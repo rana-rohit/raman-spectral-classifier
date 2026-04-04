@@ -1,0 +1,23 @@
+model:
+  name: transformer
+  signal_length: 1000
+  n_classes: 30
+  patch_size: 20
+  d_model: 256
+  n_heads: 8
+  n_layers: 6
+  d_ff: 512
+  dropout: 0.1
+  attn_dropout: 0.1
+  pos_encoding: sinusoidal
+
+training:
+  lr: 0.0005
+  loss: label_smoothing
+  loss_kwargs:
+    smoothing: 0.1
+  scheduler: warmup_cosine
+  scheduler_cfg:
+    warmup_epochs: 10
+    total_epochs: 100
+    eta_min: 0.000001

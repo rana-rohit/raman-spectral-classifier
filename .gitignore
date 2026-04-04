@@ -1,0 +1,27 @@
+# Data files and directories
+data/
+*.npy
+*.npz
+*.csv
+*.h5
+*.hdf5
+
+# Saved model weights
+*.pt
+*.pth
+*.onnx
+
+# Python caches and local environment
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+env/
+.env
+
+# System files & logs
+.DS_Store
+.vscode/
+.idea/
+*.log

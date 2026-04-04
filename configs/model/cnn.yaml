@@ -1,0 +1,15 @@
+model:
+  name: cnn
+  signal_length: 1000
+  n_classes: 30
+  channels: [32, 64, 128, 256]
+  kernel_sizes: [7, 15, 15, 31]
+  dropout: 0.3
+
+# configs/model/cnn.yaml 
+training:
+  scheduler: warmup_cosine
+  scheduler_cfg:
+    warmup_epochs: 5
+    total_epochs: 100
+    eta_min: 0.000001

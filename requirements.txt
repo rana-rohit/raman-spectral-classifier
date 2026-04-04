@@ -1,0 +1,40 @@
+# ============================================================
+# requirements.txt
+# Spectral Classifier — Research Project Dependencies
+# ============================================================
+# Install with:  pip install -r requirements.txt
+# Or with conda: conda env create -f environment.yml
+
+# Core deep learning
+torch>=2.0.0
+torchvision>=0.15.0       # For compatibility; not directly used
+
+# Scientific computing
+numpy>=1.24.0
+scipy>=1.10.0
+
+# ML utilities (preprocessing, metrics, splits)
+scikit-learn>=1.2.0
+
+# Config and logging
+pyyaml>=6.0
+
+# Data and visualisation
+matplotlib>=3.7.0
+seaborn>=0.12.0
+pandas>=2.0.0
+
+# Notebook support
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Optional: experiment tracking (uncomment to enable)
+# mlflow>=2.0.0
+# wandb>=0.15.0
+
+# Optional: faster UMAP for EDA
+# umap-learn>=0.5.0

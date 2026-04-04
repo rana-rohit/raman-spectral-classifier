@@ -1,0 +1,28 @@
+# =============================================================================
+# configs/training/base.yaml
+# Shared defaults. Model-specific configs override these.
+# =============================================================================
+
+training:
+  max_epochs: 100
+  batch_size: 128
+  num_workers: 0
+
+  optimizer: adamw
+  lr: 0.001
+  weight_decay: 0.0001
+
+  loss: cross_entropy
+  loss_kwargs: {}
+
+  scheduler: cosine
+  scheduler_cfg:
+    T_max: 100
+    eta_min: 0.000001
+
+  early_stopping_patience: 10
+  gradient_clip: 1.0
+
+  finetune_lr: 0.0001
+  finetune_epochs: 50
+  finetune_patience: 8
