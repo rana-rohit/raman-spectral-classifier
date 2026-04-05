@@ -1,0 +1,64 @@
+# =============================================================================
+# configs/data/splits.yaml
+# Single source of truth for all dataset splits.
+# Add new splits here without touching any Python source files.
+# =============================================================================
+
+dataset:
+  name: spectral_classifier
+  signal_length: 1000
+  n_classes_full: 30
+  n_classes_clinical: 5
+  shared_classes: [0, 2, 3, 5, 6]
+  already_normalised: true
+
+splits:
+  reference:
+    x_file: X_reference.npy
+    y_file: y_reference.npy
+    role: source
+    n_samples: 60000
+    n_classes: 30
+    samples_per_class: 2000
+    use_for_preprocessor_fit: true
+
+  finetune:
+    x_file: X_finetune.npy
+    y_file: y_finetune.npy
+    role: adaptation
+    n_samples: 3000
+    n_classes: 30
+    samples_per_class: 100
+
+  test:
+    x_file: X_test.npy
+    y_file: y_test.npy
+    role: holdout
+    n_samples: 3000
+    n_classes: 30
+    samples_per_class: 100
+    access_policy: once
+
+  2018clinical:
+    x_file: X_2018clinical.npy
+    y_file: y_2018clinical.npy
+    role: ood_eval
+    n_samples: 10000
+    n_classes: 5
+    samples_per_class: 2000
+    eval_classes: [0, 2, 3, 5, 6]
+
+  2019clinical:
+    x_file: X_2019clinical.npy
+    y_file: y_2019clinical.npy
+    role: ood_eval
+    n_samples: 2500
+    n_classes: 5
+    samples_per_class: 500
+    eval_classes: [0, 2, 3, 5, 6]
+
+validation:
+  strategy: stratified_split
+  source_split: reference
+  val_fraction: 0.20
+  random_seed: 42

@@ -1,0 +1,26 @@
+# =============================================================================
+# configs/data/preprocessing.yaml
+# =============================================================================
+
+preprocessing:
+  per_sample_mean_subtraction:
+    enabled: true
+
+  savitzky_golay:
+    enabled: true
+    window_length: 11
+    polyorder: 3
+
+  global_standardisation:
+    enabled: false
+    fit_on: reference
+
+  clip:
+    enabled: true
+    min_val: -3.0
+    max_val:  3.0
+
+  pipeline:
+    - per_sample_mean_subtraction
+    - savitzky_golay
+    - clip
