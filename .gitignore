@@ -1,27 +1,39 @@
-# Data files and directories
+# Data — never commit .npy files
 data/
 *.npy
-*.npz
 *.csv
-*.h5
-*.hdf5
 
-# Saved model weights
-*.pt
-*.pth
-*.onnx
+# Experiment outputs — too large for GitHub
+experiments/*/checkpoints/
+experiments/*/epoch_*.pt
+outputs/
 
-# Python caches and local environment
+# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
+*.pyo
 .pytest_cache/
-venv/
-env/
-.env
+*.egg-info/
+dist/
+build/
+.eggs/
 
-# System files & logs
+# Notebooks output cells — keep notebooks clean
+# (comment this out if you want to commit notebook outputs)
+# *.ipynb — leave this commented; you DO want notebooks in git
+
+# Environment
+.env
+*.env
+venv/
+.venv/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# VS Code
 .vscode/
-.idea/
-*.log
+
+# Colab-specific
+*.ipynb_checkpoints/
