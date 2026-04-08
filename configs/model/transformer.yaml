@@ -13,9 +13,9 @@ model:
 
 training:
   lr: 0.0005
-  loss: label_smoothing
+  loss: focal
   loss_kwargs:
-    smoothing: 0.1
+    gamma: 2.0  
   scheduler: warmup_cosine
   scheduler_cfg:
     warmup_epochs: 10

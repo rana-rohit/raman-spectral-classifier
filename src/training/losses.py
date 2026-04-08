@@ -81,3 +81,4 @@ def get_loss(name: str, **kwargs) -> nn.Module:
     if name not in registry:
         raise ValueError(f"Unknown loss '{name}'. Available: {list(registry)}")
     return registry[name](**kwargs)
+
