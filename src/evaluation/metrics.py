@@ -41,15 +41,16 @@ def compute_metrics(
 
     Returns: Dict of metric_name -> float value
     """
-    probs = F.softmax(logits, dim=-1).numpy()
-    preds = logits.argmax(dim=-1).numpy()
-    y     = targets.numpy()
+    probs = F.softmax(logits, dim=-1).detach().cpu().numpy()
+    preds = logits.argmax(dim=-1).detach().cpu().numpy()
+    y     = targets.detach().cpu().numpy()
 
-    present_classes = np.unique(y)
+    all_classes = np.arange(n_classes)
+    present_classes = all_classes
 
     # Core metrics
     accuracy = (preds == y).mean()
-    macro_f1 = _macro_f1(y, preds, present_classes)
+    macro_f1 = _macro_f1(y, preds, all_classes)
     mcc      = _matthews_corrcoef(y, preds)
 
     metrics = {
@@ -116,9 +117,15 @@ def _macro_f1(y_true, y_pred, classes) -> float:
         tp = ((y_pred == cls) & (y_true == cls)).sum()
         fp = ((y_pred == cls) & (y_true != cls)).sum()
         fn = ((y_pred != cls) & (y_true == cls)).sum()
-        prec = tp / (tp + fp + 1e-8)
-        rec  = tp / (tp + fn + 1e-8)
-        f1   = 2 * prec * rec / (prec + rec + 1e-8)
+        if tp + fp == 0 or tp + fn == 0:
+            f1 = 0.0
+        else:
+            prec = tp / (tp + fp)
+            rec  = tp / (tp + fn)
+            if prec + rec == 0:
+                f1 = 0.0
+            else:
+                f1 = 2 * prec * rec / (prec + rec)
         f1s.append(f1)
     return float(np.mean(f1s))
 
@@ -129,9 +136,15 @@ def _per_class_f1(y_true, y_pred, classes) -> Dict[int, float]:
         tp = ((y_pred == cls) & (y_true == cls)).sum()
         fp = ((y_pred == cls) & (y_true != cls)).sum()
         fn = ((y_pred != cls) & (y_true == cls)).sum()
-        prec = tp / (tp + fp + 1e-8)
-        rec  = tp / (tp + fn + 1e-8)
-        f1   = 2 * prec * rec / (prec + rec + 1e-8)
+        if tp + fp == 0 or tp + fn == 0:
+            f1 = 0.0
+        else:
+            prec = tp / (tp + fp)
+            rec  = tp / (tp + fn)
+            if prec + rec == 0:
+                f1 = 0.0
+            else:
+                f1 = 2 * prec * rec / (prec + rec)
         result[int(cls)] = float(f1)
     return result
 

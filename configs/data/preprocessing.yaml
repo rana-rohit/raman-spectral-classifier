@@ -12,7 +12,7 @@ preprocessing:
     polyorder: 3
 
   global_standardisation:
-    enabled: false
+    enabled: true
     fit_on: reference
 
   clip:
