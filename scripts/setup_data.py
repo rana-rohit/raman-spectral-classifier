@@ -72,6 +72,10 @@ def main():
     # ---- Build augmentation pipeline ----
     print("\n[4/5] Building augmentation pipeline...")
     augmentation = AugmentationPipeline.from_config(aug_cfg["augmentation"])
+
+    if len(augmentation.steps) == 0 or augmentation.p == 0:
+        augmentation = None
+
     print(f"      Steps: {[type(s).__name__ for s in augmentation.steps]}")
     print(f"      Apply probability: {augmentation.p}")
 
