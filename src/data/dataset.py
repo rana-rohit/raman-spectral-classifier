@@ -60,8 +60,7 @@ class SpectralDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         x = self.X[idx].copy()   # Copy so augmentation doesn't mutate the array
 
-        if self.training and self.augmentation is not None:
-            # Augmentation expects batched input (N, L), so expand/squeeze
+        if self.training and self.augmentation is not None and len(self.augmentation.steps) > 0:
             x = self.augmentation(x[None])[0]
 
         # Numpy augmentation ops can upcast to float64; keep model inputs float32.
