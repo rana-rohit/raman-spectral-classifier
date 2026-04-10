@@ -13,7 +13,6 @@ preprocessing:
 
   global_standardisation:
     enabled: true
-    fit_on: reference
 
   clip:
     enabled: true
