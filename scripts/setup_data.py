@@ -76,8 +76,12 @@ def main():
     if len(augmentation.steps) == 0 or augmentation.p == 0:
         augmentation = None
 
-    print(f"      Steps: {[type(s).__name__ for s in augmentation.steps]}")
-    print(f"      Apply probability: {augmentation.p}")
+    if augmentation is None:
+        print("      Steps: []")
+        print("      Apply probability: 0.0")
+    else:
+        print(f"      Steps: {[type(s).__name__ for s in augmentation.steps]}")
+        print(f"      Apply probability: {augmentation.p}")
 
     # ---- Build all DataLoaders and smoke-test ----
     print("\n[5/5] Building DataLoaders and smoke-testing batch shapes...")
