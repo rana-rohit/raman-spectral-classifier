@@ -152,4 +152,4 @@ class AugmentationPipeline:
                     X, *_ = step(X, y, self._rng)
                 else:
                     X = step(X, self._rng)
-        return np.clip(X, 0.0, 1.0)  # Keep in valid range after augmentation
+        return X
