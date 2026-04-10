@@ -100,6 +100,8 @@ def main():
     X_ref_clean  = preprocessor.fit_transform(X_ref)   # fit AND transform in one call
 
     augmentation = AugmentationPipeline.from_config(cfg["augmentation"])
+    if len(augmentation.steps) == 0 or augmentation.p == 0:
+        augmentation = None
 
     loader_cfg = {
         "batch_size":  cfg.get("training", {}).get("batch_size", 256),

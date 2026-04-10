@@ -177,7 +177,12 @@ class SpectralPreprocessor:
         return X
 
     def fit_transform(self, X: np.ndarray) -> np.ndarray:
-        return self.fit(X).transform(X)
+        """Fit and transform in a single pass — no redundant re-computation."""
+        for t in self.transforms:
+            t.fit(X)
+            X = t.transform(X)
+        self._is_fit = True
+        return X
 
     def __repr__(self) -> str:
         steps = " -> ".join(type(t).__name__ for t in self.transforms)

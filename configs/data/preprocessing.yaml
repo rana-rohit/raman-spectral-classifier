@@ -22,5 +22,5 @@ preprocessing:
   pipeline:
     - per_sample_mean_subtraction
     - savitzky_golay
-    - clip
     - global_standardisation
+    - clip
