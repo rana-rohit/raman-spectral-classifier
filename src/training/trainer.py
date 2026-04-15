@@ -83,6 +83,7 @@ class Trainer:
         self.exp_dir    = Path(exp_dir)
         self.n_classes  = n_classes
 
+        # Device resolution: CUDA > MPS > CPU
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -97,6 +98,10 @@ class Trainer:
             patience=cfg.get("early_stopping_patience", 10)
         )
 
+    # ------------------------------------------------------------------ #
+    # Main fit loop
+    # ------------------------------------------------------------------ #
+
     def fit(self) -> Dict:
         max_epochs = self.cfg.get("max_epochs", 100)
 
@@ -109,6 +114,7 @@ class Trainer:
 
             val_acc = val_metrics["accuracy"]
 
+            # Scheduler step
             sched = self.scheduler
             from torch.optim.lr_scheduler import ReduceLROnPlateau
             if isinstance(sched, ReduceLROnPlateau):
@@ -116,6 +122,7 @@ class Trainer:
             else:
                 sched.step()
 
+            # Checkpoint
             is_best = val_acc >= self.early_stopping.best
             save_checkpoint(
                 path=str(self.exp_dir / "checkpoints" / f"epoch_{epoch:03d}.pt"),
@@ -127,11 +134,11 @@ class Trainer:
                 is_best=is_best,
             )
 
+            # Early stopping
             if self.early_stopping.step(val_acc):
                 print(f"\n  Early stopping at epoch {epoch} "
                       f"(best val_acc={self.early_stopping.best:.4f})")
                 break
-
         # =========================
         # FINETUNE PHASE
         # =========================
@@ -142,17 +149,19 @@ class Trainer:
 
         if finetune_loader is not None:
 
+            # 🔥 Freeze backbone (ONLY train classifier)
             for name, param in self.model.named_parameters():
                 if "classifier" not in name:
                     param.requires_grad = False
 
+            # Lower learning rate for finetuning (only trainable params)
             self.optimizer = torch.optim.AdamW(
                 filter(lambda p: p.requires_grad, self.model.parameters()),
-                lr=1e-4,
+                lr=self.cfg.get("finetune_lr", 1e-4),
                 weight_decay=1e-4
             )
 
-            finetune_epochs = 30
+            finetune_epochs = self.cfg.get("finetune_epochs", 30)
 
             for epoch in range(1, finetune_epochs + 1):
                 self.model.train()
@@ -172,14 +181,146 @@ class Trainer:
 
                     total_loss += loss.item()
 
-                print(f"[Finetune] Epoch {epoch}/{finetune_epochs} | Loss: {total_loss:.4f}")
-
                 for g in self.optimizer.param_groups:
                     g["lr"] *= 0.95
 
             self.model.eval()
             val_metrics = self._eval_one_epoch(self.loaders["finetune"])
+            
             f1 = val_metrics.get("f1_macro", val_metrics.get("f1", 0.0))
             print(f"[Finetune] Post-adapt Val F1: {f1:.4f}")
 
         return self.logger.best
+
+    # ------------------------------------------------------------------ #
+    # Evaluation
+    # ------------------------------------------------------------------ #
+
+    def evaluate(
+        self,
+        loader: DataLoader,
+        split_name: str = "test",
+        class_names: Optional[list] = None,
+    ) -> Dict:
+        """Run evaluation on any DataLoader and log final results."""
+        metrics = self._eval_one_epoch(loader, return_preds=True)
+        self.logger.log_final(split_name, metrics)
+        return metrics
+
+    def evaluate_ood(self) -> Dict[str, Dict]:
+        """Evaluate on all OOD splits. Returns dict[split_name -> metrics]."""
+        results = {}
+        for ood_name, ood_loader in self.loaders.get("ood", {}).items():
+            metrics = self._eval_one_epoch(ood_loader)
+            self.logger.log_final(ood_name, metrics)
+            results[ood_name] = metrics
+        return results
+
+    # ------------------------------------------------------------------ #
+    # Internal loops
+    # ------------------------------------------------------------------ #
+
+    def _train_one_epoch(self, epoch: int) -> Dict[str, float]:
+        self.model.train()
+        total_loss, correct, total = 0.0, 0, 0
+        t0 = time.time()
+
+        for x, y in self.loaders["train"]:
+            x, y = x.to(self.device), y.to(self.device)
+            self.optimizer.zero_grad(set_to_none=True)
+            logits = self.model(x)
+            loss   = self.loss_fn(logits, y)
+            loss.backward()
+
+            # Gradient clipping — essential for Transformer stability
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.optimizer.step()
+
+            total_loss += loss.item() * len(y)
+            correct    += (logits.argmax(dim=-1) == y).sum().item()
+            total      += len(y)
+
+        return {
+            "loss":     total_loss / total,
+            "accuracy": correct / total,
+            "lr":       self.optimizer.param_groups[0]["lr"],
+            "epoch_time": time.time() - t0,
+        }
+
+    @torch.no_grad()
+    def _eval_one_epoch(
+        self,
+        loader: DataLoader,
+        return_preds: bool = False,
+    ) -> Dict[str, float]:
+        self.model.eval()
+        all_logits, all_targets = [], []
+
+        for x, y in loader:
+            x = x.to(self.device)
+            logits = self.model(x)
+            all_logits.append(logits.cpu())
+            all_targets.append(y)
+
+        all_logits  = torch.cat(all_logits,  dim=0)
+        all_targets = torch.cat(all_targets, dim=0)
+
+        loss = self.loss_fn(all_logits, all_targets).item()
+        metrics = compute_metrics(all_logits, all_targets, self.n_classes)
+        metrics["loss"] = loss
+
+        return metrics
+
+
+# ------------------------------------------------------------------ #
+# Factory
+# ------------------------------------------------------------------ #
+
+def build_trainer(
+    model: nn.Module,
+    loaders: Dict,
+    cfg: dict,
+    exp_dir: str,
+    n_classes: int = 30,
+) -> Trainer:
+    """
+    Build a fully configured Trainer from config dict.
+    This is the function called by train.py.
+    """
+    train_cfg = cfg.get("training", {})
+    model_name = cfg.get("model", {}).get("name", "model")
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=train_cfg.get("lr", 1e-3),
+        weight_decay=train_cfg.get("weight_decay", 1e-4),
+    )
+
+    scheduler = get_scheduler(
+        name=train_cfg.get("scheduler", "cosine"),
+        optimizer=optimizer,
+        cfg=train_cfg.get("scheduler_cfg", {"T_max": train_cfg.get("max_epochs", 100)}),
+    )
+
+    loss_fn = get_loss(
+        name=train_cfg.get("loss", "cross_entropy"),
+        **train_cfg.get("loss_kwargs", {}),
+    )
+
+    logger = ExperimentLogger(
+        exp_dir=exp_dir,
+        model_name=model_name,
+        config=cfg,
+    )
+
+    return Trainer(
+        model=model,
+        loaders=loaders,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        loss_fn=loss_fn,
+        cfg=train_cfg,
+        logger=logger,
+        exp_dir=exp_dir,
+        n_classes=n_classes,
+    )
