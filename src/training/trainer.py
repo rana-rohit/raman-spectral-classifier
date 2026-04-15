@@ -178,7 +178,8 @@ class Trainer:
                 print(f"[Finetune] Epoch {epoch}/{finetune_epochs} | Loss: {total_loss:.4f}")
 
             val_metrics = self._eval_one_epoch(self.loaders["val"])
-            print(f"[Finetune] Post-adapt Val F1: {val_metrics['f1']:.4f}")
+            f1 = val_metrics.get("f1") or val_metrics.get("macro_f1")
+            print(f"[Finetune] Post-adapt Val F1: {f1:.4f}")
 
         return self.logger.best
 
