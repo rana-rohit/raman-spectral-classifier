@@ -142,16 +142,20 @@ class Trainer:
         # =========================
         # FINETUNE PHASE
         # =========================
+
         print("\n[Finetune Phase] Adapting model to new domain...")
 
         finetune_loader = self.loaders.get("finetune", None)
 
         if finetune_loader is not None:
             # Lower learning rate for finetuning
-            for param_group in self.optimizer.param_groups:
-                param_group["lr"] *= 0.1
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(),
+                lr=3e-4,
+                weight_decay=1e-4
+            )
 
-            finetune_epochs = 5
+            finetune_epochs = 10
 
             for epoch in range(1, finetune_epochs + 1):
                 self.model.train()
@@ -169,9 +173,12 @@ class Trainer:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                     self.optimizer.step()
 
-                    total_loss += loss.item() * len(y)
+                    total_loss += loss.item()
 
                 print(f"[Finetune] Epoch {epoch}/{finetune_epochs} | Loss: {total_loss:.4f}")
+
+            val_metrics = self._eval_one_epoch(self.loaders["val"])
+            print(f"[Finetune] Post-adapt Val F1: {val_metrics['f1']:.4f}")
 
         return self.logger.best
 

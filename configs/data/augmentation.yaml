@@ -4,22 +4,22 @@
   # =============================================================================
 
   augmentation:
-    apply_probability: 0.0
+    apply_probability: 0.7
     seed: 42
 
     steps:
       gaussian_noise:
-        enabled: false
-        max_std: 0.03          # updated from 0.02 — clinical variance 25-30% higher
+        enabled: true
+        max_std: 0.05          # updated from 0.02 — clinical variance 25-30% higher
 
       baseline_shift:
-        enabled: false
-        max_shift: 0.08        # updated from 0.05 — covers observed MAD of 0.073
+        enabled: true
+        max_shift: 0.12        # updated from 0.05 — covers observed MAD of 0.073
 
       amplitude_scale:
-        enabled: false
-        factor: 0.10
+        enabled: true
+        factor: 0.15
 
       spectral_shift:
-        enabled: false
-        max_shift: 5
+        enabled: true
+        max_shift: 8
