@@ -139,6 +139,39 @@ class Trainer:
                 print(f"\n  Early stopping at epoch {epoch} "
                       f"(best val_acc={self.early_stopping.best:.4f})")
                 break
+        # =========================
+        # FINETUNE PHASE
+        # =========================
+        print("\n[Finetune Phase] Adapting model to new domain...")
+
+        finetune_loader = self.loaders.get("finetune", None)
+
+        if finetune_loader is not None:
+            # Lower learning rate for finetuning
+            for param_group in self.optimizer.param_groups:
+                param_group["lr"] *= 0.1
+
+            finetune_epochs = 5
+
+            for epoch in range(1, finetune_epochs + 1):
+                self.model.train()
+                total_loss = 0.0
+
+                for x, y in finetune_loader:
+                    x = x.to(self.device)
+                    y = y.to(self.device)
+
+                    self.optimizer.zero_grad(set_to_none=True)
+                    logits = self.model(x)
+                    loss = self.loss_fn(logits, y)
+
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    self.optimizer.step()
+
+                    total_loss += loss.item() * len(y)
+
+                print(f"[Finetune] Epoch {epoch}/{finetune_epochs} | Loss: {total_loss:.4f}")
 
         return self.logger.best
 
