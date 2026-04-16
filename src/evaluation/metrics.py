@@ -46,11 +46,11 @@ def compute_metrics(
     y     = targets.detach().cpu().numpy()
 
     all_classes = np.arange(n_classes)
-    present_classes = all_classes
+    present_classes = np.unique(np.concatenate([y, preds]))
 
     # Core metrics
     accuracy = (preds == y).mean()
-    macro_f1 = _macro_f1(y, preds, all_classes)
+    macro_f1 = _macro_f1(y, preds, present_classes)
     mcc      = _matthews_corrcoef(y, preds)
 
     metrics = {
@@ -62,7 +62,7 @@ def compute_metrics(
     # ROC-AUC (one-vs-rest, macro over present classes)
     try:
         auc = _roc_auc_ovr(y, probs, present_classes)
-        metrics["roc_auc"] = float(auc)
+        metrics["roc_auc"] = float(auc) if not np.isnan(auc) else 0.0
     except Exception:
         metrics["roc_auc"] = float("nan")
 

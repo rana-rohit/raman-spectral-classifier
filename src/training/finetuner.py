@@ -82,9 +82,14 @@ def finetune(
         orig_max = ft_cfg["training"]["max_epochs"]
         ft_cfg["training"]["max_epochs"] = freeze_epochs
         trainer.cfg["max_epochs"] = freeze_epochs
-        trainer.fit()
         _unfreeze_all(model)
         print("  Stem unfrozen — continuing full fine-tuning")
+
+        ft_cfg["training"]["lr"] *= 0.1
+
+        trainer = build_trainer(model, local_loaders, ft_cfg, exp_dir, n_classes)
+
+        trainer.fit()
         ft_cfg["training"]["max_epochs"] = orig_max - freeze_epochs
         trainer.cfg["max_epochs"] = orig_max - freeze_epochs
 
