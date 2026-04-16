@@ -6,7 +6,7 @@
 training:
   max_epochs: 100
   batch_size: 256
-  num_workers: 4
+  num_workers: 2
 
   optimizer: adamw
   lr: 0.001
