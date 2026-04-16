@@ -25,7 +25,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import torch
-
+import numpy as np
 from src.utils.seed import set_seed
 from src.utils.config import load_config
 from src.utils.checkpoint import load_best_model
@@ -35,7 +35,7 @@ from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
 from src.models.registry import get_model
 from src.evaluation.evaluator import ModelEvaluator, compare_models
-
+from src.evaluation.clinical_utils import clinical_subset_eval
 
 def parse_args():
     p = argparse.ArgumentParser(description="Evaluate trained spectral classifiers")

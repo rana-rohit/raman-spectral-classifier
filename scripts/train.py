@@ -34,7 +34,7 @@ from src.data.dataloader import build_all_loaders
 from src.models.registry import get_model, model_summary
 from src.training.trainer import build_trainer
 from src.evaluation.evaluator import ModelEvaluator
-
+from src.training.finetuner import finetune
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train a spectral classifier")
@@ -151,6 +151,17 @@ def main():
 
     print(f"\n  Done. Results in {exp_dir}/")
 
+    print("\n[Finetune Phase] Adapting model to new domain...")
+
+    finetune(
+        model=model,
+        pretrained_exp_dir=exp_dir,   
+        loaders=loaders,
+        cfg=cfg,
+        exp_dir=exp_dir,
+        freeze_epochs=3,             
+        n_classes=cfg["dataset"]["n_classes_full"],
+    )
 
 if __name__ == "__main__":
     main()

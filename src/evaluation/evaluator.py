@@ -72,9 +72,34 @@ class ModelEvaluator:
         all_logits  = torch.cat(all_logits,  dim=0)
         all_targets = torch.cat(all_targets, dim=0)
 
-        metrics = compute_metrics(all_logits, all_targets, self.n_classes)
+        # Convert to numpy for processing
+        y_pred = all_logits.argmax(dim=-1).cpu().numpy()
+        y_true = all_targets.cpu().numpy()
+
+        # 🔥 Apply clinical subset logic ONLY for clinical splits
+        if "clinical" in split_name:
+            from src.evaluation.clinical_utils import clinical_subset_eval
+
+            y_true, y_pred = clinical_subset_eval(y_true, y_pred)
+
+            # Debug (VERY IMPORTANT)
+            print(f"[DEBUG] {split_name} mapped labels:", np.unique(y_true))
+
+            # Convert back to tensors
+            all_logits = torch.from_numpy(
+                np.eye(5)[y_pred]
+            ).float()
+            all_targets = torch.from_numpy(y_true)
+
+            n_classes = 5
+        else:
+            n_classes = self.n_classes
+
+        # Compute metrics with correct label space
+        metrics = compute_metrics(all_logits, all_targets, n_classes)
+
         cm, present_classes = compute_confusion_matrix(
-            all_logits, all_targets, self.n_classes
+            all_logits, all_targets, n_classes
         )
 
         self.results["splits"][split_name] = {
