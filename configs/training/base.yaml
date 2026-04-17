@@ -5,7 +5,7 @@
 
 training:
   max_epochs: 100
-  batch_size: 256
+  batch_size: 128
   num_workers: 2
 
   optimizer: adamw
@@ -20,14 +20,14 @@ training:
     T_max: 100
     eta_min: 0.000001
 
-  early_stopping_patience: 5
+  early_stopping_patience: 10
   monitor_metric: f1_macro
   gradient_clip: 1.0
 
   finetune_lr: 0.0001
-  finetune_epochs: 8
+  finetune_epochs: 15
   finetune_batch_size: 64
-  finetune_patience: 3
+  finetune_patience: 5
 
   l2sp:
     enabled: true

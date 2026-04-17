@@ -16,7 +16,7 @@ augmentation:
 
     baseline_shift:
       enabled: true
-      max_shift: 0.12
+      max_shift: 0.08
 
     amplitude_scale:
       enabled: false
@@ -28,18 +28,18 @@ augmentation:
 
     baseline_drift:
       enabled: true
-      max_strength: 0.10
+      max_strength: 0.08
       n_control_points: 5
 
     peak_broadening:
       enabled: true
-      max_sigma: 1.5
+      max_sigma: 1.0
 
     nonlinear_warp:
       enabled: true
-      max_shift: 4
+      max_shift: 2
       n_control_points: 6
 
     spectral_shift:
       enabled: true
-      max_shift: 8
+      max_shift: 3
