@@ -6,8 +6,6 @@ Every checkpoint stores: model weights, optimizer state, epoch,
 best metric, config snapshot, and training history.
 """
 
-import json
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -30,17 +28,40 @@ def save_checkpoint(
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     checkpoint = {
-        "epoch":          epoch,
-        "model_state":    model.state_dict(),
+        "epoch":           epoch,
+        "model_state":     model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
-        "metrics":        metrics,
-        "config":         config,
+        "metrics":         metrics,
+        "config":          config,
     }
     torch.save(checkpoint, path)
 
     if is_best:
         best_path = str(Path(path).parent / "best.pt")
         torch.save(checkpoint, best_path)
+
+
+def resolve_best_checkpoint_path(experiment_dir: str) -> str:
+    """
+    Resolve the canonical best checkpoint for an experiment.
+
+    New runs save the best checkpoint under ``checkpoints/best.pt``.
+    Older runs may have used ``best.pt`` at the experiment root, so we
+    support both locations for backward compatibility.
+    """
+    exp_path = Path(experiment_dir)
+    candidates = [
+        exp_path / "checkpoints" / "best.pt",
+        exp_path / "best.pt",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    raise FileNotFoundError(
+        f"No best checkpoint found in {experiment_dir}. "
+        f"Looked in: {[str(path) for path in candidates]}"
+    )
 
 
 def load_checkpoint(
@@ -65,11 +86,6 @@ def load_best_model(
     model: torch.nn.Module,
     device: str = "cpu",
 ) -> Dict[str, Any]:
-    """Convenience: load best.pt from an experiment directory."""
-    best_path = os.path.join(experiment_dir, "best.pt")
-    if not os.path.exists(best_path):
-        raise FileNotFoundError(
-            f"No best.pt found in {experiment_dir}. "
-            "Has training completed?"
-        )
+    """Convenience: load the best checkpoint from an experiment directory."""
+    best_path = resolve_best_checkpoint_path(experiment_dir)
     return load_checkpoint(best_path, model, device=device)

@@ -2,12 +2,6 @@
 src/data/dataset.py
 
 PyTorch Dataset for 1D spectral signals.
-
-Handles:
-- Conversion to tensors with correct shape (N, 1, L) for Conv1d
-- Optional training-time augmentation (disabled at eval automatically)
-- Optional class filtering (for OOD evaluation on shared classes only)
-- Stratified train/val splitting from the reference split
 """
 
 from __future__ import annotations
@@ -16,18 +10,11 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
 from sklearn.model_selection import StratifiedShuffleSplit
+from torch.utils.data import Dataset
 
 
 class SpectralDataset(Dataset):
-    """
-    Dataset for 1D spectral signals.
-
-    X shape on disk: (N, L)  — N signals of length L
-    X shape returned: (1, L) — single-channel 1D signal for Conv1d compatibility
-    """
-
     def __init__(
         self,
         X: np.ndarray,
@@ -35,16 +22,8 @@ class SpectralDataset(Dataset):
         augmentation=None,
         training: bool = False,
         class_filter: Optional[List[int]] = None,
+        n_views: int = 1,
     ) -> None:
-        """
-        Args:
-            X:            Signal array, shape (N, L)
-            y:            Label array, shape (N,)
-            augmentation: AugmentationPipeline or None
-            training:     If True, augmentation is applied; if False, it is skipped
-            class_filter: If set, only samples from these classes are included.
-                          Use for OOD evaluation on the 5 shared classes.
-        """
         if class_filter is not None:
             mask = np.isin(y, class_filter)
             X, y = X[mask], y[mask]
@@ -53,27 +32,36 @@ class SpectralDataset(Dataset):
         self.y = y.astype(np.int64)
         self.augmentation = augmentation
         self.training = training
+        self.class_filter = list(class_filter) if class_filter is not None else None
+        self.n_views = int(n_views)
 
     def __len__(self) -> int:
         return len(self.X)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        x = self.X[idx].copy()   # Copy so augmentation doesn't mutate the array
+    def __getitem__(self, idx: int):
+        x = self.X[idx].copy()
+        y_tensor = torch.tensor(self.y[idx], dtype=torch.long)
 
+        if self.n_views == 2 and self.training:
+            x1 = self._transform_sample(x.copy())
+            x2 = self._transform_sample(x.copy())
+            return {
+                "x1": torch.from_numpy(x1).unsqueeze(0),
+                "x2": torch.from_numpy(x2).unsqueeze(0),
+                "y": y_tensor,
+            }
+
+        x = self._transform_sample(x)
+        return torch.from_numpy(x).unsqueeze(0), y_tensor
+
+    def _transform_sample(self, x: np.ndarray) -> np.ndarray:
         if self.training and self.augmentation is not None and len(self.augmentation.steps) > 0:
             x = self.augmentation(x[None])[0]
-
-        # Numpy augmentation ops can upcast to float64; keep model inputs float32.
-        x = x.astype(np.float32, copy=False)
-
-        # Add channel dimension: (L,) -> (1, L)
-        x_tensor = torch.from_numpy(x).unsqueeze(0)
-        y_tensor = torch.tensor(self.y[idx], dtype=torch.long)
-        return x_tensor, y_tensor
+        return x.astype(np.float32, copy=False)
 
     @property
     def n_classes(self) -> int:
-        return int(self.y.max()) + 1
+        return len(np.unique(self.y))
 
     @property
     def signal_length(self) -> int:
@@ -91,12 +79,6 @@ def make_train_val_split(
     val_fraction: float = 0.20,
     random_seed: int = 42,
 ) -> Tuple[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:
-    """
-    Stratified train/val split from the reference (source) split.
-    Ensures equal class representation in both halves.
-
-    Returns: (X_train, y_train), (X_val, y_val)
-    """
     sss = StratifiedShuffleSplit(
         n_splits=1,
         test_size=val_fraction,

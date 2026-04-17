@@ -1,19 +1,13 @@
 """
 src/training/finetuner.py
 
-Fine-tuning protocol for domain adaptation (Experiment 3).
-
-Starting from a pretrained checkpoint, adapts the model to a new domain
-using the finetune split (100 samples/class, 30 classes).
-
-Supports:
-- Full fine-tuning (all layers updated)
-- Frozen stem (only classifier head updated initially)
-- Few-shot subsampling for learning curve experiments (Experiment 4)
+Fine-tuning protocol for domain adaptation.
 """
 
 from __future__ import annotations
 
+import copy
+import json
 import os
 from pathlib import Path
 from typing import Dict, Optional
@@ -23,9 +17,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
 
-from src.training.trainer import Trainer, build_trainer
+from src.evaluation.evaluator import ModelEvaluator
+from src.training.trainer import build_trainer
 from src.utils.checkpoint import load_best_model
-from src.utils.logging import ExperimentLogger
 
 
 def finetune(
@@ -38,72 +32,98 @@ def finetune(
     freeze_epochs: int = 0,
     n_classes: int = 30,
 ) -> Dict:
-    """
-    Fine-tune a pretrained model on the finetune split.
-
-    Args:
-        model:              Model architecture (weights will be overwritten)
-        pretrained_exp_dir: Directory of the pretrained experiment (contains best.pt)
-        loaders:            Standard loader dict from build_all_loaders()
-        cfg:                Training config for fine-tuning
-        exp_dir:            Output directory for this fine-tuning run
-        n_shots_per_class:  If set, subsample finetune split to this many per class
-        freeze_epochs:      Number of epochs to freeze all layers except head
-        n_classes:          Number of output classes
-    """
-    # Load pretrained weights
     print(f"\n  Loading pretrained weights from {pretrained_exp_dir}")
     checkpoint = load_best_model(pretrained_exp_dir, model)
-    print(f"  Pretrained val_acc: {checkpoint['metrics'].get('val_accuracy', '?'):.4f}")
+    monitor_metric = checkpoint["metrics"].get("monitor_metric", "metric")
+    monitor_value = checkpoint["metrics"].get("monitor_value", float("nan"))
+    print(f"  Pretrained {monitor_metric}: {monitor_value:.4f}")
 
-    # Optionally subsample the finetune loader
+    reference_state = {
+        name: param.detach().cpu().clone()
+        for name, param in model.named_parameters()
+    }
+
     ft_loader = loaders["finetune"]
     if n_shots_per_class is not None:
         ft_loader = _subsample_loader(ft_loader, n_shots_per_class, n_classes)
         n_samples = n_shots_per_class * n_classes
         print(f"  Few-shot: using {n_shots_per_class} samples/class ({n_samples} total)")
 
-    # Replace finetune loader in dict
     local_loaders = {**loaders, "train": ft_loader}
-
-    # Optionally freeze stem for initial epochs
-    if freeze_epochs > 0:
-        _freeze_stem(model)
-        print(f"  Stem frozen for first {freeze_epochs} epochs")
-
-    # Override config for fine-tuning
     ft_cfg = _make_finetune_cfg(cfg, freeze_epochs)
     Path(exp_dir).mkdir(parents=True, exist_ok=True)
 
-    trainer = build_trainer(model, local_loaders, ft_cfg, exp_dir, n_classes)
+    phase_summaries = []
+    total_epochs = ft_cfg["training"]["max_epochs"]
 
-    # Phase 1: frozen stem (if requested)
     if freeze_epochs > 0:
-        orig_max = ft_cfg["training"]["max_epochs"]
-        ft_cfg["training"]["max_epochs"] = freeze_epochs
-        trainer.cfg["max_epochs"] = freeze_epochs
+        print(f"  Stem frozen for first {freeze_epochs} epochs")
+        _freeze_stem(model)
+        frozen_cfg = _phase_cfg(ft_cfg, max_epochs=freeze_epochs)
+        frozen_dir = os.path.join(exp_dir, "phase1_frozen")
+        frozen_trainer = build_trainer(
+            model,
+            local_loaders,
+            frozen_cfg,
+            frozen_dir,
+            n_classes,
+            reference_state=reference_state,
+        )
+        phase_summaries.append({
+            "phase": "phase1_frozen",
+            "best": frozen_trainer.fit(),
+        })
+        load_best_model(frozen_dir, model)
+
+    remaining_epochs = max(total_epochs - freeze_epochs, 0)
+    best_metrics = {}
+    if remaining_epochs > 0:
         _unfreeze_all(model)
-        print("  Stem unfrozen — continuing full fine-tuning")
+        print("  Stem unfrozen - continuing full fine-tuning")
+        full_lr = ft_cfg["training"]["lr"] * (0.1 if freeze_epochs > 0 else 1.0)
+        full_cfg = _phase_cfg(ft_cfg, max_epochs=remaining_epochs, lr=full_lr)
+        full_dir = os.path.join(exp_dir, "phase2_full")
+        full_trainer = build_trainer(
+            model,
+            local_loaders,
+            full_cfg,
+            full_dir,
+            n_classes,
+            reference_state=reference_state,
+        )
+        best_metrics = full_trainer.fit()
+        phase_summaries.append({
+            "phase": "phase2_full",
+            "best": best_metrics,
+        })
+        load_best_model(full_dir, model)
 
-        ft_cfg["training"]["lr"] *= 0.1
+    evaluator = ModelEvaluator(
+        model=model,
+        model_name=cfg.get("model", {}).get("name", "model"),
+        n_classes=n_classes,
+        device=_infer_model_device(model),
+        cfg=cfg,
+    )
+    val_metrics = evaluator.evaluate_split(loaders["val"], "val")
+    test_metrics = evaluator.evaluate_split(loaders["test"], "test")
+    ood_results = {}
+    for ood_name, ood_loader in loaders.get("ood", {}).items():
+        ood_results[ood_name] = evaluator.evaluate_split(ood_loader, ood_name)
 
-        trainer = build_trainer(model, local_loaders, ft_cfg, exp_dir, n_classes)
+    evaluator.results["summary"] = evaluator._build_summary("test")
+    evaluator.save(os.path.join(exp_dir, "results.json"))
 
-        trainer.fit()
-        ft_cfg["training"]["max_epochs"] = orig_max - freeze_epochs
-        trainer.cfg["max_epochs"] = orig_max - freeze_epochs
-
-    # Phase 2: full fine-tuning
-    best_metrics = trainer.fit()
-
-    # Evaluate on all relevant splits
     results = {
-        "val":          trainer.evaluate(loaders["val"],  "val"),
-        "test":         trainer.evaluate(loaders["test"], "test"),
-        "ood":          trainer.evaluate_ood(),
+        "val": val_metrics,
+        "test": test_metrics,
+        "ood": ood_results,
         "best_metrics": best_metrics,
-        "n_shots":      n_shots_per_class,
+        "n_shots": n_shots_per_class,
+        "phases": phase_summaries,
     }
+    with open(os.path.join(exp_dir, "summary.json"), "w") as f:
+        json.dump(results, f, indent=2, default=str)
     return results
 
 
@@ -112,10 +132,12 @@ def _subsample_loader(
     n_shots: int,
     n_classes: int,
 ) -> DataLoader:
-    """Return a DataLoader with exactly n_shots samples per class."""
     dataset = loader.dataset
-    # Get all indices per class
-    targets = np.array([dataset[i][1] for i in range(len(dataset))])
+    if hasattr(dataset, "y"):
+        targets = np.asarray(dataset.y)
+    else:
+        targets = np.array([dataset[i]["y"] if isinstance(dataset[i], dict) else dataset[i][1] for i in range(len(dataset))])
+
     selected = []
     rng = np.random.default_rng(42)
     for cls in range(n_classes):
@@ -133,11 +155,13 @@ def _subsample_loader(
         shuffle=True,
         num_workers=loader.num_workers,
         pin_memory=loader.pin_memory,
+        drop_last=loader.drop_last,
+        worker_init_fn=loader.worker_init_fn,
+        generator=loader.generator,
     )
 
 
 def _freeze_stem(model: nn.Module) -> None:
-    """Freeze all parameters except the final classification head."""
     for name, param in model.named_parameters():
         if "head" not in name and "classifier" not in name and "fc" not in name:
             param.requires_grad = False
@@ -149,16 +173,33 @@ def _unfreeze_all(model: nn.Module) -> None:
 
 
 def _make_finetune_cfg(base_cfg: dict, freeze_epochs: int) -> dict:
-    """Override training config for fine-tuning (lower LR, fewer epochs)."""
-    import copy
+    del freeze_epochs
     cfg = copy.deepcopy(base_cfg)
     ft = cfg.setdefault("training", {})
-    ft["lr"]          = ft.get("finetune_lr", 1e-4)    # 10x lower than initial
-    ft["max_epochs"]  = ft.get("finetune_epochs", 50)
+    ft["lr"] = ft.get("finetune_lr", 1e-4)
+    ft["max_epochs"] = ft.get("finetune_epochs", 50)
     ft["early_stopping_patience"] = ft.get("finetune_patience", 8)
-    ft["scheduler"]   = "warmup_cosine"
+    ft["scheduler"] = "warmup_cosine"
     ft["scheduler_cfg"] = {
         "warmup_epochs": 2,
-        "total_epochs":  ft["max_epochs"],
+        "total_epochs": ft["max_epochs"],
+        "eta_min": 1e-6,
     }
     return cfg
+
+
+def _phase_cfg(base_cfg: dict, max_epochs: int, lr: Optional[float] = None) -> dict:
+    cfg = copy.deepcopy(base_cfg)
+    cfg["training"]["max_epochs"] = max_epochs
+    if lr is not None:
+        cfg["training"]["lr"] = lr
+    cfg["training"]["scheduler_cfg"]["total_epochs"] = max_epochs
+    cfg["training"]["scheduler_cfg"]["warmup_epochs"] = min(
+        cfg["training"]["scheduler_cfg"].get("warmup_epochs", 2),
+        max_epochs,
+    )
+    return cfg
+
+
+def _infer_model_device(model: nn.Module) -> str:
+    return str(next(model.parameters()).device)

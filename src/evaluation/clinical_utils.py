@@ -1,27 +1,26 @@
-import numpy as np
+from __future__ import annotations
 
-def clinical_subset_eval(y_true, y_pred):
-    valid_classes = [0, 2, 3, 5, 6]
-    label_map = {0:0, 2:1, 3:2, 5:3, 6:4}
+from typing import Sequence
 
-    # Step 1: filter based on true labels
-    mask = np.isin(y_true, valid_classes)
+import torch
 
-    y_true_f = y_true[mask]
-    y_pred_f = y_pred[mask]
+from src.utils.class_subset import prepare_subset_eval_logits
 
-    # Step 2: map ONLY valid predictions, mark others as -1
-    y_pred_m = np.array([
-        label_map[y] if y in label_map else -1
-        for y in y_pred_f
-    ])
 
-    y_true_m = np.array([label_map[y] for y in y_true_f])
+DEFAULT_CLINICAL_CLASSES = (0, 2, 3, 5, 6)
 
-    # Step 3: remove invalid predictions (-1)
-    valid_mask = y_pred_m != -1
 
-    y_true_m = y_true_m[valid_mask]
-    y_pred_m = y_pred_m[valid_mask]
-
-    return y_true_m, y_pred_m
+def clinical_subset_eval(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    valid_classes: Sequence[int] = DEFAULT_CLINICAL_CLASSES,
+    aux_logits: torch.Tensor | None = None,
+    aux_blend: float = 0.5,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return prepare_subset_eval_logits(
+        main_logits=logits,
+        targets=targets,
+        class_ids=valid_classes,
+        aux_logits=aux_logits,
+        aux_blend=aux_blend,
+    )

@@ -41,6 +41,17 @@ def compute_metrics(
 
     Returns: Dict of metric_name -> float value
     """
+    if logits.numel() == 0 or targets.numel() == 0:
+        metrics = {
+            "accuracy": 0.0,
+            "f1_macro": 0.0,
+            "mcc": 0.0,
+            "roc_auc": 0.0,
+        }
+        if prefix:
+            metrics = {f"{prefix}{k}": v for k, v in metrics.items()}
+        return metrics
+
     probs = F.softmax(logits, dim=-1).detach().cpu().numpy()
     preds = logits.argmax(dim=-1).detach().cpu().numpy()
     y     = targets.detach().cpu().numpy()
@@ -84,6 +95,9 @@ def compute_confusion_matrix(
     n_classes: int,
 ) -> np.ndarray:
     """Returns (n_classes, n_classes) confusion matrix (rows=true, cols=pred)."""
+    if logits.numel() == 0 or targets.numel() == 0:
+        return np.zeros((0, 0), dtype=int), []
+
     preds = logits.argmax(dim=-1).numpy()
     y     = targets.numpy()
     present = sorted(np.unique(np.concatenate([y, preds])).tolist())
@@ -181,7 +195,7 @@ def _binary_auc(y_true, scores) -> float:
 
 def _matthews_corrcoef(y_true, y_pred) -> float:
     """Multiclass MCC using the exact formula."""
-    classes = np.unique(y_true)
+    classes = np.unique(np.concatenate([y_true, y_pred]))
     K = len(classes)
     if K < 2:
         return float("nan")

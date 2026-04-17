@@ -1,25 +1,45 @@
-  # =============================================================================
-  # configs/data/augmentation.yaml
-  # Applied ONLY during training. Never at validation or evaluation.
-  # =============================================================================
+# =============================================================================
+# configs/data/augmentation.yaml
+# Applied only during training. Never at validation or evaluation.
+# =============================================================================
 
-  augmentation:
-    apply_probability: 0.7
-    seed: 42
+augmentation:
+  apply_probability: 0.7
+  seed: 42
+  clip_min: -3.0
+  clip_max: 3.0
 
-    steps:
-      gaussian_noise:
-        enabled: true
-        max_std: 0.05          # updated from 0.02 — clinical variance 25-30% higher
+  steps:
+    gaussian_noise:
+      enabled: true
+      max_std: 0.05
 
-      baseline_shift:
-        enabled: true
-        max_shift: 0.12        # updated from 0.05 — covers observed MAD of 0.073
+    baseline_shift:
+      enabled: true
+      max_shift: 0.12
 
-      amplitude_scale:
-        enabled: true
-        factor: 0.15
+    amplitude_scale:
+      enabled: false
+      factor: 0.15
 
-      spectral_shift:
-        enabled: true
-        max_shift: 8
+    multiplicative_intensity:
+      enabled: true
+      factor: 0.20
+
+    baseline_drift:
+      enabled: true
+      max_strength: 0.10
+      n_control_points: 5
+
+    peak_broadening:
+      enabled: true
+      max_sigma: 1.5
+
+    nonlinear_warp:
+      enabled: true
+      max_shift: 4
+      n_control_points: 6
+
+    spectral_shift:
+      enabled: true
+      max_shift: 8

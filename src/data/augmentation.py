@@ -1,28 +1,18 @@
 """
 src/data/augmentation.py
 
-Spectral data augmentations — applied ONLY during training, never at eval time.
-
-All augmentations are designed to produce physically plausible signals:
-- Noise levels are bounded to realistic SNR ranges
-- Shifts are small enough not to move peaks past neighbours
-- Scaling stays within a range seen in real acquisition variation
-
-Each augmentation is independently togglable via config.
+Spectral data augmentations applied only during training.
 """
 
 from __future__ import annotations
 
-import numpy as np
 from typing import Optional
+
+import numpy as np
+from scipy.ndimage import gaussian_filter1d
 
 
 class GaussianNoise:
-    """
-    Add zero-mean Gaussian noise. Simulates detector noise.
-    std is sampled uniformly from [0, max_std] per batch element.
-    """
-
     def __init__(self, max_std: float = 0.02) -> None:
         self.max_std = max_std
 
@@ -32,12 +22,6 @@ class GaussianNoise:
 
 
 class BaselineShift:
-    """
-    Add a random constant offset to each signal.
-    Simulates the residual baseline variation between domains
-    that we observed in EDA (source mean ~0.43, clinical ~0.46).
-    """
-
     def __init__(self, max_shift: float = 0.05) -> None:
         self.max_shift = max_shift
 
@@ -47,11 +31,6 @@ class BaselineShift:
 
 
 class AmplitudeScaling:
-    """
-    Multiply each signal by a random scalar in [1-factor, 1+factor].
-    Simulates gain variation between acquisition sessions.
-    """
-
     def __init__(self, factor: float = 0.10) -> None:
         self.factor = factor
 
@@ -60,13 +39,16 @@ class AmplitudeScaling:
         return X * scale
 
 
-class SpectralShift:
-    """
-    Shift signals by a random number of positions (circular).
-    Simulates small wavelength calibration differences between instruments.
-    Keep max_shift small — large shifts move peaks past neighbours.
-    """
+class MultiplicativeIntensityScale:
+    def __init__(self, factor: float = 0.20) -> None:
+        self.factor = factor
 
+    def __call__(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        scale = rng.uniform(1 - self.factor, 1 + self.factor, size=(len(X), 1))
+        return X * scale
+
+
+class SpectralShift:
     def __init__(self, max_shift: int = 5) -> None:
         self.max_shift = max_shift
 
@@ -78,13 +60,71 @@ class SpectralShift:
         return result
 
 
-class Mixup:
-    """
-    Mixup augmentation adapted for spectral signals.
-    Interpolates between two signals from the same class.
-    alpha controls the Beta distribution shape (higher = closer to 0.5 mix).
-    """
+class BaselineDrift:
+    def __init__(self, max_strength: float = 0.10, n_control_points: int = 5) -> None:
+        self.max_strength = max_strength
+        self.n_control_points = max(2, int(n_control_points))
 
+    def __call__(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        length = X.shape[1]
+        control_x = np.linspace(0, length - 1, self.n_control_points)
+        full_x = np.arange(length)
+
+        result = np.empty_like(X)
+        for i, spectrum in enumerate(X):
+            control_y = rng.uniform(
+                -self.max_strength,
+                self.max_strength,
+                size=self.n_control_points,
+            )
+            drift = np.interp(full_x, control_x, control_y)
+            result[i] = spectrum + drift
+        return result
+
+
+class PeakBroadening:
+    def __init__(self, max_sigma: float = 1.5) -> None:
+        self.max_sigma = max_sigma
+
+    def __call__(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        result = np.empty_like(X)
+        for i, spectrum in enumerate(X):
+            sigma = float(rng.uniform(0.0, self.max_sigma))
+            result[i] = gaussian_filter1d(spectrum, sigma=sigma, mode="nearest")
+        return result
+
+
+class NonlinearSpectralWarp:
+    def __init__(self, max_shift: float = 4.0, n_control_points: int = 6) -> None:
+        self.max_shift = max_shift
+        self.n_control_points = max(2, int(n_control_points))
+
+    def __call__(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        length = X.shape[1]
+        control_x = np.linspace(0, length - 1, self.n_control_points)
+        full_x = np.arange(length)
+
+        result = np.empty_like(X)
+        for i, spectrum in enumerate(X):
+            offsets = rng.uniform(-self.max_shift, self.max_shift, size=self.n_control_points)
+            warped = control_x + offsets
+            warped[0] = 0.0
+            warped[-1] = float(length - 1)
+            warped = np.maximum.accumulate(warped)
+            warped[-1] = float(length - 1)
+
+            source_positions = np.interp(full_x, control_x, warped)
+            result[i] = np.interp(
+                full_x,
+                source_positions,
+                spectrum,
+                left=spectrum[0],
+                right=spectrum[-1],
+            )
+        return result
+
+
+class Mixup:
     def __init__(self, alpha: float = 0.2) -> None:
         self.alpha = alpha
 
@@ -94,10 +134,6 @@ class Mixup:
         y: np.ndarray,
         rng: np.random.Generator,
     ):
-        """
-        Returns mixed (X, y_a, y_b, lam) for soft-label loss computation.
-        The trainer must use: loss = lam * loss(y_a) + (1-lam) * loss(y_b)
-        """
         lam = rng.beta(self.alpha, self.alpha)
         idx = rng.permutation(len(X))
         X_mix = lam * X + (1 - lam) * X[idx]
@@ -105,29 +141,32 @@ class Mixup:
         return X_mix, y_a, y_b, lam
 
 
-# ============================================================ #
-#  Composed augmentation pipeline
-# ============================================================ #
-
 _AUG_REGISTRY = {
-    "gaussian_noise":  GaussianNoise,
-    "baseline_shift":  BaselineShift,
+    "gaussian_noise": GaussianNoise,
+    "baseline_shift": BaselineShift,
     "amplitude_scale": AmplitudeScaling,
-    "spectral_shift":  SpectralShift,
+    "multiplicative_intensity": MultiplicativeIntensityScale,
+    "spectral_shift": SpectralShift,
+    "baseline_drift": BaselineDrift,
+    "peak_broadening": PeakBroadening,
+    "nonlinear_warp": NonlinearSpectralWarp,
 }
 
 
 class AugmentationPipeline:
-    """
-    Sequential augmentation pipeline.
-    Each step is applied with a given probability.
-    Only call during training — never at evaluation time.
-    """
-
-    def __init__(self, steps: list, p: float = 0.5, seed: int = 42) -> None:
+    def __init__(
+        self,
+        steps: list,
+        p: float = 0.5,
+        seed: int = 42,
+        clip_min: float | None = 0.0,
+        clip_max: float | None = 1.0,
+    ) -> None:
         self.steps = steps
-        self.p = p          # Probability of applying each step
+        self.p = p
         self._rng = np.random.default_rng(seed)
+        self.clip_min = clip_min
+        self.clip_max = clip_max
 
     @classmethod
     def from_config(cls, cfg: dict) -> "AugmentationPipeline":
@@ -140,16 +179,23 @@ class AugmentationPipeline:
                 raise ValueError(f"Unknown augmentation '{name}'")
             params = {k: v for k, v in step_cfg.items() if k != "enabled"}
             steps.append(aug_cls(**params))
-        p   = cfg.get("apply_probability", 0.5)
-        seed = cfg.get("seed", 42)
-        return cls(steps, p, seed)
+
+        return cls(
+            steps=steps,
+            p=cfg.get("apply_probability", 0.5),
+            seed=cfg.get("seed", 42),
+            clip_min=cfg.get("clip_min", 0.0),
+            clip_max=cfg.get("clip_max", 1.0),
+        )
 
     def __call__(self, X: np.ndarray, y: Optional[np.ndarray] = None) -> np.ndarray:
-        """Apply augmentations. y is only needed if Mixup is in the pipeline."""
         for step in self.steps:
             if self._rng.random() < self.p:
                 if isinstance(step, Mixup) and y is not None:
                     X, *_ = step(X, y, self._rng)
                 else:
                     X = step(X, self._rng)
+
+        if self.clip_min is not None and self.clip_max is not None:
+            return np.clip(X, self.clip_min, self.clip_max)
         return X

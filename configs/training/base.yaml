@@ -21,9 +21,31 @@ training:
     eta_min: 0.000001
 
   early_stopping_patience: 5
+  monitor_metric: f1_macro
   gradient_clip: 1.0
 
   finetune_lr: 0.0001
   finetune_epochs: 8
   finetune_batch_size: 64
   finetune_patience: 3
+
+  l2sp:
+    enabled: true
+    lambda: 0.001
+    exclude_patterns: []
+
+  consistency:
+    enabled: true
+    views: 2
+    supervised_on_both_views: true
+    loss_type: mse_probs
+    temperature: 1.0
+    loss_weight: 0.05
+
+multitask:
+  auxiliary_shared_head:
+    enabled: true
+    classes: [0, 2, 3, 5, 6]
+    dropout: 0.0
+    loss_weight: 0.2
+    clinical_blend: 0.3
