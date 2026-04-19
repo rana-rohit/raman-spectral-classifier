@@ -303,7 +303,15 @@ class Trainer:
             return x1, x2, y
 
         if isinstance(batch, (tuple, list)) and len(batch) == 2:
-            return batch[0].to(self.device), None, batch[1].to(self.device)
+            x, y = batch
+
+            # 🔥 Handle consistency case: x = (x1, x2)
+            if isinstance(x, (tuple, list)) and len(x) == 2:
+                x1, x2 = x
+                return x1.to(self.device), x2.to(self.device), y.to(self.device)
+
+            # 🔹 Standard case: single input
+            return x.to(self.device), None, y.to(self.device)
 
         raise TypeError(f"Unsupported batch type: {type(batch)!r}")
 
