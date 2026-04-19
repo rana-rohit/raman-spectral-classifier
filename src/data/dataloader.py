@@ -27,6 +27,13 @@ def build_all_loaders(
     cfg: dict,
     derivative_cfg: Optional[dict] = None,
 ) -> Dict:
+    # 🔥 FORCE DERIVATIVE CONFIG IF NOT PASSED
+    if derivative_cfg is None:
+       derivative_cfg = {
+           "enabled": True,
+          "window_length": 11,
+          "polyorder": 3,
+       }
     batch_size = cfg.get("batch_size", 256)
     num_workers = cfg.get("num_workers", 4)
     seed = cfg.get("seed", 42)
@@ -42,6 +49,7 @@ def build_all_loaders(
             window_length=derivative_cfg.get("window_length", 11),
             polyorder=derivative_cfg.get("polyorder", 3),
         )
+        print("Derivative enabled:", derivative_cfg)
 
     loaders = {}
 
@@ -50,6 +58,7 @@ def build_all_loaders(
 
     if deriv_transform is not None:
         dX_ref = deriv_transform.transform(X_ref)
+        print("dX_ref shape:", dX_ref.shape)
         assert dX_ref.shape == X_ref.shape, "Derivative shape mismatch"
     else:
         dX_ref = None
