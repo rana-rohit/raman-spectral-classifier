@@ -4,7 +4,7 @@
 # =============================================================================
 
 augmentation:
-  apply_probability: 0.4
+  apply_probability: 0.8
   seed: 42
   clip_min: -3.0
   clip_max: 3.0
@@ -32,7 +32,7 @@ augmentation:
       n_control_points: 5
 
     polynomial_baseline:
-      enabled: true
+      enabled: false
       max_degree: 3
       max_amplitude: 0.15
 
@@ -41,7 +41,7 @@ augmentation:
       max_sigma: 0.3
 
     nonlinear_warp:
-      enabled: true
+      enabled: false
       max_shift: 1.5
       n_control_points: 6
 
@@ -50,6 +50,6 @@ augmentation:
       max_shift: 2
 
     channel_dropout:
-      enabled: true
+      enabled: false
       max_width: 10
       max_drops: 1

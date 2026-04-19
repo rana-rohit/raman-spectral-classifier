@@ -57,7 +57,6 @@ class ResidualBlock1D(nn.Module):
         out = out + self.shortcut(x)
         return self.relu(out)
 
-
 class ResNet1D(nn.Module):
     def __init__(
         self,
@@ -67,11 +66,11 @@ class ResNet1D(nn.Module):
         n_blocks: List[int] | None = None,
         stem_kernel: int = 15,
         dropout: float = 0.3,
-        in_channels: int = 1,
+        in_channels: int = 2,
     ) -> None:
         del signal_length
         super().__init__()
-        channels = channels or [64, 128, 256, 512]
+        channels = channels or [32, 64, 128, 256]
         n_blocks = n_blocks or [2, 2, 2, 2]
         assert len(channels) == 4 and len(n_blocks) == 4
 
