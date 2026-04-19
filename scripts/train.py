@@ -102,7 +102,7 @@ def main():
     model_summary(model)
 
     model.eval()
-    dummy = torch.zeros(2, 1, 1000)
+    dummy = torch.zeros(2, 2, 1000)
     with torch.no_grad():
         out = model(dummy)
     if isinstance(out, dict):
