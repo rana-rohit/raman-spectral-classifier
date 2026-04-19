@@ -10,6 +10,7 @@ Design decisions:
 - Global Average Pooling instead of Flatten gives spatial invariance,
   reduces parameter count, and is required for Grad-CAM to work correctly
 - Dropout before classifier head regularises the 30-class output
+- InstanceNorm before classifier improves domain invariance
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ class CNN1D(nn.Module):
         channels: List[int] | None = None,
         kernel_sizes: List[int] | None = None,
         dropout: float = 0.3,
+        in_channels: int = 1,
     ) -> None:
         del signal_length
         super().__init__()
@@ -72,7 +74,7 @@ class CNN1D(nn.Module):
         k1, k2, k3, k4 = kernel_sizes
 
         self.features = nn.Sequential(
-            ConvBlock(1, c1, k1),
+            ConvBlock(in_channels, c1, k1),
             nn.MaxPool1d(2),
             ConvBlock(c1, c2, k2),
             nn.MaxPool1d(2),
@@ -83,6 +85,9 @@ class CNN1D(nn.Module):
         self.gap = nn.AdaptiveAvgPool1d(1)
         self.embedding_dim = c4
 
+        # Instance norm for domain invariance — normalizes per-sample
+        self.instance_norm = nn.InstanceNorm1d(c4, affine=True)
+
         self.classifier = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(c4, n_classes),
@@ -92,6 +97,7 @@ class CNN1D(nn.Module):
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         feat = self.features(x)
+        feat = self.instance_norm(feat)
         feat = self.gap(feat)
         return feat.squeeze(-1)
 

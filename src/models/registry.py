@@ -34,14 +34,24 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
     model_cls = MODEL_REGISTRY[name]
     model_cfg = cfg.get("model", {})
 
+    # Determine input channels (1 = raw only, 2 = raw + derivative)
+    deriv_cfg = cfg.get("preprocessing", cfg.get("derivative", {}))
+    if isinstance(deriv_cfg, dict) and "derivative" in deriv_cfg:
+        deriv_cfg = deriv_cfg["derivative"]
+    elif isinstance(deriv_cfg, dict) and "derivative" not in deriv_cfg:
+        deriv_cfg = cfg.get("derivative", {})
+    use_derivative = deriv_cfg.get("enabled", False) if isinstance(deriv_cfg, dict) else False
+    default_in_channels = 2 if use_derivative else 1
+
     common = {
         "signal_length": model_cfg.get("signal_length", 1000),
         "n_classes": model_cfg.get("n_classes", 30),
+        "in_channels": model_cfg.get("in_channels", default_in_channels),
     }
     specific = {
         k: v
         for k, v in model_cfg.items()
-        if k not in ("name", "signal_length", "n_classes")
+        if k not in ("name", "signal_length", "n_classes", "in_channels")
     }
 
     model = model_cls(**common, **specific)

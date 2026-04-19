@@ -49,6 +49,57 @@ class PerSampleMeanSubtraction:
         return self.fit(X).transform(X)
 
 
+class SNVNormalization:
+    """
+    Standard Normal Variate: per-sample centering + scaling.
+    Removes multiplicative scatter AND additive baseline offset
+    simultaneously — significantly more robust than mean subtraction
+    alone for cross-session/cross-instrument generalization.
+    """
+
+    def fit(self, X: np.ndarray) -> "SNVNormalization":
+        return self  # Stateless
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        means = X.mean(axis=1, keepdims=True)
+        stds = X.std(axis=1, keepdims=True)
+        stds[stds < 1e-8] = 1.0
+        return (X - means) / stds
+
+    def fit_transform(self, X: np.ndarray) -> np.ndarray:
+        return self.fit(X).transform(X)
+
+
+class FirstDerivative:
+    """
+    Savitzky-Golay first derivative — inherently invariant to additive
+    baseline offsets and reduces sensitivity to slow-varying instrument
+    artifacts.  Standard practice in chemometrics / spectroscopy.
+    """
+
+    def __init__(self, window_length: int = 11, polyorder: int = 3) -> None:
+        if window_length % 2 == 0:
+            raise ValueError("window_length must be odd")
+        if polyorder >= window_length:
+            raise ValueError("polyorder must be < window_length")
+        self.window_length = window_length
+        self.polyorder = polyorder
+
+    def fit(self, X: np.ndarray) -> "FirstDerivative":
+        return self  # Stateless
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        return np.apply_along_axis(
+            lambda sig: savgol_filter(
+                sig, self.window_length, self.polyorder, deriv=1
+            ),
+            axis=1, arr=X,
+        )
+
+    def fit_transform(self, X: np.ndarray) -> np.ndarray:
+        return self.fit(X).transform(X)
+
+
 class SavitzkyGolaySmoothing:
     """
     Smooth signals using a Savitzky-Golay filter.
@@ -127,6 +178,8 @@ class ClipTransform:
 # Registry of available transforms
 _TRANSFORM_REGISTRY = {
     "per_sample_mean_subtraction": PerSampleMeanSubtraction,
+    "snv_normalization":           SNVNormalization,
+    "first_derivative":            FirstDerivative,
     "savitzky_golay":              SavitzkyGolaySmoothing,
     "global_standardisation":      GlobalStandardisation,
     "clip":                        ClipTransform,

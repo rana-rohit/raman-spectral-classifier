@@ -3,16 +3,16 @@
 # =============================================================================
 
 preprocessing:
-  per_sample_mean_subtraction:
+  snv_normalization:
     enabled: true
+
+  per_sample_mean_subtraction:
+    enabled: false
 
   savitzky_golay:
     enabled: true
     window_length: 11
     polyorder: 3
-
-  global_standardisation:
-    enabled: true
 
   clip:
     enabled: true
@@ -20,7 +20,13 @@ preprocessing:
     max_val:  3.0
 
   pipeline:
-    - per_sample_mean_subtraction
+    - snv_normalization
     - savitzky_golay
-    - global_standardisation
     - clip
+
+# Derivative preprocessing for the second input channel.
+# This is handled separately by the dataloader, not the main pipeline.
+derivative:
+  enabled: true
+  window_length: 11
+  polyorder: 3

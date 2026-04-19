@@ -20,7 +20,7 @@ class CNNStem(nn.Module):
         (128, 256, 15, True),
     ]
 
-    def __init__(self, n_blocks: int = 2) -> None:
+    def __init__(self, n_blocks: int = 2, in_channels: int = 1) -> None:
         super().__init__()
         assert 1 <= n_blocks <= 3, "n_blocks must be 1, 2, or 3"
         self.n_blocks = n_blocks
@@ -28,6 +28,8 @@ class CNNStem(nn.Module):
         layers = []
         for i in range(n_blocks):
             in_ch, out_ch, kernel, pool = self.BLOCK_CONFIGS[i]
+            if i == 0:
+                in_ch = in_channels  # Override first block input channels
             layers.append(ConvBlock(in_ch, out_ch, kernel))
             if pool:
                 layers.append(nn.MaxPool1d(2))
@@ -51,6 +53,7 @@ class HybridCNNTransformer(nn.Module):
         d_ff: int = 512,
         dropout: float = 0.1,
         attn_dropout: float = 0.1,
+        in_channels: int = 1,
     ) -> None:
         del signal_length
         super().__init__()
@@ -58,7 +61,7 @@ class HybridCNNTransformer(nn.Module):
         self.d_model = d_model
         self.embedding_dim = d_model
 
-        self.cnn_stem = CNNStem(n_blocks=handoff_blocks)
+        self.cnn_stem = CNNStem(n_blocks=handoff_blocks, in_channels=in_channels)
         cnn_out_ch = self.cnn_stem.out_channels
 
         self.proj = nn.Sequential(

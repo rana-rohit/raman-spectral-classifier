@@ -67,6 +67,7 @@ class ResNet1D(nn.Module):
         n_blocks: List[int] | None = None,
         stem_kernel: int = 15,
         dropout: float = 0.3,
+        in_channels: int = 1,
     ) -> None:
         del signal_length
         super().__init__()
@@ -77,7 +78,7 @@ class ResNet1D(nn.Module):
         c1, c2, c3, c4 = channels
 
         self.stem = nn.Sequential(
-            nn.Conv1d(1, c1, stem_kernel, stride=1, padding=stem_kernel // 2, bias=False),
+            nn.Conv1d(in_channels, c1, stem_kernel, stride=1, padding=stem_kernel // 2, bias=False),
             nn.BatchNorm1d(c1),
             nn.ReLU(inplace=True),
             nn.MaxPool1d(2),
@@ -90,6 +91,9 @@ class ResNet1D(nn.Module):
 
         self.gap = nn.AdaptiveAvgPool1d(1)
         self.embedding_dim = c4
+
+        # Instance norm for domain invariance
+        self.instance_norm = nn.InstanceNorm1d(c4, affine=True)
 
         self.classifier = nn.Sequential(
             nn.Dropout(dropout),
@@ -116,6 +120,7 @@ class ResNet1D(nn.Module):
         x = self.stage2(x)
         x = self.stage3(x)
         x = self.stage4(x)
+        x = self.instance_norm(x)
         x = self.gap(x)
         return x.squeeze(-1)
 

@@ -53,10 +53,11 @@ class SpectralShift:
         self.max_shift = max_shift
 
     def __call__(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        from scipy.ndimage import shift as nd_shift
         result = np.empty_like(X)
         for i in range(len(X)):
-            shift = int(rng.integers(-self.max_shift, self.max_shift + 1))
-            result[i] = np.roll(X[i], shift)
+            s = float(rng.integers(-self.max_shift, self.max_shift + 1))
+            result[i] = nd_shift(X[i], s, mode='nearest')
         return result
 
 
@@ -141,6 +142,48 @@ class Mixup:
         return X_mix, y_a, y_b, lam
 
 
+class PolynomialBaselineDrift:
+    """Add random low-order polynomial baseline — simulates fluorescence
+    background and instrument response variations across sessions."""
+
+    def __init__(self, max_degree: int = 3, max_amplitude: float = 0.3) -> None:
+        self.max_degree = max_degree
+        self.max_amplitude = max_amplitude
+
+    def __call__(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        length = X.shape[1]
+        x_norm = np.linspace(-1, 1, length)
+        result = X.copy()
+        for i in range(len(X)):
+            degree = int(rng.integers(1, self.max_degree + 1))
+            coeffs = rng.uniform(
+                -self.max_amplitude, self.max_amplitude, size=degree + 1
+            )
+            baseline = np.polyval(coeffs, x_norm)
+            result[i] = X[i] + baseline
+        return result
+
+
+class ChannelDropout:
+    """Randomly zero out contiguous spectral bands — forces the model to
+    use distributed features rather than relying on single peaks."""
+
+    def __init__(self, max_width: int = 30, max_drops: int = 3) -> None:
+        self.max_width = max_width
+        self.max_drops = max_drops
+
+    def __call__(self, X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        result = X.copy()
+        length = X.shape[1]
+        for i in range(len(X)):
+            n_drops = int(rng.integers(1, self.max_drops + 1))
+            for _ in range(n_drops):
+                width = int(rng.integers(5, self.max_width + 1))
+                start = int(rng.integers(0, max(1, length - width)))
+                result[i, start : start + width] = 0.0
+        return result
+
+
 _AUG_REGISTRY = {
     "gaussian_noise": GaussianNoise,
     "baseline_shift": BaselineShift,
@@ -150,6 +193,8 @@ _AUG_REGISTRY = {
     "baseline_drift": BaselineDrift,
     "peak_broadening": PeakBroadening,
     "nonlinear_warp": NonlinearSpectralWarp,
+    "polynomial_baseline": PolynomialBaselineDrift,
+    "channel_dropout": ChannelDropout,
 }
 
 
@@ -164,6 +209,7 @@ class AugmentationPipeline:
     ) -> None:
         self.steps = steps
         self.p = p
+        self._base_seed = seed
         self._rng = np.random.default_rng(seed)
         self.clip_min = clip_min
         self.clip_max = clip_max
@@ -199,3 +245,7 @@ class AugmentationPipeline:
         if self.clip_min is not None and self.clip_max is not None:
             return np.clip(X, self.clip_min, self.clip_max)
         return X
+
+    def set_epoch(self, epoch: int) -> None:
+        """Re-seed RNG for each epoch to ensure augmentation diversity."""
+        self._rng = np.random.default_rng(self._base_seed + epoch)

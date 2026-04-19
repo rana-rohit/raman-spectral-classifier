@@ -14,11 +14,11 @@ import torch.nn as nn
 
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, patch_size: int, d_model: int) -> None:
+    def __init__(self, patch_size: int, d_model: int, in_channels: int = 1) -> None:
         super().__init__()
         self.patch_size = patch_size
         self.proj = nn.Conv1d(
-            in_channels=1,
+            in_channels=in_channels,
             out_channels=d_model,
             kernel_size=patch_size,
             stride=patch_size,
@@ -106,6 +106,7 @@ class SpectralTransformer(nn.Module):
         dropout: float = 0.1,
         attn_dropout: float = 0.1,
         pos_encoding: str = "sinusoidal",
+        in_channels: int = 1,
     ) -> None:
         super().__init__()
 
@@ -118,7 +119,7 @@ class SpectralTransformer(nn.Module):
         self.embedding_dim = d_model
         self._use_learned_pos = pos_encoding != "sinusoidal"
 
-        self.patch_embed = PatchEmbedding(patch_size, d_model)
+        self.patch_embed = PatchEmbedding(patch_size, d_model, in_channels=in_channels)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
 
         seq_len = self.n_patches + 1

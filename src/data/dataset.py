@@ -2,6 +2,7 @@
 src/data/dataset.py
 
 PyTorch Dataset for 1D spectral signals.
+Supports optional multi-channel input (raw + first derivative).
 """
 
 from __future__ import annotations
@@ -23,10 +24,14 @@ class SpectralDataset(Dataset):
         training: bool = False,
         class_filter: Optional[List[int]] = None,
         n_views: int = 1,
+        derivative_X: Optional[np.ndarray] = None,
+        
     ) -> None:
         if class_filter is not None:
             mask = np.isin(y, class_filter)
             X, y = X[mask], y[mask]
+            if derivative_X is not None:
+                derivative_X = derivative_X[mask]
 
         self.X = X.astype(np.float32)
         self.y = y.astype(np.int64)
@@ -34,6 +39,9 @@ class SpectralDataset(Dataset):
         self.training = training
         self.class_filter = list(class_filter) if class_filter is not None else None
         self.n_views = int(n_views)
+        self.derivative_X = (
+            derivative_X.astype(np.float32) if derivative_X is not None else None
+        )
 
     def __len__(self) -> int:
         return len(self.X)
@@ -45,14 +53,35 @@ class SpectralDataset(Dataset):
         if self.n_views == 2 and self.training:
             x1 = self._transform_sample(x.copy())
             x2 = self._transform_sample(x.copy())
+            x1_tensor = self._to_multichannel(x1, idx)
+            x2_tensor = self._to_multichannel(x2, idx)
             return {
-                "x1": torch.from_numpy(x1).unsqueeze(0),
-                "x2": torch.from_numpy(x2).unsqueeze(0),
+                "x1": x1_tensor,
+                "x2": x2_tensor,
                 "y": y_tensor,
             }
 
         x = self._transform_sample(x)
-        return torch.from_numpy(x).unsqueeze(0), y_tensor
+        x_tensor = self._to_multichannel(x, idx)
+        return x_tensor, y_tensor
+
+    def _to_multichannel(self, x: np.ndarray, idx: int) -> torch.Tensor:
+        """Stack raw spectrum with optional derivative as a 2-channel input."""
+        x_tensor = torch.from_numpy(x).unsqueeze(0)  # (1, L)
+        if self.derivative_X is not None:
+            dx = self.derivative_X[idx].copy()
+
+            dx_mean = dx.mean()
+            dx_std = dx.std()
+
+            if dx_std < 1e-8:
+               dx_std = 1.0
+
+            dx = (dx - dx_mean) / dx_std
+
+            dx_tensor = torch.from_numpy(dx.astype(np.float32)).unsqueeze(0)
+            x_tensor = torch.cat([x_tensor, dx_tensor], dim=0)  # (2, L)
+        return x_tensor
 
     def _transform_sample(self, x: np.ndarray) -> np.ndarray:
         if self.training and self.augmentation is not None and len(self.augmentation.steps) > 0:
@@ -78,11 +107,21 @@ def make_train_val_split(
     y: np.ndarray,
     val_fraction: float = 0.20,
     random_seed: int = 42,
-) -> Tuple[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:
+    derivative_X: Optional[np.ndarray] = None,
+) -> Tuple:
     sss = StratifiedShuffleSplit(
         n_splits=1,
         test_size=val_fraction,
         random_state=random_seed,
     )
     train_idx, val_idx = next(sss.split(X, y))
-    return (X[train_idx], y[train_idx]), (X[val_idx], y[val_idx])
+
+    if derivative_X is not None:
+        return (
+            (X[train_idx], y[train_idx], derivative_X[train_idx]),
+            (X[val_idx], y[val_idx], derivative_X[val_idx]),
+        )
+    return (
+        (X[train_idx], y[train_idx], None),
+        (X[val_idx], y[val_idx], None),
+    )
