@@ -200,4 +200,4 @@ def _seed_worker(worker_id: int) -> None:
 
     augmentation = getattr(dataset, "augmentation", None)
     if augmentation is not None:
-        augmentation.set_rng(worker_seed)
+        augmentation._rng = np.random.default_rng(worker_seed)
