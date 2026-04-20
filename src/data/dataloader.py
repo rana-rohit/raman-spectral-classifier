@@ -27,19 +27,15 @@ def build_all_loaders(
     cfg: dict,
     derivative_cfg: Optional[dict] = None,
 ) -> Dict:
-    # 🔥 FORCE DERIVATIVE CONFIG IF NOT PASSED
-    if derivative_cfg is None:
-       derivative_cfg = {
-           "enabled": True,
-          "window_length": 11,
-          "polyorder": 3,
-       }
+    derivative_cfg = derivative_cfg or {}
     batch_size = cfg.get("batch_size", 256)
     num_workers = cfg.get("num_workers", 4)
     seed = cfg.get("seed", 42)
     val_fraction = cfg["validation"]["val_fraction"]
     val_seed = cfg["validation"]["random_seed"]
     consistency_cfg = cfg.get("consistency", {})
+
+    # If consistency training enabled, return multiple augmented views per sample
     train_views = 2 if consistency_cfg.get("enabled", False) else 1
 
     # Build derivative transform if enabled
@@ -63,8 +59,6 @@ def build_all_loaders(
     else:
         dX_ref = None
 
-    # Standardise derivative channel globally if present
-    deriv_std = None
     if dX_ref is not None:
         print("X_ref:", X_ref.shape)
         print("y_ref:", y_ref.shape)
@@ -132,7 +126,7 @@ def build_all_loaders(
         eval_classes = registry.get_eval_classes(split_name)
         loaders["ood"][split_name] = _make_loader(
             X_ood, y_ood,
-            class_filter=eval_classes,
+            class_filter=None,
             batch_size=batch_size,
             num_workers=num_workers,
             seed=seed + 10 + idx,
@@ -206,4 +200,4 @@ def _seed_worker(worker_id: int) -> None:
 
     augmentation = getattr(dataset, "augmentation", None)
     if augmentation is not None:
-        augmentation._rng = np.random.default_rng(worker_seed)
+        augmentation.set_rng(worker_seed)

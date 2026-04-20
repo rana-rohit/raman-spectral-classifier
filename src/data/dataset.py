@@ -30,8 +30,13 @@ class SpectralDataset(Dataset):
         if class_filter is not None:
             mask = np.isin(y, class_filter)
             X, y = X[mask], y[mask]
+
             if derivative_X is not None:
                 derivative_X = derivative_X[mask]
+
+            unique_classes = sorted(class_filter)
+            class_to_idx = {c: i for i, c in enumerate(unique_classes)}
+            y = np.array([class_to_idx[int(label)] for label in y], dtype=np.int64)
 
         self.X = X.astype(np.float32)
         self.y = y.astype(np.int64)
@@ -64,6 +69,11 @@ class SpectralDataset(Dataset):
         x = self._transform_sample(x)
         x_tensor = self._to_multichannel(x, idx)
         return x_tensor, y_tensor
+    """
+    Returns:
+    - Dict with x1, x2, y if n_views == 2
+    - Tuple (x, y) otherwise
+    """
 
     def _to_multichannel(self, x: np.ndarray, idx: int) -> torch.Tensor:
         """Stack raw spectrum with optional derivative as a 2-channel input."""
@@ -75,8 +85,9 @@ class SpectralDataset(Dataset):
             dx_std = dx.std()
 
             if dx_std < 1e-8:
-               dx_std = 1.0
-
+                dx_std = 1.0
+        
+            # Normalize derivative per sample to stabilize scale
             dx = (dx - dx_mean) / dx_std
 
             dx_tensor = torch.from_numpy(dx.astype(np.float32)).unsqueeze(0)
@@ -84,8 +95,9 @@ class SpectralDataset(Dataset):
         return x_tensor
 
     def _transform_sample(self, x: np.ndarray) -> np.ndarray:
-        if self.training and self.augmentation is not None and len(self.augmentation.steps) > 0:
-            x = self.augmentation(x[None])[0]
+        if self.training and self.augmentation is not None:
+            if hasattr(self.augmentation, "steps") and len(self.augmentation.steps) > 0:
+                x = self.augmentation(x[None])[0]
         return x.astype(np.float32, copy=False)
 
     @property
