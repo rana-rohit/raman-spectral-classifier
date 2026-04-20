@@ -4,8 +4,7 @@ src/models/cnn.py
 1D CNN baseline for spectral signal classification.
 
 Design decisions:
-- Four kernel sizes (7, 15, 15, 31) capturing multi-scale spectral features,
-  and broad spectral envelopes simultaneously
+- Four kernel sizes (7, 15, 15, 31) capturing multi-scale spectral features
 - BatchNorm after every conv for training stability
 - Global Average Pooling instead of Flatten gives spatial invariance,
   reduces parameter count, and is required for Grad-CAM to work correctly
