@@ -21,7 +21,7 @@ from src.training.scheduler import get_scheduler
 from src.utils.checkpoint import save_checkpoint
 from src.utils.class_subset import subset_mask, remap_targets_to_subset
 from src.utils.logging import ExperimentLogger
-
+from src.training.losses import coral_loss
 
 class EarlyStopping:
     def __init__(self, patience: int = 10, min_delta: float = 1e-4) -> None:
@@ -71,6 +71,9 @@ class Trainer:
         self.exp_dir = Path(exp_dir)
         self.n_classes = n_classes
         self.reference_state = reference_state
+        self.da_cfg = self.train_cfg.get("domain_alignment", {})
+        self.da_enabled = self.da_cfg.get("enabled", False)
+        self.da_weight = self.da_cfg.get("weight", 0.5)
 
         self.monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
         self.gradient_clip = self.train_cfg.get("gradient_clip", 1.0)
@@ -189,6 +192,7 @@ class Trainer:
         total_aux_loss = 0.0
         total_consistency_loss = 0.0
         total_l2sp_loss = 0.0
+        total_da_loss = 0.0
         correct = 0
         total = 0
         t0 = time.time()
@@ -224,6 +228,39 @@ class Trainer:
                 + self.consistency_weight * consistency_term
                 + l2sp_term
             )
+
+            # ADD DOMAIN ALIGNMENT HERE
+            if self.da_enabled:
+                try:
+                    clin_batch = next(self._clin_iter)
+                except (AttributeError, StopIteration):
+                    self._clin_iter = iter(self.loaders["finetune"])
+                    clin_batch = next(self._clin_iter)
+
+                # parse clinical batch
+                if isinstance(clin_batch, dict):
+                    x_clin = clin_batch["x1"]
+                else:
+                    x_clin, _ = clin_batch
+
+                x_clin = x_clin.to(self.device)
+               
+                da_batch_size = min(x1.size(0), x_clin.size(0))
+
+                x_ref_da = x1[:da_batch_size]
+                x_clin_da = x_clin[:da_batch_size]
+
+                # extract features
+                feat_ref = self.model.forward_features(x_ref_da) 
+                feat_clin = self.model.forward_features(x_clin_da)
+
+                # compute CORAL
+                loss_da = coral_loss(feat_ref, feat_clin)
+                total_da_loss += loss_da.item() * da_batch_size
+
+                # add to loss
+                loss = loss + self.da_weight * loss_da
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
             self.optimizer.step()
@@ -251,6 +288,7 @@ class Trainer:
                 "aux_loss": total_aux_loss / total,
                 "consistency_loss": total_consistency_loss / total,
                 "l2sp_loss": total_l2sp_loss / total,
+                "domain_loss": total_da_loss / total,
                 "accuracy": correct / total,
                 "lr": self.optimizer.param_groups[0]["lr"],
                 "epoch_time": time.time() - t0,

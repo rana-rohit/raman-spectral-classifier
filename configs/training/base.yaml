@@ -42,6 +42,10 @@ training:
     temperature: 1.0
     loss_weight: 1.0
 
+  domain_alignment:
+    enabled: true
+    weight: 0.5
+
 multitask:
   auxiliary_shared_head:
     enabled: false
