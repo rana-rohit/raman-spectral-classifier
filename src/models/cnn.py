@@ -4,13 +4,13 @@ src/models/cnn.py
 1D CNN baseline for spectral signal classification.
 
 Design decisions:
-- Three kernel sizes (7, 15, 31) to capture narrow peaks, medium features,
+- Four kernel sizes (7, 15, 15, 31) capturing multi-scale spectral features,
   and broad spectral envelopes simultaneously
 - BatchNorm after every conv for training stability
 - Global Average Pooling instead of Flatten gives spatial invariance,
   reduces parameter count, and is required for Grad-CAM to work correctly
 - Dropout before classifier head regularises the 30-class output
-- InstanceNorm before classifier improves domain invariance
+- No normalization after feature extraction to preserve discriminative amplitude information
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class ConvBlock(nn.Module):
             ),
             nn.BatchNorm1d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Dropout1d(p=0.1),
+            nn.Dropout1d(p=0.05),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -55,14 +55,12 @@ class ConvBlock(nn.Module):
 class CNN1D(nn.Module):
     def __init__(
         self,
-        signal_length: int = 1000,
         n_classes: int = 30,
         channels: List[int] | None = None,
         kernel_sizes: List[int] | None = None,
         dropout: float = 0.3,
         in_channels: int = 1,
     ) -> None:
-        del signal_length
         super().__init__()
         channels = channels or [32, 64, 128, 256]
         kernel_sizes = kernel_sizes or [7, 15, 15, 31]
@@ -85,9 +83,6 @@ class CNN1D(nn.Module):
         self.gap = nn.AdaptiveAvgPool1d(1)
         self.embedding_dim = c4
 
-        # Instance norm for domain invariance — normalizes per-sample
-        self.instance_norm = nn.InstanceNorm1d(c4, affine=True)
-
         self.classifier = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(c4, n_classes),
@@ -97,7 +92,6 @@ class CNN1D(nn.Module):
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         feat = self.features(x)
-        feat = self.instance_norm(feat)
         feat = self.gap(feat)
         return feat.squeeze(-1)
 
