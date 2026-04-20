@@ -54,6 +54,7 @@ class ConvBlock(nn.Module):
 class CNN1D(nn.Module):
     def __init__(
         self,
+        signal_length: int = 1000,
         n_classes: int = 30,
         channels: List[int] | None = None,
         kernel_sizes: List[int] | None = None,
