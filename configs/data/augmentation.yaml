@@ -4,7 +4,7 @@
 # =============================================================================
 
 augmentation:
-  apply_probability: 0.8
+  apply_probability: 1.0
   seed: 42
   clip_min: -3.0
   clip_max: 3.0
@@ -16,7 +16,7 @@ augmentation:
 
     baseline_shift:
       enabled: true
-      max_shift: 0.15
+      max_shift: 0.25
 
     amplitude_scale:
       enabled: false
@@ -28,7 +28,7 @@ augmentation:
 
     baseline_drift:
       enabled: true
-      max_strength: 0.10
+      max_strength: 0.15
       n_control_points: 5
 
     polynomial_baseline:
@@ -47,7 +47,7 @@ augmentation:
 
     spectral_shift:
       enabled: true
-      max_shift: 2
+      max_shift: 3
 
     channel_dropout:
       enabled: false

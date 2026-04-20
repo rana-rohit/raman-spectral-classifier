@@ -35,12 +35,12 @@ training:
     exclude_patterns: []
 
   consistency:
-    enabled: false
+    enabled: true
     views: 2
     supervised_on_both_views: true
     loss_type: mse_probs
     temperature: 1.0
-    loss_weight: 0.05
+    loss_weight: 1.0
 
 multitask:
   auxiliary_shared_head:
