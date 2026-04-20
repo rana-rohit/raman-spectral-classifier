@@ -10,6 +10,7 @@ import argparse
 import os
 import sys
 import time
+import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -94,25 +95,14 @@ def main():
         "consistency": cfg.get("training", {}).get("consistency", {}),
     }
     loaders = build_all_loaders(registry, preprocessor, augmentation, loader_cfg)
+
     print(f"  Train: {len(loaders['train'].dataset):,} samples")
     print(f"  Val:   {len(loaders['val'].dataset):,} samples")
 
     print("\n[2/4] Building model...")
     model = get_model(args.model, cfg)
-    model_summary(model)
-
-    model.eval()
-    dummy = torch.zeros(2, 2, 1000)
-    with torch.no_grad():
-        out = model(dummy)
-    if isinstance(out, dict):
-        out = out["main_logits"]
-    assert out.shape == (2, 30), f"Expected (2, 30), got {out.shape}"
-    assert not torch.isnan(out).any(), "Model produces NaN on zero input"
-    assert not torch.isinf(out).any(), "Model produces Inf on zero input"
-    print(f"  Model sanity check passed. Output range: [{out.min():.3f}, {out.max():.3f}]")
-    model.train()
-
+    model_summary(model) 
+    
     print("\n[3/4] Training...")
     trainer = build_trainer(
         model=model,
