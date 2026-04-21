@@ -21,7 +21,6 @@ from src.training.scheduler import get_scheduler
 from src.utils.checkpoint import save_checkpoint
 from src.utils.class_subset import subset_mask, remap_targets_to_subset
 from src.utils.logging import ExperimentLogger
-from src.training.losses import coral_loss
 from torch.autograd import Function
 
 class EarlyStopping:
@@ -85,9 +84,6 @@ class Trainer:
         self.exp_dir = Path(exp_dir)
         self.n_classes = n_classes
         self.reference_state = reference_state
-        self.da_cfg = self.train_cfg.get("domain_alignment", {})
-        self.da_enabled = self.da_cfg.get("enabled", False)
-        self.da_weight = self.da_cfg.get("weight", 0.5)
         self.dann_cfg = self.train_cfg.get("dann", {})
         self.dann_enabled = self.dann_cfg.get("enabled", False)
         self.dann_weight = self.dann_cfg.get("weight", 0.5)
@@ -216,7 +212,6 @@ class Trainer:
         total_aux_loss = 0.0
         total_consistency_loss = 0.0
         total_l2sp_loss = 0.0
-        total_da_loss = 0.0
         total_dom_loss = 0.0
         correct = 0
         total = 0
@@ -280,6 +275,9 @@ class Trainer:
 
                 feat_ref = out_ref["features"]
                 feat_clin = out_clin["features"]
+
+                if feat_ref is None or feat_clin is None:
+                    raise ValueError("Model must return 'features' for DANN training")
 
                 # GRL applied here
                 feat_ref_rev = grad_reverse(feat_ref, self.dann_lambda)
