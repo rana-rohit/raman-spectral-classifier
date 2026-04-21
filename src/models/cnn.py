@@ -141,14 +141,17 @@ class CNN1D(nn.Module):
     def _init_weights(self) -> None:
         for module in self.modules():
 
-            # FIRST: attention conv (depthwise)
+            # attention conv (depthwise)
             if isinstance(module, nn.Conv1d) and module.groups == module.in_channels:
                 nn.init.zeros_(module.weight)
-                nn.init.zeros_(module.bias)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
-            # normal convs
+            # normal conv
             elif isinstance(module, nn.Conv1d):
                 nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
             elif isinstance(module, nn.BatchNorm1d):
                 nn.init.ones_(module.weight)
