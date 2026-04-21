@@ -7,6 +7,7 @@ Core training engine shared across all model families.
 from __future__ import annotations
 
 import time
+import numpy as np
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -21,10 +22,10 @@ from src.training.scheduler import get_scheduler
 from src.utils.checkpoint import save_checkpoint
 from src.utils.class_subset import subset_mask, remap_targets_to_subset
 from src.utils.logging import ExperimentLogger
-from torch.autograd import Function
+from src.data.augmentation import AugmentationPipeline
 
 class EarlyStopping:
-    def __init__(self, patience: int = 10, min_delta: float = 1e-4) -> None:
+    def __init__(self, patience: int = 10, min_delta: float = 1e-4) -> None: 
         self.patience = patience
         self.min_delta = min_delta
         self._best = -float("inf")
@@ -45,20 +46,6 @@ class EarlyStopping:
     def best(self) -> float:
         return self._best
 
-class GradReverse(Function):
-    @staticmethod
-    def forward(ctx, x, lambda_):
-        ctx.lambda_ = lambda_
-        return x.view_as(x)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return -ctx.lambda_ * grad_output, None
-
-
-def grad_reverse(x, lambda_=1.0):
-    return GradReverse.apply(x, lambda_)
-
 class Trainer:
     def __init__(
         self,
@@ -73,6 +60,8 @@ class Trainer:
         n_classes: int = 30,
         reference_state: dict[str, torch.Tensor] | None = None,
     ) -> None:
+        aug_cfg = cfg.get("augmentation", {})
+        self.augment = AugmentationPipeline.from_config(aug_cfg)
         self.model = model
         self.loaders = loaders
         self.optimizer = optimizer
@@ -85,7 +74,7 @@ class Trainer:
         self.n_classes = n_classes
         self.reference_state = reference_state
         self.dann_cfg = self.train_cfg.get("dann", {})
-        self.dann_enabled = self.dann_cfg.get("enabled", False)
+        self.dann_enabled = False
         self.dann_weight = self.dann_cfg.get("weight", 0.5)
         self.dann_lambda = self.dann_cfg.get("lambda", 1.0)
 
@@ -205,6 +194,7 @@ class Trainer:
         return results
 
     def _train_one_epoch(self, epoch: int) -> Dict[str, float]:
+        self.augment.set_epoch(epoch)
         current_epoch = epoch
         self.model.train()
         total_loss = 0.0
@@ -212,7 +202,6 @@ class Trainer:
         total_aux_loss = 0.0
         total_consistency_loss = 0.0
         total_l2sp_loss = 0.0
-        total_dom_loss = 0.0
         correct = 0
         total = 0
         t0 = time.time()
@@ -249,56 +238,6 @@ class Trainer:
                 + l2sp_term
             )
 
-            # delay DANN until model learns basic features
-            if self.dann_enabled and current_epoch >= 5:
-                try:
-                    clin_batch = next(self._clin_iter)
-                except (AttributeError, StopIteration):
-                    self._clin_iter = iter(self.loaders["finetune"])
-                    clin_batch = next(self._clin_iter)
-
-                if isinstance(clin_batch, dict):
-                    x_clin = clin_batch["x1"]
-                else:
-                    x_clin, _ = clin_batch
-
-                x_clin = x_clin.to(self.device)
-
-                # match batch size
-                bs = min(x1.size(0), x_clin.size(0))
-                x_ref_da = x1[:bs]
-                x_clin_da = x_clin[:bs]
-
-                # forward
-                out_ref = self._normalize_outputs(self.model(x_ref_da))
-                out_clin = self._normalize_outputs(self.model(x_clin_da))
-
-                feat_ref = out_ref["features"]
-                feat_clin = out_clin["features"]
-
-                if feat_ref is None or feat_clin is None:
-                    raise ValueError("Model must return 'features' for DANN training")
-
-                # GRL applied here
-                feat_ref_rev = grad_reverse(feat_ref, self.dann_lambda)
-                feat_clin_rev = grad_reverse(feat_clin, self.dann_lambda)
-
-                dom_logits_ref = self.model.domain_classifier(feat_ref_rev)
-                dom_logits_clin = self.model.domain_classifier(feat_clin_rev)
-
-                # domain labels
-                dom_labels_ref = torch.zeros(bs, dtype=torch.long, device=self.device)
-                dom_labels_clin = torch.ones(bs, dtype=torch.long, device=self.device)
-
-                # domain loss
-                loss_dom = (
-                    nn.functional.cross_entropy(dom_logits_ref, dom_labels_ref)
-                    + nn.functional.cross_entropy(dom_logits_clin, dom_labels_clin)
-                ) / 2
-
-                loss = loss + self.dann_weight * loss_dom
-                total_dom_loss += loss_dom.item() * bs
-
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
             self.optimizer.step()
@@ -326,7 +265,7 @@ class Trainer:
                 "aux_loss": total_aux_loss / total,
                 "consistency_loss": total_consistency_loss / total,
                 "l2sp_loss": total_l2sp_loss / total,
-                "domain_loss": total_dom_loss / total,  
+                "domain_loss": 0.0,
                 "accuracy": correct / total,
                 "lr": self.optimizer.param_groups[0]["lr"],
                 "epoch_time": time.time() - t0,
@@ -367,26 +306,46 @@ class Trainer:
             }
         raise TypeError(f"Unsupported model output type: {type(outputs)!r}")
 
-    def _parse_batch(
-        self,
-        batch,
-    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
+    def _parse_batch(self, batch):
         if isinstance(batch, dict):
-            x1 = batch["x1"].to(self.device)
+            x1 = batch["x1"]
+
+            if self.model.training:
+                x1 = x1.cpu().numpy()
+                x1 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x1])
+                x1 = torch.from_numpy(x1).float().contiguous()
+
+            x1 = x1.to(self.device)
+
             x2 = batch.get("x2")
-            x2 = x2.to(self.device) if x2 is not None else None
+            if x2 is not None:
+                if self.model.training:
+                    x2 = x2.cpu().numpy()
+                    x2 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x2])
+                    x2 = torch.from_numpy(x2).float().contiguous()
+
+                x2 = x2.to(self.device)
+
             y = batch["y"].to(self.device)
             return x1, x2, y
 
         if isinstance(batch, (tuple, list)) and len(batch) == 2:
             x, y = batch
 
-            # 🔥 Handle consistency case: x = (x1, x2)
             if isinstance(x, (tuple, list)) and len(x) == 2:
                 x1, x2 = x
+
+                if self.model.training:
+                    x1 = x1.cpu().numpy()
+                    x1 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x1])
+                    x1 = torch.from_numpy(x1).float().contiguous()
+
+                    x2 = x2.cpu().numpy()
+                    x2 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x2])
+                    x2 = torch.from_numpy(x2).float().contiguous()
+
                 return x1.to(self.device), x2.to(self.device), y.to(self.device)
 
-            # 🔹 Standard case: single input
             return x.to(self.device), None, y.to(self.device)
 
         raise TypeError(f"Unsupported batch type: {type(batch)!r}")

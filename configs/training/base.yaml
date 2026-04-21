@@ -42,7 +42,7 @@ training:
     enabled: false 
   
   dann:
-    enabled: true
+    enabled: false
     weight: 0.1
     lambda: 0.5
 
