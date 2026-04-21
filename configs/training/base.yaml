@@ -35,7 +35,7 @@ training:
     exclude_patterns: []
 
   consistency:
-    enabled: true
+    enabled: false
     views: 2
     supervised_on_both_views: true
     loss_type: mse_probs

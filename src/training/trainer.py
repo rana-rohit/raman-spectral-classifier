@@ -129,6 +129,12 @@ class Trainer:
             self.device = torch.device("cpu")
 
         self.model.to(self.device)
+        # Freeze BatchNorm running statistics (prevents collapse with multi-forward passes)
+        for m in self.model.modules():
+            if isinstance(m, nn.BatchNorm1d):
+                m.eval()                 # freeze running mean/var
+                m.requires_grad_(True)   # still allow gamma/beta to learn
+
         print(f"  Device: {self.device}")
         self.early_stopping = EarlyStopping(
             patience=self.train_cfg.get("early_stopping_patience", 10)
