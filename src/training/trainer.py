@@ -203,7 +203,7 @@ class Trainer:
         return results
 
     def _train_one_epoch(self, epoch: int) -> Dict[str, float]:
-        del epoch
+        current_epoch = epoch
         self.model.train()
         total_loss = 0.0
         total_main_loss = 0.0
@@ -249,7 +249,7 @@ class Trainer:
             )
 
             # delay DANN until model learns basic features
-            if self.dann_enabled and epoch >= 5:
+            if self.dann_enabled and current_epoch >= 5:
                 try:
                     clin_batch = next(self._clin_iter)
                 except (AttributeError, StopIteration):
