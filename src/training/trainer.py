@@ -22,6 +22,7 @@ from src.utils.checkpoint import save_checkpoint
 from src.utils.class_subset import subset_mask, remap_targets_to_subset
 from src.utils.logging import ExperimentLogger
 from src.training.losses import coral_loss
+from torch.autograd import Function
 
 class EarlyStopping:
     def __init__(self, patience: int = 10, min_delta: float = 1e-4) -> None:
@@ -45,6 +46,19 @@ class EarlyStopping:
     def best(self) -> float:
         return self._best
 
+class GradReverse(Function):
+    @staticmethod
+    def forward(ctx, x, lambda_):
+        ctx.lambda_ = lambda_
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return -ctx.lambda_ * grad_output, None
+
+
+def grad_reverse(x, lambda_=1.0):
+    return GradReverse.apply(x, lambda_)
 
 class Trainer:
     def __init__(
@@ -74,6 +88,10 @@ class Trainer:
         self.da_cfg = self.train_cfg.get("domain_alignment", {})
         self.da_enabled = self.da_cfg.get("enabled", False)
         self.da_weight = self.da_cfg.get("weight", 0.5)
+        self.dann_cfg = self.train_cfg.get("dann", {})
+        self.dann_enabled = self.dann_cfg.get("enabled", False)
+        self.dann_weight = self.dann_cfg.get("weight", 0.5)
+        self.dann_lambda = self.dann_cfg.get("lambda", 1.0)
 
         self.monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
         self.gradient_clip = self.train_cfg.get("gradient_clip", 1.0)
@@ -193,6 +211,7 @@ class Trainer:
         total_consistency_loss = 0.0
         total_l2sp_loss = 0.0
         total_da_loss = 0.0
+        total_dom_loss = 0.0
         correct = 0
         total = 0
         t0 = time.time()
@@ -229,37 +248,52 @@ class Trainer:
                 + l2sp_term
             )
 
-            # ADD DOMAIN ALIGNMENT HERE
-            if self.da_enabled:
+            # DANN (Domain Adversarial Training)
+            if self.dann_enabled:
                 try:
                     clin_batch = next(self._clin_iter)
                 except (AttributeError, StopIteration):
                     self._clin_iter = iter(self.loaders["finetune"])
                     clin_batch = next(self._clin_iter)
 
-                # parse clinical batch
                 if isinstance(clin_batch, dict):
                     x_clin = clin_batch["x1"]
                 else:
                     x_clin, _ = clin_batch
 
                 x_clin = x_clin.to(self.device)
-               
-                da_batch_size = min(x1.size(0), x_clin.size(0))
 
-                x_ref_da = x1[:da_batch_size]
-                x_clin_da = x_clin[:da_batch_size]
+                # match batch size
+                bs = min(x1.size(0), x_clin.size(0))
+                x_ref_da = x1[:bs]
+                x_clin_da = x_clin[:bs]
 
-                # extract features
-                feat_ref = self.model.forward_features(x_ref_da) 
-                feat_clin = self.model.forward_features(x_clin_da)
+                # forward
+                out_ref = self._normalize_outputs(self.model(x_ref_da))
+                out_clin = self._normalize_outputs(self.model(x_clin_da))
 
-                # compute CORAL
-                loss_da = coral_loss(feat_ref, feat_clin)
-                total_da_loss += loss_da.item() * da_batch_size
+                feat_ref = out_ref["features"]
+                feat_clin = out_clin["features"]
 
-                # add to loss
-                loss = loss + self.da_weight * loss_da
+                # GRL applied here
+                feat_ref_rev = grad_reverse(feat_ref, self.dann_lambda)
+                feat_clin_rev = grad_reverse(feat_clin, self.dann_lambda)
+
+                dom_logits_ref = self.model.domain_classifier(feat_ref_rev)
+                dom_logits_clin = self.model.domain_classifier(feat_clin_rev)
+
+                # domain labels
+                dom_labels_ref = torch.zeros(bs, dtype=torch.long, device=self.device)
+                dom_labels_clin = torch.ones(bs, dtype=torch.long, device=self.device)
+
+                # domain loss
+                loss_dom = (
+                    nn.functional.cross_entropy(dom_logits_ref, dom_labels_ref)
+                    + nn.functional.cross_entropy(dom_logits_clin, dom_labels_clin)
+                ) / 2
+
+                loss = loss + self.dann_weight * loss_dom
+                total_dom_loss += loss_dom.item() * bs
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
@@ -288,7 +322,7 @@ class Trainer:
                 "aux_loss": total_aux_loss / total,
                 "consistency_loss": total_consistency_loss / total,
                 "l2sp_loss": total_l2sp_loss / total,
-                "domain_loss": total_da_loss / total,
+                "domain_loss": total_dom_loss / total,  
                 "accuracy": correct / total,
                 "lr": self.optimizer.param_groups[0]["lr"],
                 "epoch_time": time.time() - t0,

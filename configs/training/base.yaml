@@ -43,8 +43,13 @@ training:
     loss_weight: 1.0
 
   domain_alignment:
+    enabled: false 
+    weight: 0.5
+  
+  dann:
     enabled: true
     weight: 0.5
+    lambda: 1.0 
 
 multitask:
   auxiliary_shared_head:
