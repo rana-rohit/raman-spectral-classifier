@@ -48,8 +48,8 @@ training:
   
   dann:
     enabled: true
-    weight: 0.5
-    lambda: 1.0 
+    weight: 0.1
+    lambda: 0.5
 
 multitask:
   auxiliary_shared_head:

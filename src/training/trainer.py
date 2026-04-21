@@ -248,8 +248,8 @@ class Trainer:
                 + l2sp_term
             )
 
-            # DANN (Domain Adversarial Training)
-            if self.dann_enabled:
+            # delay DANN until model learns basic features
+            if self.dann_enabled and epoch >= 5:
                 try:
                     clin_batch = next(self._clin_iter)
                 except (AttributeError, StopIteration):
