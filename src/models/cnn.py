@@ -70,6 +70,19 @@ class CNN1D(nn.Module):
 
         c1, c2, c3, c4 = channels
         k1, k2, k3, k4 = kernel_sizes
+        
+        # Spectral attention (learns important regions)
+        self.attention = nn.Sequential(
+            nn.Conv1d(
+                in_channels=in_channels,
+                out_channels=in_channels,
+                kernel_size=7,
+                padding=3,
+                groups=in_channels,
+                bias=True,
+            ),
+            nn.Sigmoid()
+        )
 
         self.features = nn.Sequential(
             ConvBlock(in_channels, c1, k1),
@@ -87,27 +100,60 @@ class CNN1D(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(c4, n_classes),
         )
+        
+        # Domain classifier (for DANN)
+        self.domain_classifier = nn.Sequential(
+            nn.Linear(c4, 128),
+            nn.ReLU(),
+            nn.Linear(128, 2)  # 2 domains: reference vs clinical
+        )
 
         self._init_weights()
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+        # compute attention mask
+        attn = self.attention(x)
+
+        # apply residual attention
+        x = x * attn + x
+
+        # pass through CNN
         feat = self.features(x)
         feat = self.gap(feat)
+        
+        if self.training and torch.rand(1).item() < 0.001:
+            print(f"attn mean: {attn.mean().detach().cpu().item():.4f}")
+    
         return feat.squeeze(-1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.classifier(self.forward_features(x))
+        feat = self.forward_features(x)
+
+        return {
+            "main_logits": self.classifier(feat),
+            "features": feat,
+            "domain_logits": self.domain_classifier(feat),
+        }
 
     def get_feature_maps(self, x: torch.Tensor) -> torch.Tensor:
         return self.features(x)
 
     def _init_weights(self) -> None:
         for module in self.modules():
-            if isinstance(module, nn.Conv1d):
+
+            # FIRST: attention conv (depthwise)
+            if isinstance(module, nn.Conv1d) and module.groups == module.in_channels:
+                nn.init.zeros_(module.weight)
+                nn.init.zeros_(module.bias)
+
+            # normal convs
+            elif isinstance(module, nn.Conv1d):
                 nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+
             elif isinstance(module, nn.BatchNorm1d):
                 nn.init.ones_(module.weight)
                 nn.init.zeros_(module.bias)
+
             elif isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
                 nn.init.zeros_(module.bias)
