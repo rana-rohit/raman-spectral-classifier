@@ -45,6 +45,10 @@ training:
     enabled: false
     weight: 0.1
     lambda: 0.5
+  
+  coral:
+    enabled: true
+    weight: 0.5 
 
 multitask:
   auxiliary_shared_head:

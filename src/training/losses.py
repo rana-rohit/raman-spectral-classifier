@@ -34,33 +34,28 @@ class LabelSmoothingCrossEntropy(nn.Module):
             return loss.sum()
         return loss
 
-def coral_loss(
-    source: torch.Tensor,
-    target: torch.Tensor,
-) -> torch.Tensor:
+def coral_loss(source, target):
     """
-    CORAL loss: aligns covariance of source and target features.
+    CORAL loss: aligns covariance of source and target features
+    source: (N, D)
+    target: (M, D)
+    """
 
-    source: (B, D) features from reference domain
-    target: (B, D) features from clinical domain
-    """
-    if source.numel() == 0 or target.numel() == 0:
+    # ensure enough samples
+    if source.size(0) < 2 or target.size(0) < 2:
         return source.new_tensor(0.0)
 
-    d = source.size(1)
+    # center features
+    source = source - source.mean(dim=0, keepdim=True)
+    target = target - target.mean(dim=0, keepdim=True)
 
-    # Center features
-    source_c = source - source.mean(dim=0)
-    target_c = target - target.mean(dim=0)
+    # covariance with safe denominator
+    cov_s = (source.T @ source) / (source.size(0) - 1)
+    cov_t = (target.T @ target) / (target.size(0) - 1)
 
-    # Covariance matrices
-    cov_source = (source_c.T @ source_c) / (source.size(0) - 1)
-    cov_target = (target_c.T @ target_c) / (target.size(0) - 1)
-
-    # Frobenius norm between covariances
-    loss = torch.mean((cov_source - cov_target) ** 2)
-
-    return loss / (4 * d * d)
+    # Frobenius norm
+    loss = torch.mean((cov_s - cov_t) ** 2) / (source.size(1) ** 2)
+    return loss
     
 class FocalLoss(nn.Module):
     def __init__(self, gamma: float = 2.0, reduction: str = "mean") -> None:

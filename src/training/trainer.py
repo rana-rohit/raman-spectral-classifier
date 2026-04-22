@@ -23,6 +23,7 @@ from src.utils.checkpoint import save_checkpoint
 from src.utils.class_subset import subset_mask, remap_targets_to_subset
 from src.utils.logging import ExperimentLogger
 from src.data.augmentation import AugmentationPipeline
+from src.training.losses import coral_loss
 
 class EarlyStopping:
     def __init__(self, patience: int = 10, min_delta: float = 1e-4) -> None: 
@@ -77,7 +78,9 @@ class Trainer:
         self.dann_enabled = False
         self.dann_weight = self.dann_cfg.get("weight", 0.5)
         self.dann_lambda = self.dann_cfg.get("lambda", 1.0)
-
+        self.coral_cfg = self.train_cfg.get("coral", {})
+        self.coral_enabled = self.coral_cfg.get("enabled", False)
+        self.coral_weight = self.coral_cfg.get("weight", 0.5)
         self.monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
         self.gradient_clip = self.train_cfg.get("gradient_clip", 1.0)
 
@@ -202,6 +205,7 @@ class Trainer:
         total_aux_loss = 0.0
         total_consistency_loss = 0.0
         total_l2sp_loss = 0.0
+        total_coral_loss = 0.0
         correct = 0
         total = 0
         t0 = time.time()
@@ -213,8 +217,19 @@ class Trainer:
 
             outputs1 = self._normalize_outputs(self.model(x1))
             outputs2 = None
+            coral_term = self._zero_loss()
+
             if x2 is not None:
                 outputs2 = self._normalize_outputs(self.model(x2))
+
+                if self.coral_enabled:
+                    feat1 = outputs1.get("features")
+                    feat2 = outputs2.get("features")
+
+                    if feat1 is not None and feat2 is not None:
+                        feat1 = nn.functional.normalize(feat1, dim=1)
+                        feat2 = nn.functional.normalize(feat2, dim=1)
+                        coral_term = coral_loss(feat1, feat2)
 
             main_loss1 = self.loss_fn(outputs1["main_logits"], y)
             aux_loss1 = self._compute_aux_loss(outputs1, y)
@@ -230,12 +245,15 @@ class Trainer:
 
             consistency_term = self._compute_consistency_loss(outputs1, outputs2, y)
             l2sp_term = self.l2sp(self.model) if self.l2sp is not None else self._zero_loss()
+            
+            coral_weight = self.coral_weight * min(1.0, epoch / 10)
 
             loss = (
                 main_loss
                 + self.aux_loss_weight * aux_loss
                 + self.consistency_weight * consistency_term
                 + l2sp_term
+                + coral_weight * coral_term
             )
 
             loss.backward()
@@ -248,6 +266,7 @@ class Trainer:
             total_aux_loss += aux_loss.item() * batch_size
             total_consistency_loss += consistency_term.item() * batch_size
             total_l2sp_loss += l2sp_term.item() * batch_size
+            total_coral_loss += coral_term.item() * batch_size
             correct += (outputs1["main_logits"].argmax(dim=-1) == y).sum().item()
             total += batch_size
             all_logits.append(outputs1["main_logits"].detach().cpu())
@@ -265,6 +284,7 @@ class Trainer:
                 "aux_loss": total_aux_loss / total,
                 "consistency_loss": total_consistency_loss / total,
                 "l2sp_loss": total_l2sp_loss / total,
+                "coral_loss": total_coral_loss / total,
                 "domain_loss": 0.0,
                 "accuracy": correct / total,
                 "lr": self.optimizer.param_groups[0]["lr"],
