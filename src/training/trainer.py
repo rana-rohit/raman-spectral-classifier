@@ -24,6 +24,7 @@ from src.utils.class_subset import subset_mask, remap_targets_to_subset
 from src.utils.logging import ExperimentLogger
 from src.data.augmentation import AugmentationPipeline
 from src.training.losses import coral_loss
+from itertools import cycle
 
 class EarlyStopping:
     def __init__(self, patience: int = 10, min_delta: float = 1e-4) -> None: 
@@ -83,6 +84,13 @@ class Trainer:
         self.coral_weight = self.coral_cfg.get("weight", 0.5)
         self.monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
         self.gradient_clip = self.train_cfg.get("gradient_clip", 1.0)
+
+        self.clinical_loader = self.loaders.get("clinical", None)
+
+        if self.clinical_loader is not None:
+            self.clinical_iter = cycle(self.clinical_loader)
+        else:
+            self.clinical_iter = None
 
         self.aux_cfg = cfg.get("multitask", {}).get("auxiliary_shared_head", {})
         self.shared_class_ids = self.aux_cfg.get(
@@ -198,7 +206,6 @@ class Trainer:
 
     def _train_one_epoch(self, epoch: int) -> Dict[str, float]:
         self.augment.set_epoch(epoch)
-        current_epoch = epoch
         self.model.train()
         total_loss = 0.0
         total_main_loss = 0.0
@@ -212,29 +219,46 @@ class Trainer:
         all_logits, all_targets = [], []
 
         for batch in self.loaders["train"]:
+
+            clin_batch = None
+            if self.clinical_iter is not None:
+                clin_batch = next(self.clinical_iter)
+
             x1, x2, y = self._parse_batch(batch)
+            x_clin = None
+
+            if clin_batch is not None:
+                x_clin, _, _ = self._parse_batch(clin_batch, augment=False)
+
             self.optimizer.zero_grad(set_to_none=True)
 
             outputs1 = self._normalize_outputs(self.model(x1))
-            outputs2 = None
             coral_term = self._zero_loss()
 
-            if x2 is not None:
-                outputs2 = self._normalize_outputs(self.model(x2))
+            outputs_clin = None
+
+            if x_clin is not None:
+                outputs_clin = self._normalize_outputs(self.model(x_clin))
 
                 if self.coral_enabled:
-                    feat1 = outputs1.get("features")
-                    feat2 = outputs2.get("features")
+                    feat_ref = outputs1.get("features")
+                    feat_clin = outputs_clin.get("features")
 
-                    if feat1 is not None and feat2 is not None:
-                        feat1 = nn.functional.normalize(feat1, dim=1)
-                        feat2 = nn.functional.normalize(feat2, dim=1)
-                        coral_term = coral_loss(feat1, feat2)
+                    if feat_ref is not None and feat_clin is not None:
+
+                        min_bs = min(feat_ref.size(0), feat_clin.size(0))
+                        feat_ref = feat_ref[:min_bs]
+                        feat_clin = feat_clin[:min_bs]
+
+                        feat_ref = nn.functional.normalize(feat_ref, dim=1)
+                        feat_clin = nn.functional.normalize(feat_clin, dim=1)
+
+                        coral_term = coral_loss(feat_ref, feat_clin)
 
             main_loss1 = self.loss_fn(outputs1["main_logits"], y)
             aux_loss1 = self._compute_aux_loss(outputs1, y)
 
-            if outputs2 is not None and self.supervised_on_both_views:
+            if False:
                 main_loss2 = self.loss_fn(outputs2["main_logits"], y)
                 aux_loss2 = self._compute_aux_loss(outputs2, y)
                 main_loss = 0.5 * (main_loss1 + main_loss2)
@@ -243,7 +267,7 @@ class Trainer:
                 main_loss = main_loss1
                 aux_loss = aux_loss1
 
-            consistency_term = self._compute_consistency_loss(outputs1, outputs2, y)
+            consistency_term = self._zero_loss()
             l2sp_term = self.l2sp(self.model) if self.l2sp is not None else self._zero_loss()
             
             coral_weight = self.coral_weight * min(1.0, epoch / 10)
@@ -326,45 +350,35 @@ class Trainer:
             }
         raise TypeError(f"Unsupported model output type: {type(outputs)!r}")
 
-    def _parse_batch(self, batch):
+    def _parse_batch(self, batch, augment=True):
         if isinstance(batch, dict):
             x1 = batch["x1"]
 
-            if self.model.training:
+            if self.model.training and augment:
                 x1 = x1.cpu().numpy()
                 x1 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x1])
                 x1 = torch.from_numpy(x1).float().contiguous()
 
             x1 = x1.to(self.device)
 
-            x2 = batch.get("x2")
-            if x2 is not None:
-                if self.model.training:
-                    x2 = x2.cpu().numpy()
-                    x2 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x2])
-                    x2 = torch.from_numpy(x2).float().contiguous()
+            y = batch["y"].to(self.device)   
 
-                x2 = x2.to(self.device)
+            x2 = None
 
-            y = batch["y"].to(self.device)
             return x1, x2, y
 
         if isinstance(batch, (tuple, list)) and len(batch) == 2:
             x, y = batch
 
             if isinstance(x, (tuple, list)) and len(x) == 2:
-                x1, x2 = x
+                x1, _ = x 
 
-                if self.model.training:
+                if self.model.training and augment:
                     x1 = x1.cpu().numpy()
                     x1 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x1])
                     x1 = torch.from_numpy(x1).float().contiguous()
 
-                    x2 = x2.cpu().numpy()
-                    x2 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x2])
-                    x2 = torch.from_numpy(x2).float().contiguous()
-
-                return x1.to(self.device), x2.to(self.device), y.to(self.device)
+                return x1.to(self.device), None, y.to(self.device)
 
             return x.to(self.device), None, y.to(self.device)
 
