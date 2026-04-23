@@ -318,7 +318,7 @@ class Trainer:
 
                     total_domain_loss += domain_loss.item() * batch_size
 
-                    loss = loss + 0.1 * domain_loss
+                    loss = loss + 0.3 * domain_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
