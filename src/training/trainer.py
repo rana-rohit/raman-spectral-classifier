@@ -14,6 +14,7 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.autograd import Function
 
 from src.evaluation.metrics import compute_metrics
 from src.training.losses import consistency_loss, get_loss, coral_loss
@@ -46,6 +47,16 @@ class EarlyStopping:
     @property
     def best(self) -> float:
         return self._best
+
+class GradReverse(Function):
+    @staticmethod
+    def forward(ctx, x, lambda_):
+        ctx.lambda_ = lambda_
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return -ctx.lambda_ * grad_output, None
 
 class Trainer:
     def __init__(
@@ -274,7 +285,8 @@ class Trainer:
                 + coral_weight * coral_term
             )
             
-            # 🔥 DANN (correct placement)
+            # DANN
+            domain_loss = torch.tensor(0.0).to(self.device)
             if self.dann_enabled and outputs_clin is not None:
 
                 feat_ref = outputs1.get("features")
@@ -289,20 +301,24 @@ class Trainer:
                     feat_all = torch.cat([feat_ref, feat_clin], dim=0)
 
                     domain_labels = torch.cat([
-                        torch.zeros(feat_ref.size(0)),
-                        torch.ones(feat_clin.size(0))
-                    ]).long().to(self.device)
+                        torch.zeros(feat_ref.size(0), dtype=torch.long, device=self.device),
+                        torch.ones(feat_clin.size(0), dtype=torch.long, device=self.device)
+                    ])
 
-                    feat_all = feat_all.detach() + (feat_all - feat_all.detach()) * (-1.0)
+                    feat_all = GradReverse.apply(feat_all, self.dann_weight)
+
                     domain_logits = self.model.domain_classifier(feat_all)
 
                     domain_loss = nn.CrossEntropyLoss()(domain_logits, domain_labels)
+                    
+                    if epoch == 1 and total == 0:
+                        print(f"DOMAIN LOSS SAMPLE: {domain_loss.item():.4f}")
 
                     batch_size = len(y)  
 
                     total_domain_loss += domain_loss.item() * batch_size
 
-                    loss = loss + self.dann_weight * domain_loss
+                    loss = loss + 0.1 * domain_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
@@ -319,6 +335,9 @@ class Trainer:
             total += batch_size
             all_logits.append(outputs1["main_logits"].detach().cpu())
             all_targets.append(y.detach().cpu())
+        
+        avg_domain_loss = total_domain_loss / max(total, 1)
+        print(f"[Epoch {epoch}] Avg Domain Loss: {avg_domain_loss:.4f}")
 
         metrics = compute_metrics(
             torch.cat(all_logits, dim=0),
