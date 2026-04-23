@@ -10,7 +10,7 @@ dataset:
   n_classes_full: 30
   n_classes_clinical: 5
   shared_classes: [0, 2, 3, 5, 6]
-  already_normalised: true
+  already_normalised: false
 
 splits:
   reference:

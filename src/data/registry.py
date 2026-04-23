@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from src.data.split_roles import SplitRole, role_from_str, ROLE_PERMISSIONS
+from src.data.split_roles import SplitRole, role_from_str
 
 
 @dataclass
@@ -88,7 +88,7 @@ class DataRegistry:
                 f"Check configs/data/splits.yaml path for split '{split_name}'"
             )
 
-        meta.X = np.load(x_path)
+        meta.X = np.load(x_path, mmap_mode='r')
         meta.y = np.load(y_path).astype(np.int64)
         meta.loaded = True
 
@@ -101,6 +101,12 @@ class DataRegistry:
         return self
 
     def _validate_shape(self, name: str, meta: SplitMeta) -> None:
+        if not np.isfinite(meta.X).any():
+            raise ValueError(f"[DataRegistry] Split '{name}' contains NaN/Inf in X")
+
+        if not np.isfinite(meta.y).all():
+            raise ValueError(f"[DataRegistry] Split '{name}' contains NaN/Inf in y")
+
         assert meta.X.shape[1] == self._signal_length, (
             f"[DataRegistry] Split '{name}': expected signal length "
             f"{self._signal_length}, got {meta.X.shape[1]}"
@@ -114,10 +120,15 @@ class DataRegistry:
     # Access
     # ------------------------------------------------------------------ #
 
-    def get_arrays(self, split_name: str) -> Tuple[np.ndarray, np.ndarray]:
-        """Return (X, y) for a split. Loads from disk if not yet loaded."""
+    def get_arrays(self, split_name: str, allow_holdout: bool = False):
         self.load(split_name)
         meta = self._get_meta(split_name)
+
+        if meta.role == SplitRole.HOLDOUT and not allow_holdout:
+            raise RuntimeError(
+                f"[DataRegistry] Split '{split_name}' is HOLDOUT and cannot be used during training"
+            )
+
         return meta.X, meta.y
 
     def get_meta(self, split_name: str) -> SplitMeta:

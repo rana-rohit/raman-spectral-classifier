@@ -20,12 +20,10 @@ preprocessing:
     max_val:  3.0
 
   pipeline:
-    - snv_normalization
     - savitzky_golay
+    - snv_normalization
     - clip
 
-# Derivative preprocessing for the second input channel.
-# This is handled separately by the dataloader, not the main pipeline.
 derivative:
   enabled: true
   window_length: 11

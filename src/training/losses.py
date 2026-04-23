@@ -23,7 +23,7 @@ class LabelSmoothingCrossEntropy(nn.Module):
         with torch.no_grad():
             smooth_targets = torch.full_like(
                 log_probs,
-                self.smoothing / (n_classes - 1),
+                self.smoothing / max(1, (n_classes - 1))
             )
             smooth_targets.scatter_(-1, targets.unsqueeze(-1), 1.0 - self.smoothing)
 
@@ -54,7 +54,7 @@ def coral_loss(source, target):
     cov_t = (target.T @ target) / (target.size(0) - 1)
 
     # Frobenius norm
-    loss = torch.mean((cov_s - cov_t) ** 2) / (source.size(1) ** 2)
+    loss = torch.mean((cov_s - cov_t) ** 2)
     return loss
     
 class FocalLoss(nn.Module):
@@ -65,7 +65,7 @@ class FocalLoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         ce_loss = F.cross_entropy(logits, targets, reduction="none")
-        pt = torch.exp(-ce_loss)
+        pt = torch.exp(-ce_loss.detach())
         focal = (1 - pt) ** self.gamma * ce_loss
 
         if self.reduction == "mean":
@@ -91,7 +91,7 @@ def consistency_loss(
         return torch.mean((probs_a - probs_b) ** 2)
     if loss_type == "kl_probs":
         return 0.5 * (
-            F.kl_div(probs_a.log(), probs_b, reduction="batchmean")
+            F.kl_div(torch.log(probs_a + 1e-8), probs_b, reduction="batchmean")
             + F.kl_div(probs_b.log(), probs_a, reduction="batchmean")
         )
     raise ValueError(f"Unknown consistency loss '{loss_type}'")

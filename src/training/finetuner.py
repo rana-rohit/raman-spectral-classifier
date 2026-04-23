@@ -142,10 +142,7 @@ def _subsample_loader(
     rng = np.random.default_rng(42)
     for cls in range(n_classes):
         idx = np.where(targets == cls)[0]
-        if len(idx) >= n_shots:
-            chosen = rng.choice(idx, n_shots, replace=False)
-        else:
-            chosen = idx
+        chosen = rng.choice(idx, n_shots, replace=True)
         selected.extend(chosen.tolist())
 
     subset = Subset(dataset, selected)
@@ -163,7 +160,11 @@ def _subsample_loader(
 
 def _freeze_stem(model: nn.Module) -> None:
     for name, param in model.named_parameters():
-        if "head" not in name and "classifier" not in name and "fc" not in name:
+        if (
+            "classifier" not in name
+            and "domain_classifier" not in name
+            and "fc" not in name
+        ):
             param.requires_grad = False
 
 

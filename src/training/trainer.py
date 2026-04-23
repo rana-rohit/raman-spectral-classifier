@@ -16,14 +16,13 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from src.evaluation.metrics import compute_metrics
-from src.training.losses import consistency_loss, get_loss
+from src.training.losses import consistency_loss, get_loss, coral_loss
 from src.training.regularizers import L2SPRegularizer
 from src.training.scheduler import get_scheduler
 from src.utils.checkpoint import save_checkpoint
 from src.utils.class_subset import subset_mask, remap_targets_to_subset
 from src.utils.logging import ExperimentLogger
 from src.data.augmentation import AugmentationPipeline
-from src.training.losses import coral_loss
 from itertools import cycle
 
 class EarlyStopping:
@@ -76,9 +75,8 @@ class Trainer:
         self.n_classes = n_classes
         self.reference_state = reference_state
         self.dann_cfg = self.train_cfg.get("dann", {})
-        self.dann_enabled = False
+        self.dann_enabled = self.dann_cfg.get("enabled", False)
         self.dann_weight = self.dann_cfg.get("weight", 0.5)
-        self.dann_lambda = self.dann_cfg.get("lambda", 1.0)
         self.coral_cfg = self.train_cfg.get("coral", {})
         self.coral_enabled = self.coral_cfg.get("enabled", False)
         self.coral_weight = self.coral_cfg.get("weight", 0.5)
@@ -125,6 +123,7 @@ class Trainer:
             self.device = torch.device("cpu")
 
         self.model.to(self.device)
+        
         # Freeze BatchNorm running statistics (prevents collapse with multi-forward passes)
         for m in self.model.modules():
             if isinstance(m, nn.BatchNorm1d):
@@ -213,6 +212,7 @@ class Trainer:
         total_consistency_loss = 0.0
         total_l2sp_loss = 0.0
         total_coral_loss = 0.0
+        total_domain_loss = 0.0
         correct = 0
         total = 0
         t0 = time.time()
@@ -238,6 +238,7 @@ class Trainer:
             outputs_clin = None
 
             if x_clin is not None:
+
                 outputs_clin = self._normalize_outputs(self.model(x_clin))
 
                 if self.coral_enabled:
@@ -250,28 +251,21 @@ class Trainer:
                         feat_ref = feat_ref[:min_bs]
                         feat_clin = feat_clin[:min_bs]
 
-                        feat_ref = nn.functional.normalize(feat_ref, dim=1)
-                        feat_clin = nn.functional.normalize(feat_clin, dim=1)
-
                         coral_term = coral_loss(feat_ref, feat_clin)
+                            
+            main_loss = self.loss_fn(outputs1["main_logits"], y)
+            aux_loss = self._compute_aux_loss(outputs1, y)
 
-            main_loss1 = self.loss_fn(outputs1["main_logits"], y)
-            aux_loss1 = self._compute_aux_loss(outputs1, y)
+            outputs2 = None
+            if x2 is not None:
+                outputs2 = self._normalize_outputs(self.model(x2))
 
-            if False:
-                main_loss2 = self.loss_fn(outputs2["main_logits"], y)
-                aux_loss2 = self._compute_aux_loss(outputs2, y)
-                main_loss = 0.5 * (main_loss1 + main_loss2)
-                aux_loss = 0.5 * (aux_loss1 + aux_loss2)
-            else:
-                main_loss = main_loss1
-                aux_loss = aux_loss1
+            consistency_term = self._compute_consistency_loss(outputs1, outputs2, y)
 
-            consistency_term = self._zero_loss()
             l2sp_term = self.l2sp(self.model) if self.l2sp is not None else self._zero_loss()
             
-            coral_weight = self.coral_weight * min(1.0, epoch / 10)
-
+            coral_weight = self.coral_weight
+            
             loss = (
                 main_loss
                 + self.aux_loss_weight * aux_loss
@@ -279,6 +273,36 @@ class Trainer:
                 + l2sp_term
                 + coral_weight * coral_term
             )
+            
+            # 🔥 DANN (correct placement)
+            if self.dann_enabled and outputs_clin is not None:
+
+                feat_ref = outputs1.get("features")
+                feat_clin = outputs_clin.get("features")
+
+                if feat_ref is not None and feat_clin is not None:
+
+                    min_bs = min(feat_ref.size(0), feat_clin.size(0))
+                    feat_ref = feat_ref[:min_bs]
+                    feat_clin = feat_clin[:min_bs]
+
+                    feat_all = torch.cat([feat_ref, feat_clin], dim=0)
+
+                    domain_labels = torch.cat([
+                        torch.zeros(feat_ref.size(0)),
+                        torch.ones(feat_clin.size(0))
+                    ]).long().to(self.device)
+
+                    feat_all = feat_all.detach() + (feat_all - feat_all.detach()) * (-1.0)
+                    domain_logits = self.model.domain_classifier(feat_all)
+
+                    domain_loss = nn.CrossEntropyLoss()(domain_logits, domain_labels)
+
+                    batch_size = len(y)  
+
+                    total_domain_loss += domain_loss.item() * batch_size
+
+                    loss = loss + self.dann_weight * domain_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
@@ -309,7 +333,7 @@ class Trainer:
                 "consistency_loss": total_consistency_loss / total,
                 "l2sp_loss": total_l2sp_loss / total,
                 "coral_loss": total_coral_loss / total,
-                "domain_loss": 0.0,
+                "domain_loss": total_domain_loss / total,
                 "accuracy": correct / total,
                 "lr": self.optimizer.param_groups[0]["lr"],
                 "epoch_time": time.time() - t0,
@@ -356,8 +380,16 @@ class Trainer:
 
             if self.model.training and augment:
                 x1 = x1.cpu().numpy()
-                x1 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x1])
-                x1 = torch.from_numpy(x1).float().contiguous()
+                x1_aug = []
+                for sample in x1:
+                    augmented = self.augment(sample[0][None, :])[0]
+                    if sample.shape[0] > 1:
+                        augmented = np.stack([augmented, sample[1]])
+                    else:
+                        augmented = augmented[None, :]
+                    x1_aug.append(augmented)
+
+                x1 = torch.from_numpy(np.array(x1_aug)).float().contiguous()
 
             x1 = x1.to(self.device)
 
@@ -375,8 +407,19 @@ class Trainer:
 
                 if self.model.training and augment:
                     x1 = x1.cpu().numpy()
-                    x1 = np.array([self.augment(x[0][None, :])[0][None, :] for x in x1])
-                    x1 = torch.from_numpy(x1).float().contiguous()
+                    x1_aug = []
+
+                    for sample in x1:
+                        augmented = self.augment(sample[0][None, :])[0]
+
+                        if sample.shape[0] > 1:
+                            augmented = np.stack([augmented, sample[1]])
+                        else:
+                            augmented = augmented[None, :]
+
+                        x1_aug.append(augmented)
+
+                    x1 = torch.from_numpy(np.array(x1_aug)).float().contiguous()
 
                 return x1.to(self.device), None, y.to(self.device)
 

@@ -45,7 +45,6 @@ def build_all_loaders(
             window_length=derivative_cfg.get("window_length", 11),
             polyorder=derivative_cfg.get("polyorder", 3),
         )
-        print("Derivative enabled:", derivative_cfg)
 
     loaders = {}
 
@@ -54,15 +53,9 @@ def build_all_loaders(
 
     if deriv_transform is not None:
         dX_ref = deriv_transform.transform(X_ref)
-        print("dX_ref shape:", dX_ref.shape)
         assert dX_ref.shape == X_ref.shape, "Derivative shape mismatch"
     else:
         dX_ref = None
-
-    if dX_ref is not None:
-        print("X_ref:", X_ref.shape)
-        print("y_ref:", y_ref.shape)
-        print("dX_ref:", None if dX_ref is None else dX_ref.shape)
 
     train_split, val_split = make_train_val_split(
         X_ref, y_ref,
@@ -102,6 +95,31 @@ def build_all_loaders(
         seed=seed + 2,
         derivative_X=dX_test,
     )
+    
+    # -----------------------------
+    # CLINICAL LOADER (for domain adaptation / DANN)
+    # -----------------------------
+    try:
+        X_clin1, _ = registry.get_arrays("2018clinical")
+        X_clin2, _ = registry.get_arrays("2019clinical")
+
+        X_clin = np.concatenate([X_clin1, X_clin2], axis=0)
+
+        X_clin = preprocessor.transform(X_clin)
+        dX_clin = _apply_deriv(deriv_transform, X_clin)
+
+        loaders["clinical"] = _make_loader(
+            X_clin,
+            np.zeros(len(X_clin), dtype=np.int64),
+            batch_size=batch_size,
+            num_workers=num_workers,
+            shuffle=True,
+            seed=seed + 5,
+            derivative_X=dX_clin,
+        )
+
+    except Exception as e:
+        print("WARNING: Clinical data not found:", e)
 
     X_ft, y_ft = registry.get_arrays("finetune")
     X_ft = preprocessor.transform(X_ft)

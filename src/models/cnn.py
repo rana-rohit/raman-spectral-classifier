@@ -70,19 +70,6 @@ class CNN1D(nn.Module):
 
         c1, c2, c3, c4 = channels
         k1, k2, k3, k4 = kernel_sizes
-        
-        # Spectral attention (learns important regions)
-        self.attention = nn.Sequential(
-            nn.Conv1d(
-                in_channels=in_channels,
-                out_channels=in_channels,
-                kernel_size=7,
-                padding=3,
-                groups=in_channels,
-                bias=True,
-            ),
-            nn.Sigmoid()
-        )
 
         self.features = nn.Sequential(
             ConvBlock(in_channels, c1, k1),
@@ -132,7 +119,6 @@ class CNN1D(nn.Module):
         return {
             "main_logits": self.classifier(feat),
             "features": feat,
-            "domain_logits": self.domain_classifier(feat),
         }
 
     def get_feature_maps(self, x: torch.Tensor) -> torch.Tensor:
@@ -140,15 +126,8 @@ class CNN1D(nn.Module):
 
     def _init_weights(self) -> None:
         for module in self.modules():
-
-            # ONLY initialize attention layer to zero
-            if module is self.attention[0]:
-                nn.init.zeros_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-
             # normal conv
-            elif isinstance(module, nn.Conv1d):
+            if isinstance(module, nn.Conv1d):
                 nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)

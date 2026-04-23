@@ -84,8 +84,7 @@ class SpectralDataset(Dataset):
             dx_mean = dx.mean()
             dx_std = dx.std()
 
-            if dx_std < 1e-8:
-                dx_std = 1.0
+            dx_std = max(dx.std(), 1e-6)
         
             # Normalize derivative per sample to stabilize scale
             dx = (dx - dx_mean) / dx_std
