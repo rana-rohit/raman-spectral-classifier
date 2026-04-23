@@ -85,7 +85,7 @@ def build_all_loaders(
         derivative_X=dX_val,
     )
 
-    X_test, y_test = registry.get_arrays("test")
+    X_test, y_test = registry.get_arrays("test", allow_holdout=True)
     X_test = preprocessor.transform(X_test)
     dX_test = _apply_deriv(deriv_transform, X_test)
     loaders["test"] = _make_loader(
