@@ -177,6 +177,11 @@ def _make_finetune_cfg(base_cfg: dict, freeze_epochs: int) -> dict:
     del freeze_epochs
     cfg = copy.deepcopy(base_cfg)
     ft = cfg.setdefault("training", {})
+
+    ft["dann"] = {
+        "enabled": False
+    }
+
     ft["lr"] = ft.get("finetune_lr", 1e-4)
     ft["max_epochs"] = ft.get("finetune_epochs", 50)
     ft["early_stopping_patience"] = ft.get("finetune_patience", 8)
