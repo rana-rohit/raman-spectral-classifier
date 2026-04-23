@@ -4,9 +4,9 @@
 # =============================================================================
 
 training:
-  max_epochs: 2
-  batch_size: 32
-  num_workers: 0
+  max_epochs: 100
+  batch_size: 128
+  num_workers: 2
 
   optimizer: adamw
   lr: 0.001
@@ -15,9 +15,10 @@ training:
   loss: cross_entropy
   loss_kwargs: {}
 
-  scheduler: cosine
+  scheduler: warmup_cosine
   scheduler_cfg:
-    T_max: 2
+    warmup_epochs: 5
+    total_epochs: 100
     eta_min: 0.000001
 
   early_stopping_patience: 10
@@ -43,7 +44,7 @@ training:
   
   dann:
     enabled: true
-    weight: 0.5
+    weight: 0.1
   
   coral:
     enabled: false
