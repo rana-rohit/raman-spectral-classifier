@@ -30,7 +30,7 @@ def finetune(
     exp_dir: str,
     n_shots_per_class: Optional[int] = None,
     freeze_epochs: int = 0,
-    n_classes: int = 30,
+    n_classes: int = None,
 ) -> Dict:
     print(f"\n  Loading pretrained weights from {pretrained_exp_dir}")
     checkpoint = load_best_model(pretrained_exp_dir, model)
@@ -44,29 +44,31 @@ def finetune(
     }
 
     base_dataset = loaders["clinical"].dataset
+    if n_classes is None:
+        n_classes = base_dataset.n_classes
 
-    shared_classes = cfg["dataset"]["shared_classes"]
-    n_classes = len(shared_classes)
     ft_dataset = SpectralDataset(
         X=base_dataset.X,
         y=base_dataset.y,
         augmentation=base_dataset.augmentation,
         training=True,
-        class_filter=shared_classes,
+        class_filter=None,
         n_views=1,
         derivative_X=base_dataset.derivative_X
     )
     
     ft_loader = DataLoader(
     ft_dataset,
-    batch_size=loaders["clinical"].batch_size,
+    batch_size=cfg["training"].get("finetune_batch_size", loaders["clinical"].batch_size),
     shuffle=True,
     num_workers=loaders["clinical"].num_workers,
     pin_memory=loaders["clinical"].pin_memory,
     drop_last=False
     )
     in_features = model.classifier[-1].in_features
-    model.classifier[-1] = nn.Linear(in_features, len(shared_classes))
+    if n_classes is None:
+        n_classes = base_dataset.n_classes
+    model.classifier[-1] = nn.Linear(in_features, n_classes)
 
     if n_shots_per_class is not None:
         ft_loader = _subsample_loader(ft_loader, n_shots_per_class, n_classes)
