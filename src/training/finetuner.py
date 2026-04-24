@@ -43,7 +43,7 @@ def finetune(
         for name, param in model.named_parameters()
     }
 
-    ft_loader = loaders["finetune"]
+    ft_loader = loaders["clinical"]
     if n_shots_per_class is not None:
         ft_loader = _subsample_loader(ft_loader, n_shots_per_class, n_classes)
         n_samples = n_shots_per_class * n_classes
