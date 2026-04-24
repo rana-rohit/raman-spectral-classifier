@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader, Subset
 from src.evaluation.evaluator import ModelEvaluator
 from src.training.trainer import build_trainer
 from src.utils.checkpoint import load_best_model
-
+from src.data.dataset import SpectralDataset
 
 def finetune(
     model: nn.Module,
@@ -43,7 +43,31 @@ def finetune(
         for name, param in model.named_parameters()
     }
 
-    ft_loader = loaders["clinical"]
+    base_dataset = loaders["clinical"].dataset
+
+    shared_classes = cfg["dataset"]["shared_classes"]
+    n_classes = len(shared_classes)
+    ft_dataset = SpectralDataset(
+        X=base_dataset.X,
+        y=base_dataset.y,
+        augmentation=base_dataset.augmentation,
+        training=True,
+        class_filter=shared_classes,
+        n_views=1,
+        derivative_X=base_dataset.derivative_X
+    )
+    
+    ft_loader = DataLoader(
+    ft_dataset,
+    batch_size=loaders["clinical"].batch_size,
+    shuffle=True,
+    num_workers=loaders["clinical"].num_workers,
+    pin_memory=loaders["clinical"].pin_memory,
+    drop_last=False
+    )
+    in_features = model.classifier[-1].in_features
+    model.classifier[-1] = nn.Linear(in_features, len(shared_classes))
+
     if n_shots_per_class is not None:
         ft_loader = _subsample_loader(ft_loader, n_shots_per_class, n_classes)
         n_samples = n_shots_per_class * n_classes
