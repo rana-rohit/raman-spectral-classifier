@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from src.data.dataset import SpectralDataset, make_train_val_split
 from src.data.preprocessing import SpectralPreprocessor, FirstDerivative
 from src.data.registry import DataRegistry
-
+from sklearn.model_selection import train_test_split
 
 def build_all_loaders(
     registry: DataRegistry,
@@ -107,16 +107,44 @@ def build_all_loaders(
         y_clin = np.concatenate([y_clin1, y_clin2], axis=0)
 
         X_clin = preprocessor.transform(X_clin)
-        dX_clin = _apply_deriv(deriv_transform, X_clin)
 
-        loaders["clinical"] = _make_loader(
+        
+        # Stratified split
+        X_clin_tr, X_clin_val, y_clin_tr, y_clin_val = train_test_split(
             X_clin,
             y_clin,
+            test_size=0.2,
+            stratify=y_clin,
+            random_state=seed,
+        )
+
+        # Apply derivative separately
+        dX_clin_tr = _apply_deriv(deriv_transform, X_clin_tr)
+        dX_clin_val = _apply_deriv(deriv_transform, X_clin_val)
+
+        # Train loader
+        loaders["clinical_train"] = _make_loader(
+            X_clin_tr,
+            y_clin_tr,
+            augmentation=_clone_augmentation(augmentation),
+            training=True,
             batch_size=batch_size,
             num_workers=num_workers,
             shuffle=True,
             seed=seed + 5,
-            derivative_X=dX_clin,
+            n_views=train_views,
+            derivative_X=dX_clin_tr,
+        )
+
+        # Validation loader
+        loaders["clinical_val"] = _make_loader(
+            X_clin_val,
+            y_clin_val,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            shuffle=False,
+            seed=seed + 6,
+            derivative_X=dX_clin_val,
         )
 
     except Exception as e:
