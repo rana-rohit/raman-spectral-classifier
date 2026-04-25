@@ -43,9 +43,20 @@ def finetune(
         for name, param in model.named_parameters()
     }
 
-    base_dataset = loaders["clinical"].dataset
+    base_dataset = loaders["finetune"].dataset
     if n_classes is None:
         n_classes = base_dataset.n_classes
+
+    # --- Label sanity check ---
+    unique_labels = np.unique(base_dataset.y)
+    print(f"  Finetune dataset: {len(base_dataset)} samples, "
+          f"{len(unique_labels)} classes, labels {unique_labels[:10]}...")
+    if len(unique_labels) <= 1:
+        raise ValueError(
+            f"Finetune labels contain only {len(unique_labels)} unique class(es): "
+            f"{unique_labels.tolist()}. This will cause training collapse. "
+            f"Check that the correct dataset is being used."
+        )
 
     ft_dataset = SpectralDataset(
         X=base_dataset.X,
@@ -56,19 +67,25 @@ def finetune(
         n_views=1,
         derivative_X=base_dataset.derivative_X
     )
-    
+
     ft_loader = DataLoader(
-    ft_dataset,
-    batch_size=cfg["training"].get("finetune_batch_size", loaders["clinical"].batch_size),
-    shuffle=True,
-    num_workers=loaders["clinical"].num_workers,
-    pin_memory=loaders["clinical"].pin_memory,
-    drop_last=False
+        ft_dataset,
+        batch_size=cfg["training"].get("finetune_batch_size", loaders["finetune"].batch_size),
+        shuffle=True,
+        num_workers=loaders["finetune"].num_workers,
+        pin_memory=loaders["finetune"].pin_memory,
+        drop_last=False,
     )
+
+    # Only reset the classifier head if the number of classes has changed;
+    # preserves the pretrained class-feature mapping when possible.
     in_features = model.classifier[-1].in_features
-    if n_classes is None:
-        n_classes = base_dataset.n_classes
-    model.classifier[-1] = nn.Linear(in_features, n_classes)
+    current_out = model.classifier[-1].out_features
+    if n_classes != current_out:
+        model.classifier[-1] = nn.Linear(in_features, n_classes)
+        print(f"  Classifier head reset: {current_out} → {n_classes} classes")
+    else:
+        print(f"  Keeping pretrained classifier head ({n_classes} classes)")
 
     if n_shots_per_class is not None:
         ft_loader = _subsample_loader(ft_loader, n_shots_per_class, n_classes)
@@ -204,9 +221,15 @@ def _make_finetune_cfg(base_cfg: dict, freeze_epochs: int) -> dict:
     cfg = copy.deepcopy(base_cfg)
     ft = cfg.setdefault("training", {})
 
+    # Keep DANN active during finetuning with reduced weight for
+    # continued domain alignment (was previously force-disabled).
     ft["dann"] = {
-        "enabled": False
+        "enabled": ft.get("dann", {}).get("enabled", False),
+        "weight": ft.get("dann", {}).get("weight", 0.5) * 0.5,
     }
+
+    # Allow BatchNorm to adapt to the finetune domain distribution
+    ft["freeze_bn"] = False
 
     ft["lr"] = ft.get("finetune_lr", 1e-4)
     ft["max_epochs"] = ft.get("finetune_epochs", 50)

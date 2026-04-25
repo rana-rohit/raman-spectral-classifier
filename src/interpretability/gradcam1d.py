@@ -63,7 +63,7 @@ class GradCAM1D:
             feature_extractor.register_forward_hook(save_activation)
         )
         self._hooks.append(
-            feature_extractor.register_backward_hook(save_gradient)  # type: ignore
+            feature_extractor.register_full_backward_hook(save_gradient)
         )
 
     def _remove_hooks(self) -> None:
@@ -97,9 +97,15 @@ class GradCAM1D:
 
         self.model.eval()
         x = x.requires_grad_(True)
+        x = x.to(next(self.model.parameters()).device)
 
         # Forward pass
-        logits = self.model(x)
+        outputs = self.model(x)
+
+        if isinstance(outputs, dict):
+            logits = outputs["main_logits"]
+        else:
+            logits = outputs
 
         if target_class is None:
             target_class = logits.argmax(dim=-1).item()

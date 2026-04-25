@@ -100,17 +100,18 @@ def build_all_loaders(
     # CLINICAL LOADER (for domain adaptation / DANN)
     # -----------------------------
     try:
-        X_clin1, _ = registry.get_arrays("2018clinical")
-        X_clin2, _ = registry.get_arrays("2019clinical")
+        X_clin1, y_clin1 = registry.get_arrays("2018clinical")
+        X_clin2, y_clin2 = registry.get_arrays("2019clinical")
 
         X_clin = np.concatenate([X_clin1, X_clin2], axis=0)
+        y_clin = np.concatenate([y_clin1, y_clin2], axis=0)
 
         X_clin = preprocessor.transform(X_clin)
         dX_clin = _apply_deriv(deriv_transform, X_clin)
 
         loaders["clinical"] = _make_loader(
             X_clin,
-            np.zeros(len(X_clin), dtype=np.int64),
+            y_clin,
             batch_size=batch_size,
             num_workers=num_workers,
             shuffle=True,

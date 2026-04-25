@@ -6,8 +6,8 @@
 augmentation:
   apply_probability: 0.3
   seed: 42
-  clip_min: -2.0
-  clip_max: 2.0
+  clip_min: -3.0
+  clip_max: 3.0
 
   steps:
     gaussian_noise:

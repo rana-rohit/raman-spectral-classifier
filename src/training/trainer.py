@@ -135,11 +135,14 @@ class Trainer:
 
         self.model.to(self.device)
         
-        # Freeze BatchNorm running statistics (prevents collapse with multi-forward passes)
-        for m in self.model.modules():
-            if isinstance(m, nn.BatchNorm1d):
-                m.eval()                 # freeze running mean/var
-                m.requires_grad_(True)   # still allow gamma/beta to learn
+        # Optionally freeze BatchNorm running statistics.
+        # Useful during pretraining with multi-forward passes, but should
+        # be disabled during finetuning to allow domain adaptation.
+        if self.train_cfg.get("freeze_bn", True):
+            for m in self.model.modules():
+                if isinstance(m, nn.BatchNorm1d):
+                    m.eval()                 # freeze running mean/var
+                    m.requires_grad_(True)   # still allow gamma/beta to learn
 
         print(f"  Device: {self.device}")
         self.early_stopping = EarlyStopping(
