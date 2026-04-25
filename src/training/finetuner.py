@@ -15,12 +15,10 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Subset
 
 from src.evaluation.evaluator import ModelEvaluator
 from src.training.trainer import build_trainer
 from src.utils.checkpoint import load_best_model
-from src.data.dataset import SpectralDataset
 
 def finetune(
     model: nn.Module,
@@ -42,57 +40,35 @@ def finetune(
         name: param.detach().cpu().clone()
         for name, param in model.named_parameters()
     }
-
-    base_dataset = loaders["finetune"].dataset
-    if n_classes is None:
-        n_classes = base_dataset.n_classes
-
-    # --- Label sanity check ---
-    unique_labels = np.unique(base_dataset.y)
-    print(f"  Finetune dataset: {len(base_dataset)} samples, "
-          f"{len(unique_labels)} classes, labels {unique_labels[:10]}...")
-    if len(unique_labels) <= 1:
-        raise ValueError(
-            f"Finetune labels contain only {len(unique_labels)} unique class(es): "
-            f"{unique_labels.tolist()}. This will cause training collapse. "
-            f"Check that the correct dataset is being used."
-        )
-
-    ft_dataset = SpectralDataset(
-        X=base_dataset.X,
-        y=base_dataset.y,
-        augmentation=base_dataset.augmentation,
-        training=True,
-        class_filter=None,
-        n_views=1,
-        derivative_X=base_dataset.derivative_X
-    )
-
-    ft_loader = DataLoader(
-        ft_dataset,
-        batch_size=cfg["training"].get("finetune_batch_size", loaders["finetune"].batch_size),
-        shuffle=True,
-        num_workers=loaders["finetune"].num_workers,
-        pin_memory=loaders["finetune"].pin_memory,
-        drop_last=False,
-    )
-
+    
+    print("Finetune using clinical domain:")
+    print("Train samples:", len(loaders["clinical_train"].dataset))
+    print("Val samples:", len(loaders["clinical_val"].dataset))
+    
     # Only reset the classifier head if the number of classes has changed;
     # preserves the pretrained class-feature mapping when possible.
+    if n_classes is None:
+        n_classes = len(np.unique(loaders["clinical_train"].dataset.y))
+        print(f"  Detected {n_classes} clinical classes")
+    
     in_features = model.classifier[-1].in_features
     current_out = model.classifier[-1].out_features
     if n_classes != current_out:
         model.classifier[-1] = nn.Linear(in_features, n_classes)
-        print(f"  Classifier head reset: {current_out} → {n_classes} classes")
+        print(f"  Classifier head reset to {n_classes} classes (clinical)")
     else:
         print(f"  Keeping pretrained classifier head ({n_classes} classes)")
 
-    if n_shots_per_class is not None:
-        ft_loader = _subsample_loader(ft_loader, n_shots_per_class, n_classes)
-        n_samples = n_shots_per_class * n_classes
-        print(f"  Few-shot: using {n_shots_per_class} samples/class ({n_samples} total)")
 
-    local_loaders = {**loaders, "train": ft_loader}
+    train_loader = loaders["clinical_train"]
+    val_loader = loaders["clinical_val"]
+
+    local_loaders = {
+        **loaders,
+        "train": train_loader,
+        "val": val_loader,
+    }
+    
     ft_cfg = _make_finetune_cfg(cfg, freeze_epochs)
     Path(exp_dir).mkdir(parents=True, exist_ok=True)
 
@@ -148,7 +124,7 @@ def finetune(
         device=_infer_model_device(model),
         cfg=cfg,
     )
-    val_metrics = evaluator.evaluate_split(loaders["val"], "val")
+    val_metrics = evaluator.evaluate_split(loaders["clinical_val"], "clinical_val")
     test_metrics = evaluator.evaluate_split(loaders["test"], "test")
     ood_results = {}
     for ood_name, ood_loader in loaders.get("ood", {}).items():
