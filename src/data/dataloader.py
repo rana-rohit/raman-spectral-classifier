@@ -15,8 +15,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from src.data.preprocessing import SpectralPreprocessor
 from src.data.dataset import SpectralDataset, make_train_val_split
-from src.data.preprocessing import SpectralPreprocessor, FirstDerivative
 from src.data.registry import DataRegistry
 from src.utils.class_subset import filter_and_remap_classes
 from sklearn.model_selection import train_test_split
@@ -28,9 +28,7 @@ def build_all_loaders(
     preprocessor: SpectralPreprocessor,
     augmentation,
     cfg: dict,
-    derivative_cfg: Optional[dict] = None,
 ) -> Dict:
-    derivative_cfg = derivative_cfg or {}
     batch_size = cfg.get("batch_size", 256)
     num_workers = cfg.get("num_workers", 4)
     seed = cfg.get("seed", 42)
@@ -41,38 +39,18 @@ def build_all_loaders(
     # If consistency training enabled, return multiple augmented views per sample
     train_views = 2 if consistency_cfg.get("enabled", False) else 1
 
-    # Build derivative transform if enabled
-    deriv_transform = None
-    if derivative_cfg is not None and derivative_cfg.get("enabled", False):
-        deriv_transform = FirstDerivative(
-            window_length=derivative_cfg.get("window_length", 11),
-            polyorder=derivative_cfg.get("polyorder", 3),
-        )
-
     loaders = {}
 
     X_ref, y_ref = registry.get_arrays("reference")
 
-    # Apply preprocessing FIRST
-    X_ref = preprocessor.transform(X_ref)
-
     # THEN filter
     X_ref, y_ref = filter_and_remap_classes(X_ref, y_ref, SHARED_CLASSES)
 
-    if deriv_transform is not None:
-        dX_ref = deriv_transform.transform(X_ref)
-        assert dX_ref.shape == X_ref.shape, "Derivative shape mismatch"
-    else:
-        dX_ref = None
-
-    train_split, val_split = make_train_val_split(
+    (X_tr, y_tr), (X_val, y_val) = make_train_val_split(
         X_ref, y_ref,
         val_fraction=val_fraction,
         random_seed=val_seed,
-        derivative_X=dX_ref,
     )
-    X_tr, y_tr, dX_tr = train_split
-    X_val, y_val, dX_val = val_split
 
     loaders["train"] = _make_loader(
         X_tr, y_tr,
@@ -83,27 +61,26 @@ def build_all_loaders(
         shuffle=True,
         seed=seed,
         n_views=train_views,
-        derivative_X=dX_tr,
+        preprocessor=preprocessor, 
     )
     loaders["val"] = _make_loader(
         X_val, y_val,
         batch_size=batch_size,
         num_workers=num_workers,
         seed=seed + 1,
-        derivative_X=dX_val,
+        preprocessor=preprocessor, 
+        shuffle=False,
     )
 
     X_test, y_test = registry.get_arrays("test", allow_holdout=True)
 
-    X_test = preprocessor.transform(X_test)
     X_test, y_test = filter_and_remap_classes(X_test, y_test, SHARED_CLASSES)
-    dX_test = _apply_deriv(deriv_transform, X_test)
     loaders["test"] = _make_loader(
         X_test, y_test,
         batch_size=batch_size,
         num_workers=num_workers,
         seed=seed + 2,
-        derivative_X=dX_test,
+        preprocessor=preprocessor, 
     )
     
     # -----------------------------
@@ -115,7 +92,6 @@ def build_all_loaders(
 
         X_clin = np.concatenate([X_clin1, X_clin2], axis=0)
         y_clin = np.concatenate([y_clin1, y_clin2], axis=0)
-        X_clin = preprocessor.transform(X_clin)
         X_clin, y_clin = filter_and_remap_classes(X_clin, y_clin, SHARED_CLASSES)
 
         
@@ -128,10 +104,6 @@ def build_all_loaders(
             random_state=seed,
         )
 
-        # Apply derivative separately
-        dX_clin_tr = _apply_deriv(deriv_transform, X_clin_tr)
-        dX_clin_val = _apply_deriv(deriv_transform, X_clin_val)
-
         # Train loader
         loaders["clinical_train"] = _make_loader(
             X_clin_tr,
@@ -142,8 +114,8 @@ def build_all_loaders(
             num_workers=num_workers,
             shuffle=True,
             seed=seed + 5,
-            n_views=train_views,
-            derivative_X=dX_clin_tr,
+            n_views=train_views,   
+            preprocessor=preprocessor,  
         )
 
         # Validation loader
@@ -154,7 +126,7 @@ def build_all_loaders(
             num_workers=num_workers,
             shuffle=False,
             seed=seed + 6,
-            derivative_X=dX_clin_val,
+            preprocessor=preprocessor, 
         )
 
     except Exception as e:
@@ -162,9 +134,7 @@ def build_all_loaders(
 
     X_ft, y_ft = registry.get_arrays("finetune")
 
-    X_ft = preprocessor.transform(X_ft)
     X_ft, y_ft = filter_and_remap_classes(X_ft, y_ft, SHARED_CLASSES)
-    dX_ft = _apply_deriv(deriv_transform, X_ft)
     loaders["finetune"] = _make_loader(
         X_ft, y_ft,
         augmentation=_clone_augmentation(augmentation),
@@ -174,32 +144,24 @@ def build_all_loaders(
         shuffle=True,
         seed=seed + 3,
         n_views=train_views,
-        derivative_X=dX_ft,
+        preprocessor=preprocessor, 
     )
 
     loaders["ood"] = {}
     for idx, split_name in enumerate(registry.ood_split_names()):
         X_ood, y_ood = registry.get_arrays(split_name)
 
-        X_ood = preprocessor.transform(X_ood)
         X_ood, y_ood = filter_and_remap_classes(X_ood, y_ood, SHARED_CLASSES)
-        dX_ood = _apply_deriv(deriv_transform, X_ood)
         loaders["ood"][split_name] = _make_loader(
             X_ood, y_ood,
             class_filter=None,
             batch_size=batch_size,
             num_workers=num_workers,
             seed=seed + 10 + idx,
-            derivative_X=dX_ood,
+            preprocessor=preprocessor, 
         )
 
     return loaders
-    
-def _apply_deriv(deriv_transform, X):
-    if deriv_transform is None:
-        return None
-    return deriv_transform.transform(X)
-
 
 def _make_loader(
     X,
@@ -212,7 +174,7 @@ def _make_loader(
     shuffle: bool = False,
     seed: int = 42,
     n_views: int = 1,
-    derivative_X=None,
+    preprocessor=None, 
 ) -> DataLoader:
     dataset = SpectralDataset(
         X,
@@ -221,7 +183,7 @@ def _make_loader(
         training=training,
         class_filter=class_filter,
         n_views=n_views,
-        derivative_X=derivative_X,
+        preprocessor=preprocessor,
     )
     generator = torch.Generator()
     generator.manual_seed(seed)
