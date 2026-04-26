@@ -63,9 +63,18 @@ def main():
 
     # ---- Verify transforms on other splits ----
     print("\n[3/5] Verifying transforms across all splits...")
+    from src.data.split_roles import SplitRole
+
     for split_name in registry.available_splits():
+        meta = registry.get_split(split_name)
+
+        if meta.role == SplitRole.HOLDOUT:
+            print(f"      {split_name:>16s}  (skipped HOLDOUT)")
+            continue
+
         X, y = registry.get_arrays(split_name)
         X_proc = preprocessor.transform(X)
+
         print(f"      {split_name:>16s}  raw_mean={X.mean():.4f}  "
               f"proc_mean={X_proc.mean():.4f}  proc_std={X_proc.std():.4f}")
 
