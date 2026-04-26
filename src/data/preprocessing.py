@@ -62,6 +62,12 @@ def per_sample_normalize(X):
     std = X.std(axis=1, keepdims=True) + 1e-8
     return (X - mean) / std
 
+def compute_first_derivative(X):
+    """
+    Compute first derivative using numpy gradient
+    """
+    return np.gradient(X, axis=1)
+
 class SNVNormalization: 
     """
     Standard Normal Variate: per-sample centering + scaling.
@@ -237,19 +243,32 @@ class SpectralPreprocessor:
         return self
 
     def transform(self, X: np.ndarray) -> np.ndarray:
-        """Apply all transforms in order."""
         for t in self.transforms:
             X = t.transform(X)
-        X = per_sample_normalize(X)
+
+        # Step 1: normalize
+        X_norm = per_sample_normalize(X)
+
+        # Step 2: derivative
+        X_deriv = compute_first_derivative(X_norm)
+
+        # Step 3: stack channels
+        X = np.stack([X_norm, X_deriv], axis=1)  # (N, 2, L)
+
         return X
 
     def fit_transform(self, X: np.ndarray) -> np.ndarray:
-        """Fit and transform in a single pass — no redundant re-computation."""
         for t in self.transforms:
             t.fit(X)
             X = t.transform(X)
+
         self._is_fit = True
-        X = per_sample_normalize(X)
+
+        X_norm = per_sample_normalize(X)
+        X_deriv = compute_first_derivative(X_norm)
+
+        X = np.stack([X_norm, X_deriv], axis=1)
+
         return X
 
     def __repr__(self) -> str:
