@@ -55,3 +55,28 @@ def prepare_subset_eval_logits(
         main_logits = (1.0 - blend) * main_logits + blend * aux_logits
 
     return main_logits, targets.long()
+
+import numpy as np
+
+def filter_and_remap_classes(X, y, keep_classes):
+    keep_classes = np.array(sorted(keep_classes))
+
+    mask = np.isin(y, keep_classes)
+
+    if mask.shape[0] != X.shape[0]:
+        raise ValueError("Mask and data size mismatch")
+
+    X_filtered = X[mask]
+    y_filtered = y[mask].astype(int)
+
+    if X_filtered.shape[0] == 0:
+        raise ValueError("No samples found for selected classes")
+
+    class_map = {cls: i for i, cls in enumerate(keep_classes)}
+
+    try:
+        y_remapped = np.fromiter((class_map[label] for label in y_filtered), dtype=np.int64)
+    except KeyError as e:
+        raise ValueError(f"Unexpected label encountered during remapping: {e}")
+
+    return X_filtered, y_remapped
