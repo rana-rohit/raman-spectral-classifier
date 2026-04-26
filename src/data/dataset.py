@@ -7,7 +7,7 @@ Supports optional multi-channel input (raw + first derivative).
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -21,25 +21,27 @@ class SpectralDataset(Dataset):
         X: np.ndarray,
         y: np.ndarray,
         augmentation=None,
-        training: bool = False,
-        class_filter: Optional[List[int]] = None,
+        training: bool = False, 
         n_views: int = 1,
         preprocessor=None,
         
     ) -> None:
-        if class_filter is not None:
-            mask = np.isin(y, class_filter)
-            X, y = X[mask], y[mask]
-
-            unique_classes = sorted(class_filter)
-            class_to_idx = {c: i for i, c in enumerate(unique_classes)}
-            y = np.array([class_to_idx[int(label)] for label in y], dtype=np.int64)
-
         self.X = X.astype(np.float32)
         self.y = y.astype(np.int64)
+        unique = np.unique(self.y)
+        if not np.array_equal(unique, np.arange(len(unique))):
+            raise ValueError(
+                f"Labels must be contiguous [0..N-1], got {unique}"
+            )
+        if self.X.ndim != 2:
+            raise ValueError(f"Expected X shape (N, L), got {self.X.shape}")
+
+        if len(self.X) != len(self.y):
+            raise ValueError(
+                f"X and y size mismatch: {self.X.shape[0]} vs {len(self.y)}"
+            )
         self.augmentation = augmentation
         self.training = training
-        self.class_filter = list(class_filter) if class_filter is not None else None
         self.n_views = int(n_views) 
         self.preprocessor = preprocessor
 
@@ -48,7 +50,7 @@ class SpectralDataset(Dataset):
 
     def __getitem__(self, idx: int):
         x = self.X[idx].copy()
-        y_tensor = torch.tensor(self.y[idx], dtype=torch.long)
+        y_tensor = torch.as_tensor(self.y[idx], dtype=torch.long)
 
         if self.n_views == 2 and self.training:
             x1 = self._transform_sample(x.copy())
@@ -72,7 +74,7 @@ class SpectralDataset(Dataset):
 
     def _to_multichannel(self, x: np.ndarray, idx: int) -> torch.Tensor:
         """
-        x is already (2, L) from preprocessing
+        x should be (C, L) after preprocessing (C=2 if derivative enabled)
         """
         return torch.from_numpy(x.astype(np.float32))
 
@@ -88,7 +90,11 @@ class SpectralDataset(Dataset):
         else:
             raise ValueError("Preprocessor is required for dataset")
         
-        print("Processed shape:", x.shape)
+        if x.ndim != 2:
+            raise ValueError(f"Expected (C, L) after preprocessing, got {x.shape}")
+
+        if x.shape[0] not in (1, 2):
+            raise ValueError(f"Unexpected channel count: {x.shape}")
 
         return x.astype(np.float32, copy=False)
 
