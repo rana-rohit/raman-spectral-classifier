@@ -27,25 +27,26 @@ def build_all_loaders(
     preprocessor: SpectralPreprocessor,
     augmentation,
     cfg: dict,
+    shared_classes
 ) -> Dict:
     batch_size = cfg.get("batch_size", 256)
     num_workers = cfg.get("num_workers", 4)
     seed = cfg.get("seed", 42)
     val_fraction = cfg["validation"]["val_fraction"]
     val_seed = cfg["validation"]["random_seed"]
-    consistency_cfg = cfg.get("consistency", {})
-
-    # If consistency training enabled, return multiple augmented views per sample
+    consistency_cfg = cfg.get("consistency") or {}
+    
     train_views = 2 if consistency_cfg.get("enabled", False) else 1
+    # If consistency training enabled, return multiple augmented views per sample
+    if train_views not in (1, 2):
+        raise ValueError("train_views must be 1 or 2")
 
     loaders = {}
-    
-    SHARED_CLASSES = registry.cfg["dataset"]["shared_classes"]
 
     X_ref, y_ref = registry.get_arrays("reference")
 
     # THEN filter
-    X_ref, y_ref = filter_and_remap_classes(X_ref, y_ref, SHARED_CLASSES)
+    X_ref, y_ref = filter_and_remap_classes(X_ref, y_ref, shared_classes)
 
     (X_tr, y_tr), (X_val, y_val) = make_train_val_split(
         X_ref, y_ref,
@@ -75,7 +76,7 @@ def build_all_loaders(
 
     X_test, y_test = registry.get_arrays("test", allow_holdout=True)
 
-    X_test, y_test = filter_and_remap_classes(X_test, y_test, SHARED_CLASSES)
+    X_test, y_test = filter_and_remap_classes(X_test, y_test, shared_classes)
     loaders["test"] = _make_loader(
         X_test, y_test,
         batch_size=batch_size,
@@ -94,7 +95,7 @@ def build_all_loaders(
 
         X_clin = np.concatenate([X_clin1, X_clin2], axis=0)
         y_clin = np.concatenate([y_clin1, y_clin2], axis=0)
-        X_clin, y_clin = filter_and_remap_classes(X_clin, y_clin, SHARED_CLASSES)
+        X_clin, y_clin = filter_and_remap_classes(X_clin, y_clin, shared_classes)
 
         
         # Stratified split
@@ -136,7 +137,7 @@ def build_all_loaders(
 
     X_ft, y_ft = registry.get_arrays("finetune")
 
-    X_ft, y_ft = filter_and_remap_classes(X_ft, y_ft, SHARED_CLASSES)
+    X_ft, y_ft = filter_and_remap_classes(X_ft, y_ft, shared_classes)
     loaders["finetune"] = _make_loader(
         X_ft, y_ft,
         augmentation=_clone_augmentation(augmentation),
@@ -153,11 +154,12 @@ def build_all_loaders(
     for idx, split_name in enumerate(registry.ood_split_names()):
         X_ood, y_ood = registry.get_arrays(split_name)
 
-        X_ood, y_ood = filter_and_remap_classes(X_ood, y_ood, SHARED_CLASSES)
+        X_ood, y_ood = filter_and_remap_classes(X_ood, y_ood, shared_classes)
         loaders["ood"][split_name] = _make_loader(
             X_ood, y_ood,
             batch_size=batch_size,
             num_workers=num_workers,
+            shuffle=False,
             seed=seed + 10 + idx,
             preprocessor=preprocessor, 
         )
@@ -181,7 +183,6 @@ def _make_loader(
         y,
         augmentation=augmentation,
         training=training,
-        class_filter=None,
         n_views=n_views,
         preprocessor=preprocessor,
     )
