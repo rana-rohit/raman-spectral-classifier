@@ -40,11 +40,11 @@ training:
     views: 1
 
   domain_alignment:
-    enabled: false 
+    enabled: true
   
   dann:
     enabled: true
-    weight: 0.5
+    weight: 0.1
   
   coral:
     enabled: false

@@ -258,7 +258,7 @@ class Trainer:
                 if self.coral_enabled:
                     feat_ref = outputs1.get("features")
                     feat_clin = outputs_clin.get("features")
-
+                    
                     if feat_ref is not None and feat_clin is not None:
 
                         min_bs = min(feat_ref.size(0), feat_clin.size(0))
@@ -308,7 +308,7 @@ class Trainer:
                         torch.ones(feat_clin.size(0), dtype=torch.long, device=self.device)
                     ])
 
-                    feat_all = GradReverse.apply(feat_all, self.dann_weight)
+                    feat_all = GradReverse.apply(feat_all, 1.0) 
 
                     domain_logits = self.model.domain_classifier(feat_all)
 
@@ -321,7 +321,7 @@ class Trainer:
 
                     total_domain_loss += domain_loss.item() * batch_size
 
-                    loss = loss + 0.3 * domain_loss
+                    loss = loss + self.dann_weight * domain_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
