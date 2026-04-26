@@ -21,7 +21,6 @@ from src.data.registry import DataRegistry
 from src.utils.class_subset import filter_and_remap_classes
 from sklearn.model_selection import train_test_split
 
-SHARED_CLASSES = [0, 2, 3, 5, 6]
 
 def build_all_loaders(
     registry: DataRegistry,
@@ -40,6 +39,8 @@ def build_all_loaders(
     train_views = 2 if consistency_cfg.get("enabled", False) else 1
 
     loaders = {}
+    
+    SHARED_CLASSES = registry.cfg["dataset"]["shared_classes"]
 
     X_ref, y_ref = registry.get_arrays("reference")
 
@@ -80,6 +81,7 @@ def build_all_loaders(
         batch_size=batch_size,
         num_workers=num_workers,
         seed=seed + 2,
+        shuffle=False,
         preprocessor=preprocessor, 
     )
     
@@ -154,7 +156,6 @@ def build_all_loaders(
         X_ood, y_ood = filter_and_remap_classes(X_ood, y_ood, SHARED_CLASSES)
         loaders["ood"][split_name] = _make_loader(
             X_ood, y_ood,
-            class_filter=None,
             batch_size=batch_size,
             num_workers=num_workers,
             seed=seed + 10 + idx,
@@ -168,7 +169,6 @@ def _make_loader(
     y,
     augmentation=None,
     training: bool = False,
-    class_filter=None,
     batch_size: int = 256,
     num_workers: int = 4,
     shuffle: bool = False,
@@ -181,7 +181,7 @@ def _make_loader(
         y,
         augmentation=augmentation,
         training=training,
-        class_filter=class_filter,
+        class_filter=None,
         n_views=n_views,
         preprocessor=preprocessor,
     )
