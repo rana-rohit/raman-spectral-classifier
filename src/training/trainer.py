@@ -94,7 +94,7 @@ class Trainer:
         self.monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
         self.gradient_clip = self.train_cfg.get("gradient_clip", 1.0)
 
-        self.clinical_loader = self.loaders.get("clinical", None)
+        self.clinical_loader = self.loaders.get("clinical_train", None)
 
         if self.clinical_loader is not None:
             self.clinical_iter = cycle(self.clinical_loader)
@@ -227,6 +227,7 @@ class Trainer:
         total_l2sp_loss = 0.0
         total_coral_loss = 0.0
         total_domain_loss = 0.0
+        total_domain_samples = 0
         correct = 0
         total = 0
         t0 = time.time()
@@ -314,12 +315,13 @@ class Trainer:
 
                     domain_loss = nn.CrossEntropyLoss()(domain_logits, domain_labels)
                     
-                    if epoch == 1 and total == 0:
+                    if epoch == 1 and len(all_logits) == 0:
                         print(f"DOMAIN LOSS SAMPLE: {domain_loss.item():.4f}")
 
-                    batch_size = len(y)  
+                    domain_batch_size = domain_labels.size(0)
 
-                    total_domain_loss += domain_loss.item() * batch_size
+                    total_domain_loss += domain_loss.item() * domain_batch_size
+                    total_domain_samples += domain_batch_size
 
                     loss = loss + self.dann_weight * domain_loss
 
@@ -339,7 +341,8 @@ class Trainer:
             all_logits.append(outputs1["main_logits"].detach().cpu())
             all_targets.append(y.detach().cpu())
         
-        avg_domain_loss = total_domain_loss / max(total, 1)
+        avg_domain_loss = total_domain_loss / max(total_domain_samples, 1)
+
         print(f"[Epoch {epoch}] Avg Domain Loss: {avg_domain_loss:.4f}")
 
         metrics = compute_metrics(
