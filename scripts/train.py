@@ -28,7 +28,7 @@ from src.training.trainer import build_trainer
 from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config, save_config
 from src.utils.seed import set_seed
-
+from src.utils.class_subset import filter_and_remap_classes
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train a spectral classifier")
@@ -79,7 +79,12 @@ def main():
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
     registry.load_all()
 
-    X_ref, _ = registry.get_arrays("reference")
+    X_ref, y_ref = registry.get_arrays("reference")
+
+    shared_classes = cfg["dataset"]["shared_classes"]
+
+    X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
+
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
 
@@ -94,7 +99,14 @@ def main():
         "seed": args.seed,
         "consistency": cfg.get("training", {}).get("consistency", {}),
     }
-    loaders = build_all_loaders(registry, preprocessor, augmentation, loader_cfg)
+
+    loaders = build_all_loaders(
+        registry,
+        preprocessor,
+        augmentation,
+        loader_cfg,
+        shared_classes=shared_classes,
+    )
 
     print(f"  Train: {len(loaders['train'].dataset):,} samples")
     print(f"  Val:   {len(loaders['val'].dataset):,} samples")
@@ -109,7 +121,7 @@ def main():
         loaders=loaders,
         cfg=cfg,
         exp_dir=exp_dir,
-        n_classes=cfg["dataset"]["n_classes_full"],
+        n_classes=cfg["dataset"]["n_classes_clinical"],
     )
     trainer.fit()
     load_best_model(exp_dir, model)
@@ -118,7 +130,7 @@ def main():
     evaluator = ModelEvaluator(
         model=model,
         model_name=args.model,
-        n_classes=cfg["dataset"]["n_classes_full"],
+        n_classes=cfg["dataset"]["n_classes_clinical"],
         device=str(next(model.parameters()).device),
         cfg=cfg,
     )
@@ -136,7 +148,7 @@ def main():
         cfg=cfg,
         exp_dir=finetune_dir,
         freeze_epochs=3,
-        n_classes=cfg["dataset"]["n_classes_full"],
+        n_classes=cfg["dataset"]["n_classes_clinical"],
     )
 
     print(f"\n  Done. Training artifacts: {exp_dir}/")
