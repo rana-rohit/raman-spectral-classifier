@@ -18,7 +18,10 @@ from torch.utils.data import DataLoader
 from src.data.dataset import SpectralDataset, make_train_val_split
 from src.data.preprocessing import SpectralPreprocessor, FirstDerivative
 from src.data.registry import DataRegistry
+from src.utils.class_subset import filter_and_remap_classes
 from sklearn.model_selection import train_test_split
+
+SHARED_CLASSES = [0, 2, 3, 5, 6]
 
 def build_all_loaders(
     registry: DataRegistry,
@@ -49,7 +52,12 @@ def build_all_loaders(
     loaders = {}
 
     X_ref, y_ref = registry.get_arrays("reference")
+
+    # Apply preprocessing FIRST
     X_ref = preprocessor.transform(X_ref)
+
+    # THEN filter
+    X_ref, y_ref = filter_and_remap_classes(X_ref, y_ref, SHARED_CLASSES)
 
     if deriv_transform is not None:
         dX_ref = deriv_transform.transform(X_ref)
@@ -86,7 +94,9 @@ def build_all_loaders(
     )
 
     X_test, y_test = registry.get_arrays("test", allow_holdout=True)
+
     X_test = preprocessor.transform(X_test)
+    X_test, y_test = filter_and_remap_classes(X_test, y_test, SHARED_CLASSES)
     dX_test = _apply_deriv(deriv_transform, X_test)
     loaders["test"] = _make_loader(
         X_test, y_test,
@@ -105,8 +115,8 @@ def build_all_loaders(
 
         X_clin = np.concatenate([X_clin1, X_clin2], axis=0)
         y_clin = np.concatenate([y_clin1, y_clin2], axis=0)
-
         X_clin = preprocessor.transform(X_clin)
+        X_clin, y_clin = filter_and_remap_classes(X_clin, y_clin, SHARED_CLASSES)
 
         
         # Stratified split
@@ -114,7 +124,7 @@ def build_all_loaders(
             X_clin,
             y_clin,
             test_size=0.2,
-            stratify=y_clin,
+            stratify=y_clin if len(np.unique(y_clin)) > 1 else None,
             random_state=seed,
         )
 
@@ -151,7 +161,9 @@ def build_all_loaders(
         print("WARNING: Clinical data not found:", e)
 
     X_ft, y_ft = registry.get_arrays("finetune")
+
     X_ft = preprocessor.transform(X_ft)
+    X_ft, y_ft = filter_and_remap_classes(X_ft, y_ft, SHARED_CLASSES)
     dX_ft = _apply_deriv(deriv_transform, X_ft)
     loaders["finetune"] = _make_loader(
         X_ft, y_ft,
@@ -168,9 +180,10 @@ def build_all_loaders(
     loaders["ood"] = {}
     for idx, split_name in enumerate(registry.ood_split_names()):
         X_ood, y_ood = registry.get_arrays(split_name)
+
         X_ood = preprocessor.transform(X_ood)
+        X_ood, y_ood = filter_and_remap_classes(X_ood, y_ood, SHARED_CLASSES)
         dX_ood = _apply_deriv(deriv_transform, X_ood)
-        eval_classes = registry.get_eval_classes(split_name)
         loaders["ood"][split_name] = _make_loader(
             X_ood, y_ood,
             class_filter=None,
