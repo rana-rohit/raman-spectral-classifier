@@ -93,7 +93,9 @@ def main():
         "num_workers": 0,   # 0 for bootstrap (avoids multiprocessing overhead)
         "validation": splits_cfg["validation"],
     }
-    loaders = build_all_loaders(registry, preprocessor, augmentation, loader_cfg)
+
+    shared_classes = splits_cfg["dataset"]["shared_classes"]    
+    loaders = build_all_loaders(registry, preprocessor, augmentation, loader_cfg, shared_classes=shared_classes,)
 
     for name, loader in loaders.items():
         if name == "ood":
@@ -106,7 +108,8 @@ def main():
                     f"y={tuple(y_batch.shape)}  classes={classes}"
                 )
 
-                expected_classes = set(range(5))
+                n_classes = splits_cfg["dataset"]["n_classes_clinical"]
+                expected_classes = set(range(n_classes))
                 actual_classes = set(classes)
 
                 if not actual_classes.issubset(expected_classes):
@@ -123,7 +126,8 @@ def main():
                 f"y={tuple(y_batch.shape)}  classes={classes}"
             )
 
-            expected_classes = set(range(5))
+            n_classes = splits_cfg["dataset"]["n_classes_clinical"]
+            expected_classes = set(range(n_classes))
             actual_classes = set(classes)
 
             if not actual_classes.issubset(expected_classes):
