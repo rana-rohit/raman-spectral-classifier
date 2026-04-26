@@ -89,7 +89,7 @@ class SpectralDataset(Dataset):
             raise ValueError("Preprocessor is required for dataset")
         
         print("Processed shape:", x.shape)
-        
+
         return x.astype(np.float32, copy=False)
 
     @property
@@ -105,7 +105,6 @@ class SpectralDataset(Dataset):
         unique, counts = np.unique(self.y, return_counts=True)
         return dict(zip(unique.tolist(), counts.tolist()))
 
-    print(x.shape)
 
 def make_train_val_split(
     X: np.ndarray,
