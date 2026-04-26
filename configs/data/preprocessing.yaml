@@ -4,10 +4,10 @@
 
 preprocessing:
   snv_normalization:
-    enabled: true
+    enabled: false
 
   per_sample_mean_subtraction:
-    enabled: false
+    enabled: false  
 
   savitzky_golay:
     enabled: true

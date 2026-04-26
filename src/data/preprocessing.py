@@ -48,8 +48,21 @@ class PerSampleMeanSubtraction:
     def fit_transform(self, X: np.ndarray) -> np.ndarray:
         return self.fit(X).transform(X)
 
+def per_sample_normalize(X):
+    """
+    Normalize each spectrum independently.
+    
+    Args:
+        X: numpy array of shape (N, L)
+    
+    Returns:
+        normalized X
+    """
+    mean = X.mean(axis=1, keepdims=True)
+    std = X.std(axis=1, keepdims=True) + 1e-8
+    return (X - mean) / std
 
-class SNVNormalization:
+class SNVNormalization: 
     """
     Standard Normal Variate: per-sample centering + scaling.
     Removes multiplicative scatter AND additive baseline offset
@@ -227,6 +240,7 @@ class SpectralPreprocessor:
         """Apply all transforms in order."""
         for t in self.transforms:
             X = t.transform(X)
+        X = per_sample_normalize(X)
         return X
 
     def fit_transform(self, X: np.ndarray) -> np.ndarray:
@@ -235,6 +249,7 @@ class SpectralPreprocessor:
             t.fit(X)
             X = t.transform(X)
         self._is_fit = True
+        X = per_sample_normalize(X)
         return X
 
     def __repr__(self) -> str:
