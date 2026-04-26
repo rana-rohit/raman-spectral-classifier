@@ -24,15 +24,12 @@ class SpectralDataset(Dataset):
         training: bool = False,
         class_filter: Optional[List[int]] = None,
         n_views: int = 1,
-        derivative_X: Optional[np.ndarray] = None,
+        preprocessor=None,
         
     ) -> None:
         if class_filter is not None:
             mask = np.isin(y, class_filter)
             X, y = X[mask], y[mask]
-
-            if derivative_X is not None:
-                derivative_X = derivative_X[mask]
 
             unique_classes = sorted(class_filter)
             class_to_idx = {c: i for i, c in enumerate(unique_classes)}
@@ -43,10 +40,8 @@ class SpectralDataset(Dataset):
         self.augmentation = augmentation
         self.training = training
         self.class_filter = list(class_filter) if class_filter is not None else None
-        self.n_views = int(n_views)
-        self.derivative_X = (
-            derivative_X.astype(np.float32) if derivative_X is not None else None
-        )
+        self.n_views = int(n_views) 
+        self.preprocessor = preprocessor
 
     def __len__(self) -> int:
         return len(self.X)
@@ -76,27 +71,25 @@ class SpectralDataset(Dataset):
     """
 
     def _to_multichannel(self, x: np.ndarray, idx: int) -> torch.Tensor:
-        """Stack raw spectrum with optional derivative as a 2-channel input."""
-        x_tensor = torch.from_numpy(x).unsqueeze(0)  # (1, L)
-        if self.derivative_X is not None:
-            dx = self.derivative_X[idx].copy()
-
-            dx_mean = dx.mean()
-            dx_std = dx.std()
-
-            dx_std = max(dx.std(), 1e-6)
-        
-            # Normalize derivative per sample to stabilize scale
-            dx = (dx - dx_mean) / dx_std
-
-            dx_tensor = torch.from_numpy(dx.astype(np.float32)).unsqueeze(0)
-            x_tensor = torch.cat([x_tensor, dx_tensor], dim=0)  # (2, L)
-        return x_tensor
+        """
+        x is already (2, L) from preprocessing
+        """
+        return torch.from_numpy(x.astype(np.float32))
 
     def _transform_sample(self, x: np.ndarray) -> np.ndarray:
+        # x is RAW (1000,)
+
         if self.training and self.augmentation is not None:
             if hasattr(self.augmentation, "steps") and len(self.augmentation.steps) > 0:
                 x = self.augmentation(x[None])[0]
+
+        if self.preprocessor is not None:
+            x = self.preprocessor.transform(x[None])[0]
+        else:
+            raise ValueError("Preprocessor is required for dataset")
+        
+        print("Processed shape:", x.shape)
+        
         return x.astype(np.float32, copy=False)
 
     @property
@@ -112,13 +105,13 @@ class SpectralDataset(Dataset):
         unique, counts = np.unique(self.y, return_counts=True)
         return dict(zip(unique.tolist(), counts.tolist()))
 
+    print(x.shape)
 
 def make_train_val_split(
     X: np.ndarray,
     y: np.ndarray,
     val_fraction: float = 0.20,
     random_seed: int = 42,
-    derivative_X: Optional[np.ndarray] = None,
 ) -> Tuple:
     sss = StratifiedShuffleSplit(
         n_splits=1,
@@ -127,12 +120,7 @@ def make_train_val_split(
     )
     train_idx, val_idx = next(sss.split(X, y))
 
-    if derivative_X is not None:
-        return (
-            (X[train_idx], y[train_idx], derivative_X[train_idx]),
-            (X[val_idx], y[val_idx], derivative_X[val_idx]),
-        )
     return (
-        (X[train_idx], y[train_idx], None),
-        (X[val_idx], y[val_idx], None),
+        (X[train_idx], y[train_idx]),
+        (X[val_idx], y[val_idx]),
     )
