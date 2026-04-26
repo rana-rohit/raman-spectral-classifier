@@ -19,13 +19,11 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import yaml
-import numpy as np
 
 from src.utils.seed import set_seed
 from src.data.registry import DataRegistry
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.augmentation import AugmentationPipeline
-from src.data.dataset import make_train_val_split, SpectralDataset
 from src.data.dataloader import build_all_loaders
 
 
@@ -63,12 +61,8 @@ def main():
 
     # ---- Verify transforms on other splits ----
     print("\n[3/5] Verifying transforms across all splits...")
-    from src.data.split_roles import SplitRole
-
     for split_name in registry.available_splits():
-        meta = registry.get_split(split_name)
-
-        if meta.role == SplitRole.HOLDOUT:
+        if split_name.lower() == "test":
             print(f"      {split_name:>16s}  (skipped HOLDOUT)")
             continue
 
@@ -105,14 +99,39 @@ def main():
         if name == "ood":
             for ood_name, ood_loader in loader.items():
                 x_batch, y_batch = next(iter(ood_loader))
-                print(f"      OOD {ood_name:>14s}: x={tuple(x_batch.shape)}  "
-                      f"y={tuple(y_batch.shape)}  "
-                      f"classes={sorted(y_batch.unique().tolist())}")
+                classes = sorted(y_batch.unique().tolist())
+
+                print(
+                    f"      OOD {ood_name:>14s}: x={tuple(x_batch.shape)}  "
+                    f"y={tuple(y_batch.shape)}  classes={classes}"
+                )
+
+                expected_classes = set(range(5))
+                actual_classes = set(classes)
+
+                if not actual_classes.issubset(expected_classes):
+                    raise ValueError(f"OOD split {ood_name} has invalid classes: {classes}")
+
+                if len(actual_classes) < len(expected_classes):
+                    print(f"[WARN] OOD split {ood_name} missing classes: {classes}")
         else:
             x_batch, y_batch = next(iter(loader))
-            print(f"      {name:>20s}: x={tuple(x_batch.shape)}  "
-                  f"y={tuple(y_batch.shape)}")
+            classes = sorted(y_batch.unique().tolist())
 
+            print(
+                f"      {name:>20s}: x={tuple(x_batch.shape)}  "
+                f"y={tuple(y_batch.shape)}  classes={classes}"
+            )
+
+            expected_classes = set(range(5))
+            actual_classes = set(classes)
+
+            if not actual_classes.issubset(expected_classes):
+                raise ValueError(f"Loader {name} has invalid classes: {classes}")
+
+            if len(actual_classes) < len(expected_classes):
+                print(f"[WARN] Loader {name} missing some classes: {classes}")
+                
     print("\n[OK] Data pipeline verified. Ready to train.\n")
 
 
