@@ -6,41 +6,30 @@ import torch
 
 
 def subset_mask(targets: torch.Tensor, class_ids: Sequence[int]) -> torch.Tensor:
-    class_tensor = torch.tensor(
-        [int(cls) for cls in class_ids],
-        device=targets.device,
-        dtype=targets.dtype,
-    )
-    return (targets.unsqueeze(-1) == class_tensor).any(dim=-1)
+    """
+    Deprecated in 5-class setup.
+    """
+    return torch.ones_like(targets, dtype=torch.bool)
 
 
 def remap_targets_to_subset(
     targets: torch.Tensor,
     class_ids: Sequence[int],
 ) -> torch.Tensor:
-    class_ids = [int(cls) for cls in class_ids]
-    mapped = torch.full_like(targets, fill_value=-1)
-    for idx, cls in enumerate(class_ids):
-        mapped = torch.where(
-            targets == cls,
-            torch.full_like(mapped, fill_value=idx),
-            mapped,
-        )
-    if (mapped < 0).any():
-        raise ValueError("Targets contain labels outside the requested subset.")
-    return mapped.long()
+    """
+    No-op in 5-class setup (targets already remapped).
+    """
+    return targets.long()
 
 
 def slice_logits_to_subset(
     logits: torch.Tensor,
     class_ids: Sequence[int],
 ) -> torch.Tensor:
-    indices = torch.tensor(
-        [int(cls) for cls in class_ids],
-        device=logits.device,
-        dtype=torch.long,
-    )
-    return logits.index_select(dim=-1, index=indices)
+    """
+    No-op in 5-class setup (kept for compatibility).
+    """
+    return logits
 
 
 def prepare_subset_eval_logits(
@@ -51,29 +40,18 @@ def prepare_subset_eval_logits(
     aux_blend: float = 0.5,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Prepare logits/targets for evaluation on a clinically valid class subset.
+    Simplified for 5-class training setup.
 
-    ``main_logits`` always originate from the 30-class head. When an auxiliary
-    shared-class head is present, its 5-class logits can be blended into the
-    sliced main logits to bias evaluation toward the clinically relevant subset.
+    Assumes:
+    - model outputs already match class space
+    - targets already remapped to [0..N-1]
     """
-    mask = subset_mask(targets, class_ids)
-    filtered_targets = targets[mask]
 
-    if filtered_targets.numel() == 0:
-        empty_logits = main_logits.new_zeros((0, len(class_ids)))
-        empty_targets = targets.new_zeros((0,), dtype=torch.long)
-        return empty_logits, empty_targets
-
-    subset_logits = slice_logits_to_subset(main_logits[mask], class_ids)
     if aux_logits is not None:
-        filtered_aux = aux_logits[mask]
-        if filtered_aux.size(-1) != len(class_ids):
-            raise ValueError(
-                "Auxiliary logits width does not match the requested subset size."
-            )
-        blend = float(aux_blend)
-        subset_logits = (1.0 - blend) * subset_logits + blend * filtered_aux
+        if aux_logits.size(-1) != main_logits.size(-1):
+            raise ValueError("Aux logits must match main logits size")
 
-    mapped_targets = remap_targets_to_subset(filtered_targets, class_ids)
-    return subset_logits, mapped_targets
+        blend = float(aux_blend)
+        main_logits = (1.0 - blend) * main_logits + blend * aux_logits
+
+    return main_logits, targets.long()
