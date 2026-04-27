@@ -5,7 +5,7 @@ model:
   in_channels: 2
   channels: [32, 64, 128, 256]
   kernel_sizes: [7, 15, 15, 31]
-  dropout: 0.2
+  dropout: 0.4
 
 training:
   scheduler: warmup_cosine
@@ -20,4 +20,4 @@ training:
 
   coral:
     enabled: true
-    weight: 0.3
+    weight: 0.1

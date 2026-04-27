@@ -196,7 +196,6 @@ def _make_finetune_cfg(base_cfg: dict, freeze_epochs: int) -> dict:
     # Keep DANN active during finetuning with reduced weight for
     # continued domain alignment (was previously force-disabled).
     ft["dann"] = {
-        "enabled": ft.get("dann", {}).get("enabled", False),
         "weight": ft.get("dann", {}).get("weight", 0.3),
     }
 

@@ -243,7 +243,7 @@ class Trainer:
             x_clin = None
 
             if clin_batch is not None:
-                x_clin, _, _ = self._parse_batch(clin_batch, augment=False)
+                x_clin, _, y_clin = self._parse_batch(clin_batch, augment=False)
 
             self.optimizer.zero_grad(set_to_none=True)
 
@@ -268,8 +268,16 @@ class Trainer:
 
                         coral_term = coral_loss(feat_ref, feat_clin)
                             
-            main_loss = self.loss_fn(outputs1["main_logits"], y)
-            aux_loss = self._compute_aux_loss(outputs1, y)
+            if x_clin is not None:
+                outputs_target = outputs_clin  # reuse computed forward
+                main_loss = self.loss_fn(outputs_target["main_logits"], y_clin)
+            else:
+                main_loss = self.loss_fn(outputs1["main_logits"], y)
+            
+            if x_clin is not None:
+                aux_loss = self._compute_aux_loss(outputs_clin, y_clin)
+            else:
+                aux_loss = self._compute_aux_loss(outputs1, y)
 
             outputs2 = None
             if x2 is not None:
@@ -309,7 +317,10 @@ class Trainer:
                         torch.ones(feat_clin.size(0), dtype=torch.long, device=self.device)
                     ])
 
-                    feat_all = GradReverse.apply(feat_all, 1.0) 
+                    p = epoch / self.train_cfg.get("max_epochs", 100)
+                    lambda_ = 2. / (1. + np.exp(-10 * p)) - 1
+
+                    feat_all = GradReverse.apply(feat_all, lambda_)
 
                     domain_logits = self.model.domain_classifier(feat_all)
 
@@ -336,10 +347,15 @@ class Trainer:
             total_consistency_loss += consistency_term.item() * batch_size
             total_l2sp_loss += l2sp_term.item() * batch_size
             total_coral_loss += coral_term.item() * batch_size
-            correct += (outputs1["main_logits"].argmax(dim=-1) == y).sum().item()
             total += batch_size
-            all_logits.append(outputs1["main_logits"].detach().cpu())
-            all_targets.append(y.detach().cpu())
+            if x_clin is not None:
+                correct += (outputs_target["main_logits"].argmax(dim=-1) == y_clin).sum().item()
+                all_logits.append(outputs_target["main_logits"].detach().cpu())
+                all_targets.append(y_clin.detach().cpu())
+            else:
+                correct += (outputs1["main_logits"].argmax(dim=-1) == y).sum().item()
+                all_logits.append(outputs1["main_logits"].detach().cpu())
+                all_targets.append(y.detach().cpu())
         
         avg_domain_loss = total_domain_loss / max(total_domain_samples, 1)
 
