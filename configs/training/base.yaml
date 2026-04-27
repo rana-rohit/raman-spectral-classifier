@@ -36,19 +36,17 @@ training:
     exclude_patterns: []
 
   consistency:
-    enabled: false
-    views: 1
-
-  domain_alignment:
     enabled: true
+    loss_weight: 0.1
+    views: 2
   
   dann:
     enabled: true
-    weight: 0.1
+    weight: 0.3
   
   coral:
-    enabled: false
-    weight: 0.5 
+    enabled: true
+    weight: 0.1
 
 multitask:
   auxiliary_shared_head:

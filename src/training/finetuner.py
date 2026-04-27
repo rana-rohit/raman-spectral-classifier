@@ -60,13 +60,9 @@ def finetune(
         print(f"  Keeping pretrained classifier head ({n_classes} classes)")
 
 
-    train_loader = loaders["clinical_train"]
-    val_loader = loaders["clinical_val"]
-
     local_loaders = {
         **loaders,
-        "train": train_loader,
-        "val": val_loader,
+        "val": loaders["clinical_val"],   # only validation changes
     }
     
     ft_cfg = _make_finetune_cfg(cfg, freeze_epochs)
@@ -201,7 +197,7 @@ def _make_finetune_cfg(base_cfg: dict, freeze_epochs: int) -> dict:
     # continued domain alignment (was previously force-disabled).
     ft["dann"] = {
         "enabled": ft.get("dann", {}).get("enabled", False),
-        "weight": ft.get("dann", {}).get("weight", 0.5) * 0.5,
+        "weight": ft.get("dann", {}).get("weight", 0.3),
     }
 
     # Allow BatchNorm to adapt to the finetune domain distribution
