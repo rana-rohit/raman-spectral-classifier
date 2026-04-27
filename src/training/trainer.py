@@ -439,19 +439,31 @@ class Trainer:
     def _eval_one_epoch(self, loader: DataLoader) -> Dict[str, float]:
         self.model.eval()
         all_logits, all_targets = [], []
+        total_loss = 0.0
+        total_samples = 0
 
         for batch in loader:
             x, _, y = self._parse_batch(batch)
+
             outputs = self._normalize_outputs(self.model(x))
-            self._assert_logits_and_targets(outputs["main_logits"], y, "eval")
-            all_logits.append(outputs["main_logits"].cpu())
-            all_targets.append(y.cpu())
+            logits = outputs["main_logits"]
+
+            self._assert_logits_and_targets(logits, y, "eval")
+            loss = self.loss_fn(logits, y)
+
+            batch_size = y.size(0)
+            total_loss += loss.item() * batch_size
+            total_samples += batch_size
+
+            all_logits.append(logits.detach().cpu())
+            all_targets.append(y.detach().cpu())
 
         logits = torch.cat(all_logits, dim=0)
         targets = torch.cat(all_targets, dim=0)
-        loss = self.loss_fn(logits, targets).item()
+
+        epoch_loss = total_loss / total_samples
         metrics = compute_metrics(logits, targets, self.n_classes)
-        metrics["loss"] = loss
+        metrics["loss"] = epoch_loss
         return metrics
 
     def _normalize_outputs(self, outputs) -> dict[str, torch.Tensor | None]:
