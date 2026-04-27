@@ -85,6 +85,12 @@ class Trainer:
         self.exp_dir = Path(exp_dir)
         self.n_classes = n_classes
         self.reference_state = reference_state
+        shared_classes = cfg.get("dataset", {}).get("shared_classes", [])
+        if shared_classes:
+            assert self.n_classes == len(shared_classes), (
+                f"Shared-class training requires n_classes == len(shared_classes), "
+                f"got {self.n_classes} vs {len(shared_classes)}"
+            )
         self.dann_cfg = self.train_cfg.get("dann", {})
         self.dann_enabled = self.dann_cfg.get("enabled", False)
         self.dann_weight = self.dann_cfg.get("weight", 0.5)
@@ -93,6 +99,9 @@ class Trainer:
         self.coral_weight = self.coral_cfg.get("weight", 0.5)
         self.monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
         self.gradient_clip = self.train_cfg.get("gradient_clip", 1.0)
+        target_cfg = self.train_cfg.get("target_supervised", {})
+        self.target_supervised_enabled = target_cfg.get("enabled", True)
+        self.target_supervised_weight = float(target_cfg.get("weight", 1.0))
 
         self.clinical_loader = self.loaders.get("clinical_train", None)
 
@@ -134,6 +143,7 @@ class Trainer:
             self.device = torch.device("cpu")
 
         self.model.to(self.device)
+        self.loss_fn.to(self.device)
         
         # Optionally freeze BatchNorm running statistics.
         # Useful during pretraining with multi-forward passes, but should
@@ -159,6 +169,14 @@ class Trainer:
             val_metrics = self._eval_one_epoch(self.loaders["val"])
             self.logger.log(epoch, "val", val_metrics)
 
+            source_val_metrics = None
+            if (
+                "source_val" in self.loaders
+                and self.loaders["source_val"] is not self.loaders["val"]
+            ):
+                source_val_metrics = self._eval_one_epoch(self.loaders["source_val"])
+                self.logger.log(epoch, "source_val", source_val_metrics)
+
             monitor_value = val_metrics.get(self.monitor_metric)
             if monitor_value is None:
                 raise KeyError(
@@ -182,6 +200,11 @@ class Trainer:
                 metrics={
                     **train_metrics,
                     **{f"val_{k}": v for k, v in val_metrics.items()},
+                    **(
+                        {f"source_val_{k}": v for k, v in source_val_metrics.items()}
+                        if source_val_metrics is not None
+                        else {}
+                    ),
                     "monitor_metric": self.monitor_metric,
                     "monitor_value": monitor_value,
                 },
@@ -222,16 +245,18 @@ class Trainer:
         self.model.train()
         total_loss = 0.0
         total_main_loss = 0.0
+        total_source_loss = 0.0
+        total_target_loss = 0.0
         total_aux_loss = 0.0
         total_consistency_loss = 0.0
         total_l2sp_loss = 0.0
         total_coral_loss = 0.0
         total_domain_loss = 0.0
         total_domain_samples = 0
-        correct = 0
         total = 0
         t0 = time.time()
-        all_logits, all_targets = [], []
+        source_logits, source_targets = [], []
+        target_logits, target_targets = [], []
 
         for batch in self.loaders["train"]:
 
@@ -248,13 +273,16 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
 
             outputs1 = self._normalize_outputs(self.model(x1))
+            self._assert_logits_and_targets(outputs1["main_logits"], y, "source")
             coral_term = self._zero_loss()
 
             outputs_clin = None
+            target_loss = self._zero_loss()
 
             if x_clin is not None:
 
                 outputs_clin = self._normalize_outputs(self.model(x_clin))
+                self._assert_logits_and_targets(outputs_clin["main_logits"], y_clin, "target")
 
                 if self.coral_enabled:
                     feat_ref = outputs1.get("features")
@@ -268,16 +296,21 @@ class Trainer:
 
                         coral_term = coral_loss(feat_ref, feat_clin)
                             
-            if x_clin is not None:
-                outputs_target = outputs_clin
-                loss_src = self.loss_fn(outputs1["main_logits"], y)
-                loss_tgt = self.loss_fn(outputs_target["main_logits"], y_clin)
-
-                main_loss = 0.5 * loss_src + 0.5 * loss_tgt
+            source_loss = self.loss_fn(outputs1["main_logits"], y)
+            if (
+                outputs_clin is not None
+                and self.target_supervised_enabled
+                and self.target_supervised_weight > 0.0
+            ):
+                target_loss = self.loss_fn(outputs_clin["main_logits"], y_clin)
+                main_loss = (
+                    source_loss
+                    + self.target_supervised_weight * target_loss
+                ) / (1.0 + self.target_supervised_weight)
             else:
-                main_loss = self.loss_fn(outputs1["main_logits"], y)
+                main_loss = source_loss
             
-            if x_clin is not None:
+            if outputs_clin is not None and self.target_supervised_enabled:
                 aux_loss = self._compute_aux_loss(outputs_clin, y_clin)
             else:
                 aux_loss = self._compute_aux_loss(outputs1, y)
@@ -320,16 +353,21 @@ class Trainer:
                         torch.ones(feat_clin.size(0), dtype=torch.long, device=self.device)
                     ])
 
-                    p = epoch / self.train_cfg.get("max_epochs", 100)
+                    max_epochs = max(1, self.train_cfg.get("max_epochs", 100) - 1)
+                    p = (epoch - 1) / max_epochs
                     lambda_ = 2. / (1. + np.exp(-10 * p)) - 1
 
                     feat_all = GradReverse.apply(feat_all, lambda_)
 
+                    if not hasattr(self.model, "domain_classifier"):
+                        raise AttributeError(
+                            "DANN is enabled but the model has no domain_classifier"
+                        )
                     domain_logits = self.model.domain_classifier(feat_all)
 
                     domain_loss = nn.CrossEntropyLoss()(domain_logits, domain_labels)
                     
-                    if epoch == 1 and len(all_logits) == 0:
+                    if epoch == 1 and len(source_logits) == 0:
                         print(f"DOMAIN LOSS SAMPLE: {domain_loss.item():.4f}")
 
                     domain_batch_size = domain_labels.size(0)
@@ -346,39 +384,51 @@ class Trainer:
             batch_size = len(y)
             total_loss += loss.item() * batch_size
             total_main_loss += main_loss.item() * batch_size
+            total_source_loss += source_loss.item() * batch_size
+            total_target_loss += target_loss.item() * batch_size
             total_aux_loss += aux_loss.item() * batch_size
             total_consistency_loss += consistency_term.item() * batch_size
             total_l2sp_loss += l2sp_term.item() * batch_size
             total_coral_loss += coral_term.item() * batch_size
             total += batch_size
-            if x_clin is not None:
-                correct += (outputs_target["main_logits"].argmax(dim=-1) == y_clin).sum().item()
-                all_logits.append(outputs_target["main_logits"].detach().cpu())
-                all_targets.append(y_clin.detach().cpu())
-            else:
-                correct += (outputs1["main_logits"].argmax(dim=-1) == y).sum().item()
-                all_logits.append(outputs1["main_logits"].detach().cpu())
-                all_targets.append(y.detach().cpu())
+            source_logits.append(outputs1["main_logits"].detach().cpu())
+            source_targets.append(y.detach().cpu())
+            if outputs_clin is not None:
+                target_logits.append(outputs_clin["main_logits"].detach().cpu())
+                target_targets.append(y_clin.detach().cpu())
         
         avg_domain_loss = total_domain_loss / max(total_domain_samples, 1)
 
         print(f"[Epoch {epoch}] Avg Domain Loss: {avg_domain_loss:.4f}")
 
         metrics = compute_metrics(
-            torch.cat(all_logits, dim=0),
-            torch.cat(all_targets, dim=0),
+            torch.cat(source_logits, dim=0),
+            torch.cat(source_targets, dim=0),
             self.n_classes,
         )
+        metrics["source_accuracy"] = metrics["accuracy"]
+        if target_logits:
+            target_metrics = compute_metrics(
+                torch.cat(target_logits, dim=0),
+                torch.cat(target_targets, dim=0),
+                self.n_classes,
+            )
+            metrics["target_accuracy"] = target_metrics["accuracy"]
+            metrics["target_f1_macro"] = target_metrics["f1_macro"]
+        else:
+            metrics["target_accuracy"] = 0.0
+            metrics["target_f1_macro"] = 0.0
         metrics.update(
             {
                 "loss": total_loss / total,
                 "main_loss": total_main_loss / total,
+                "source_loss": total_source_loss / total,
+                "target_loss": total_target_loss / total,
                 "aux_loss": total_aux_loss / total,
                 "consistency_loss": total_consistency_loss / total,
                 "l2sp_loss": total_l2sp_loss / total,
                 "coral_loss": total_coral_loss / total,
                 "domain_loss": avg_domain_loss,
-                "accuracy": correct / total,
                 "lr": self.optimizer.param_groups[0]["lr"],
                 "epoch_time": time.time() - t0,
             }
@@ -393,6 +443,7 @@ class Trainer:
         for batch in loader:
             x, _, y = self._parse_batch(batch)
             outputs = self._normalize_outputs(self.model(x))
+            self._assert_logits_and_targets(outputs["main_logits"], y, "eval")
             all_logits.append(outputs["main_logits"].cpu())
             all_targets.append(y.cpu())
 
@@ -510,6 +561,25 @@ class Trainer:
     def _zero_loss(self) -> torch.Tensor:
         return torch.tensor(0.0, device=self.device)
 
+    def _assert_logits_and_targets(
+        self,
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        split_name: str,
+    ) -> None:
+        assert logits.shape[-1] == self.n_classes, (
+            f"{split_name} logits must have {self.n_classes} classes, "
+            f"got shape {tuple(logits.shape)}"
+        )
+        if targets.numel() == 0:
+            raise AssertionError(f"{split_name} batch has no targets")
+        assert int(targets.min()) >= 0, (
+            f"{split_name} targets must be non-negative, got {int(targets.min())}"
+        )
+        assert int(targets.max()) < self.n_classes, (
+            f"{split_name} targets must be < {self.n_classes}, got {int(targets.max())}"
+        )
+
 
 def build_trainer(
     model: nn.Module,
@@ -536,9 +606,13 @@ def build_trainer(
         optimizer=optimizer,
         cfg=train_cfg.get("scheduler_cfg", {"T_max": train_cfg.get("max_epochs", 100)}),
     )
+    loss_kwargs = dict(train_cfg.get("loss_kwargs", {}))
+    class_weights = _compute_class_weights(loaders, n_classes, train_cfg)
+    if class_weights is not None and "weight" not in loss_kwargs:
+        loss_kwargs["weight"] = class_weights
     loss_fn = get_loss(
         name=train_cfg.get("loss", "cross_entropy"),
-        **train_cfg.get("loss_kwargs", {}),
+        **loss_kwargs,
     )
     logger = ExperimentLogger(
         exp_dir=exp_dir,
@@ -558,3 +632,33 @@ def build_trainer(
         n_classes=n_classes,
         reference_state=reference_state,
     )
+
+
+def _compute_class_weights(
+    loaders: Dict,
+    n_classes: int,
+    train_cfg: dict,
+) -> torch.Tensor | None:
+    class_weight_cfg = train_cfg.get("class_weights", {})
+    if not class_weight_cfg.get("enabled", False):
+        return None
+
+    loader_name = class_weight_cfg.get("source", "train")
+    if loader_name not in loaders:
+        raise KeyError(
+            f"class_weights.source='{loader_name}' not found. "
+            f"Available loaders: {sorted(loaders.keys())}"
+        )
+
+    dataset = loaders[loader_name].dataset
+    if not hasattr(dataset, "y"):
+        return None
+
+    targets = np.asarray(dataset.y, dtype=np.int64)
+    counts = np.bincount(targets, minlength=n_classes)
+    if np.any(counts == 0):
+        missing = np.where(counts == 0)[0].tolist()
+        raise ValueError(f"Cannot compute class weights; missing classes: {missing}")
+
+    weights = counts.sum() / (n_classes * counts.astype(np.float32))
+    return torch.as_tensor(weights, dtype=torch.float32)

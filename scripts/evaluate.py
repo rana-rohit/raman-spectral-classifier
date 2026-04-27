@@ -21,6 +21,7 @@ from src.models.registry import get_model
 from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config
 from src.utils.seed import set_seed
+from src.utils.class_subset import filter_and_remap_classes
 
 
 def parse_args():
@@ -36,7 +37,16 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
     registry.load_all()
 
-    X_ref, _ = registry.get_arrays("reference")
+    shared_classes = cfg["dataset"]["shared_classes"]
+    n_classes = cfg["dataset"]["n_classes_clinical"]
+    assert n_classes == len(shared_classes), (
+        f"n_classes_clinical must match shared_classes, "
+        f"got {n_classes} vs {len(shared_classes)}"
+    )
+    cfg["model"]["n_classes"] = n_classes
+
+    X_ref, y_ref = registry.get_arrays("reference")
+    X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
 
@@ -55,8 +65,9 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
             "seed": seed,
             "consistency": cfg.get("training", {}).get("consistency", {}),
         },
+        shared_classes=shared_classes,
     )
-    return loaders, cfg["dataset"]["n_classes_full"]
+    return loaders, n_classes
 
 
 def evaluate_one(exp_dir: str, seed: int) -> dict:

@@ -11,8 +11,7 @@ Computes:
 - Matthews Correlation Coefficient
 - Confusion matrix
 
-All metrics work on both the full 30-class problem and the
-5-class OOD evaluation (via the class_filter in the DataLoader).
+All metrics are used by the production shared 5-class clinical pipeline.
 """
 
 from __future__ import annotations

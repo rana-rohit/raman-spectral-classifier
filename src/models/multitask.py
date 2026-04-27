@@ -10,9 +10,8 @@ class MultiHeadSpectralModel(nn.Module):
     """
     Wrap a backbone with an auxiliary shared-class classifier.
 
-    The backbone still owns the main 30-class classifier. This wrapper adds a
-    second head over the same feature representation for the clinically shared
-    subset without changing the base architecture implementation.
+    Optional auxiliary head over the same feature representation. The primary
+    production recipe already uses the shared 5-class classifier.
     """
 
     def __init__(
@@ -36,6 +35,8 @@ class MultiHeadSpectralModel(nn.Module):
             nn.Dropout(aux_dropout),
             nn.Linear(self.embedding_dim, len(self.shared_class_ids)),
         )
+        if hasattr(backbone, "domain_classifier"):
+            self.domain_classifier = backbone.domain_classifier
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         return self.backbone.forward_features(x)

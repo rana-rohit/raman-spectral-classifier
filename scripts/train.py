@@ -67,6 +67,13 @@ def main():
         f"configs/model/{args.model}.yaml",
     )
     cfg = apply_overrides(dict(cfg), args.override)
+    shared_classes = cfg["dataset"]["shared_classes"]
+    n_classes = cfg["dataset"]["n_classes_clinical"]
+    assert n_classes == len(shared_classes), (
+        f"n_classes_clinical must match shared_classes, "
+        f"got {n_classes} vs {len(shared_classes)}"
+    )
+    cfg["model"]["n_classes"] = n_classes
 
     exp_name = args.exp_name or f"{args.model}_{time.strftime('%Y%m%d_%H%M%S')}"
     exp_dir = os.path.join(args.exp_dir, exp_name)
@@ -80,8 +87,6 @@ def main():
     registry.load_all()
 
     X_ref, y_ref = registry.get_arrays("reference")
-
-    shared_classes = cfg["dataset"]["shared_classes"]
 
     X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
 
@@ -109,7 +114,9 @@ def main():
     )
 
     print(f"  Train: {len(loaders['train'].dataset):,} samples")
-    print(f"  Val:   {len(loaders['val'].dataset):,} samples")
+    print(f"  Source val:   {len(loaders['source_val'].dataset):,} samples")
+    if "clinical_val" in loaders:
+        print(f"  Clinical val: {len(loaders['clinical_val'].dataset):,} samples")
 
     print("\n[2/4] Building model...")
     model = get_model(args.model, cfg)
@@ -121,7 +128,7 @@ def main():
         loaders=loaders,
         cfg=cfg,
         exp_dir=exp_dir,
-        n_classes=cfg["dataset"]["n_classes_clinical"],
+        n_classes=n_classes,
     )
     trainer.fit()
     load_best_model(exp_dir, model)
@@ -130,7 +137,7 @@ def main():
     evaluator = ModelEvaluator(
         model=model,
         model_name=args.model,
-        n_classes=cfg["dataset"]["n_classes_clinical"],
+        n_classes=n_classes,
         device=str(next(model.parameters()).device),
         cfg=cfg,
     )
@@ -148,7 +155,7 @@ def main():
         cfg=cfg,
         exp_dir=finetune_dir,
         freeze_epochs=3,
-        n_classes=cfg["dataset"]["n_classes_clinical"],
+        n_classes=n_classes,
     )
 
     print(f"\n  Done. Training artifacts: {exp_dir}/")

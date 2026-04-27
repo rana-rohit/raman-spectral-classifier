@@ -13,6 +13,11 @@ dataset:
   training_classes: [0, 2, 3, 5, 6]
   already_normalised: false
 
+task:
+  mode: shared_clinical_5
+  original_classes: [0, 2, 3, 5, 6]
+  remapped_classes: [0, 1, 2, 3, 4]
+
 splits:
   reference:
     x_file: X_reference.npy
@@ -62,4 +67,6 @@ validation:
   strategy: stratified_split
   source_split: reference
   val_fraction: 0.20
+  clinical_val_fraction: 0.20
+  clinical_eval_fraction: 0.20
   random_seed: 42

@@ -98,6 +98,11 @@ class ResNet1D(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(c4, n_classes),
         )
+        self.domain_classifier = nn.Sequential(
+            nn.Linear(c4, 128),
+            nn.ReLU(),
+            nn.Linear(128, 2),
+        )
 
         self._init_weights()
 
@@ -123,8 +128,12 @@ class ResNet1D(nn.Module):
         x = self.gap(x)
         return x.squeeze(-1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.classifier(self.forward_features(x))
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        features = self.forward_features(x)
+        return {
+            "main_logits": self.classifier(features),
+            "features": features,
+        }
 
     def get_feature_maps(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem(x)

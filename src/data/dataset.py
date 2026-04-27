@@ -7,7 +7,7 @@ Supports optional multi-channel input (raw + first derivative).
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Mapping, Tuple
 
 import numpy as np
 import torch
@@ -24,15 +24,14 @@ class SpectralDataset(Dataset):
         training: bool = False, 
         n_views: int = 1,
         preprocessor=None,
-        
+        expected_n_classes: int | None = None,
+        class_filter: list[int] | None = None,
+        class_map: Mapping[int, int] | None = None,
+        inverse_class_map: Mapping[int, int] | None = None,
+        sample_ids=None,
     ) -> None:
         self.X = X.astype(np.float32)
         self.y = y.astype(np.int64)
-        unique = np.unique(self.y)
-        if not np.array_equal(unique, np.arange(len(unique))):
-            raise ValueError(
-                f"Labels must be contiguous [0..N-1], got {unique}"
-            )
         if self.X.ndim != 2:
             raise ValueError(f"Expected X shape (N, L), got {self.X.shape}")
 
@@ -40,6 +39,21 @@ class SpectralDataset(Dataset):
             raise ValueError(
                 f"X and y size mismatch: {self.X.shape[0]} vs {len(self.y)}"
             )
+
+        self.expected_n_classes = expected_n_classes
+        self.class_filter = list(class_filter) if class_filter is not None else None
+        self.class_map = dict(class_map or {})
+        self.inverse_class_map = dict(inverse_class_map or {})
+        if sample_ids is None:
+            self.sample_ids = np.arange(len(self.y))
+        else:
+            self.sample_ids = np.asarray(sample_ids)
+            if len(self.sample_ids) != len(self.y):
+                raise ValueError(
+                    f"sample_ids and y size mismatch: {len(self.sample_ids)} vs {len(self.y)}"
+                )
+        self._validate_labels()
+
         self.augmentation = augmentation
         self.training = training
         self.n_views = int(n_views) 
@@ -110,6 +124,24 @@ class SpectralDataset(Dataset):
     def class_counts(self) -> dict:
         unique, counts = np.unique(self.y, return_counts=True)
         return dict(zip(unique.tolist(), counts.tolist()))
+
+    def _validate_labels(self) -> None:
+        if len(self.y) == 0:
+            raise ValueError("Dataset cannot be empty")
+
+        unique = np.unique(self.y)
+        expected_unique = np.arange(len(unique))
+        if not np.array_equal(unique, expected_unique):
+            raise ValueError(
+                f"Labels must be contiguous [0..N-1], got {unique}"
+            )
+
+        if self.expected_n_classes is not None:
+            if self.y.min() < 0 or self.y.max() >= self.expected_n_classes:
+                raise ValueError(
+                    f"Labels must be in [0, {self.expected_n_classes - 1}], "
+                    f"got [{self.y.min()}, {self.y.max()}]"
+                )
 
 
 def make_train_val_split(

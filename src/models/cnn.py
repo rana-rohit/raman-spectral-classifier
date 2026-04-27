@@ -8,7 +8,7 @@ Design decisions:
 - BatchNorm after every conv for training stability
 - Global Average Pooling instead of Flatten gives spatial invariance,
   reduces parameter count, and is required for Grad-CAM to work correctly
-- Dropout before classifier head regularises the 30-class output
+- Dropout before classifier head regularises the shared-class output
 - No normalization after feature extraction to preserve discriminative amplitude information
 """
 

@@ -15,6 +15,7 @@ from typing import Dict, Optional
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, Subset
 
 from src.evaluation.evaluator import ModelEvaluator
 from src.training.trainer import build_trainer
@@ -196,7 +197,12 @@ def _make_finetune_cfg(base_cfg: dict, freeze_epochs: int) -> dict:
     # Keep DANN active during finetuning with reduced weight for
     # continued domain alignment (was previously force-disabled).
     ft["dann"] = {
+        "enabled": ft.get("dann", {}).get("enabled", True),
         "weight": ft.get("dann", {}).get("weight", 0.3),
+    }
+    ft["coral"] = {
+        "enabled": ft.get("coral", {}).get("enabled", True),
+        "weight": ft.get("coral", {}).get("weight", 0.1),
     }
 
     # Allow BatchNorm to adapt to the finetune domain distribution

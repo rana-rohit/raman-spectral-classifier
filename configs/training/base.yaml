@@ -13,8 +13,10 @@ training:
   weight_decay: 0.0005  
 
   loss: cross_entropy
-  loss_kwargs: 
-    label_smoothing: 0.1
+  loss_kwargs: {}
+  class_weights:
+    enabled: true
+    source: train
 
   scheduler: warmup_cosine
   scheduler_cfg:
@@ -40,6 +42,10 @@ training:
     enabled: false
     loss_weight: 0.1
     views: 2
+
+  target_supervised:
+    enabled: true
+    weight: 1.0
   
   dann:
     enabled: true

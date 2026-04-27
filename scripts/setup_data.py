@@ -25,6 +25,7 @@ from src.data.registry import DataRegistry
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
+from src.utils.class_subset import filter_and_remap_classes
 
 
 def load_yaml(path: str) -> dict:
@@ -53,8 +54,10 @@ def main():
     # ---- Fit preprocessor on reference ONLY ----
     print("[2/5] Fitting preprocessor on reference split...")
     X_ref, y_ref = registry.get_arrays("reference")
+    shared_classes = splits_cfg["dataset"]["shared_classes"]
+    X_ref_fit, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
     preprocessor = SpectralPreprocessor.from_config(prep_cfg["preprocessing"])
-    X_ref_clean  = preprocessor.fit_transform(X_ref)
+    X_ref_clean  = preprocessor.fit_transform(X_ref_fit)
     print(f"      {preprocessor}")
     print(f"      Reference: raw  mean={X_ref.mean():.4f}  std={X_ref.std():.4f}")
     print(f"      Reference: proc mean={X_ref_clean.mean():.4f}  std={X_ref_clean.std():.4f}")
@@ -94,14 +97,13 @@ def main():
         "validation": splits_cfg["validation"],
     }
 
-    shared_classes = splits_cfg["dataset"]["shared_classes"]    
     loaders = build_all_loaders(registry, preprocessor, augmentation, loader_cfg, shared_classes=shared_classes,)
 
     for name, loader in loaders.items():
         if name == "ood":
             for ood_name, ood_loader in loader.items():
                 x_batch, y_batch = next(iter(ood_loader))
-                classes = sorted(y_batch.unique().tolist())
+                classes = sorted(set(ood_loader.dataset.y.tolist()))
 
                 print(
                     f"      OOD {ood_name:>14s}: x={tuple(x_batch.shape)}  "
@@ -119,7 +121,7 @@ def main():
                     print(f"[WARN] OOD split {ood_name} missing classes: {classes}")
         else:
             x_batch, y_batch = next(iter(loader))
-            classes = sorted(y_batch.unique().tolist())
+            classes = sorted(set(loader.dataset.y.tolist()))
 
             print(
                 f"      {name:>20s}: x={tuple(x_batch.shape)}  "

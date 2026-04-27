@@ -1,7 +1,7 @@
 model:
   name: transformer
   signal_length: 1000
-  n_classes: 30
+  n_classes: 5
   patch_size: 20
   d_model: 256
   n_heads: 8
@@ -15,7 +15,8 @@ training:
   lr: 0.0005
   loss: focal
   loss_kwargs:
-    gamma: 2.0  
+    gamma: 2.0
+    alpha: 0.75
   scheduler: warmup_cosine
   scheduler_cfg:
     warmup_epochs: 10

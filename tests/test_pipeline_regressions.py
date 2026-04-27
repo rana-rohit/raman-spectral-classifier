@@ -14,6 +14,7 @@ from src.training.trainer import build_trainer
 from src.utils.checkpoint import load_best_model, save_checkpoint
 from src.utils.class_subset import prepare_subset_eval_logits
 from src.data.dataset import SpectralDataset
+from src.data.preprocessing import SpectralPreprocessor
 
 
 class TinyClassifier(nn.Module):
@@ -179,15 +180,24 @@ def test_l2sp_regularizer_penalizes_drift_and_respects_exclusions():
 
 def test_spectral_dataset_returns_two_augmented_views_when_enabled():
     X = np.arange(24, dtype=np.float32).reshape(3, 8)
-    y = np.array([0, 2, 6], dtype=np.int64)
+    y = np.array([0, 1, 2], dtype=np.int64)
 
-    dataset = SpectralDataset(X, y, augmentation=None, training=True, n_views=2)
+    preprocessor = SpectralPreprocessor([]).fit(X)
+    dataset = SpectralDataset(
+        X,
+        y,
+        augmentation=None,
+        training=True,
+        n_views=2,
+        preprocessor=preprocessor,
+        expected_n_classes=3,
+    )
     sample = dataset[1]
 
     assert set(sample.keys()) == {"x1", "x2", "y"}
-    assert sample["x1"].shape == (1, 8)
-    assert sample["x2"].shape == (1, 8)
-    assert sample["y"].item() == 2
+    assert sample["x1"].shape == (2, 8)
+    assert sample["x2"].shape == (2, 8)
+    assert sample["y"].item() == 1
 
 
 def test_registry_wraps_model_with_auxiliary_shared_head():
@@ -195,11 +205,13 @@ def test_registry_wraps_model_with_auxiliary_shared_head():
         "model": {
             "name": "cnn",
             "signal_length": 32,
-            "n_classes": 30,
+            "n_classes": 5,
             "channels": [8, 16, 32, 64],
             "kernel_sizes": [3, 3, 3, 3],
             "dropout": 0.1,
         },
+        "dataset": {"shared_classes": [0, 2, 3, 5, 6]},
+        "task": {"mode": "shared_clinical_5"},
         "multitask": {
             "auxiliary_shared_head": {
                 "enabled": True,
@@ -213,5 +225,5 @@ def test_registry_wraps_model_with_auxiliary_shared_head():
     outputs = model(torch.randn(2, 1, 32))
 
     assert isinstance(model, MultiHeadSpectralModel)
-    assert outputs["main_logits"].shape == (2, 30)
+    assert outputs["main_logits"].shape == (2, 5)
     assert outputs["aux_logits"].shape == (2, 5)

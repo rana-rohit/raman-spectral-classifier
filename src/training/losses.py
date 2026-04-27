@@ -12,10 +12,19 @@ import torch.nn.functional as F
 
 
 class LabelSmoothingCrossEntropy(nn.Module):
-    def __init__(self, smoothing: float = 0.1, reduction: str = "mean") -> None:
+    def __init__(
+        self,
+        smoothing: float = 0.1,
+        reduction: str = "mean",
+        weight: torch.Tensor | None = None,
+    ) -> None:
         super().__init__()
         self.smoothing = smoothing
         self.reduction = reduction
+        self.register_buffer(
+            "weight",
+            weight.float() if weight is not None else None,
+        )
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         n_classes = logits.size(-1)
@@ -28,7 +37,15 @@ class LabelSmoothingCrossEntropy(nn.Module):
             smooth_targets.scatter_(-1, targets.unsqueeze(-1), 1.0 - self.smoothing)
 
         loss = -(smooth_targets * log_probs).sum(dim=-1)
+        if self.weight is not None:
+            sample_weight = self.weight.gather(0, targets)
+            loss = loss * sample_weight
+        else:
+            sample_weight = None
+
         if self.reduction == "mean":
+            if sample_weight is not None:
+                return loss.sum() / sample_weight.sum().clamp_min(1e-8)
             return loss.mean()
         if self.reduction == "sum":
             return loss.sum()
@@ -58,13 +75,22 @@ def coral_loss(source, target):
     return loss
     
 class FocalLoss(nn.Module):
-    def __init__(self, gamma: float = 2.0, reduction: str = "mean") -> None:
+    def __init__(
+        self,
+        gamma: float = 2.0,
+        reduction: str = "mean",
+        weight: torch.Tensor | None = None,
+    ) -> None:
         super().__init__()
         self.gamma = gamma
         self.reduction = reduction
+        self.register_buffer(
+            "weight",
+            weight.float() if weight is not None else None,
+        )
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        ce_loss = F.cross_entropy(logits, targets, reduction="none")
+        ce_loss = F.cross_entropy(logits, targets, weight=self.weight, reduction="none")
         pt = torch.exp(-ce_loss.detach())
         focal = (1 - pt) ** self.gamma * ce_loss
 

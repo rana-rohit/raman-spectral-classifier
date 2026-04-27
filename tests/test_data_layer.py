@@ -23,6 +23,7 @@ from src.data.augmentation import (
 )
 from src.data.dataset import SpectralDataset, make_train_val_split
 from src.data.split_roles import SplitRole, role_from_str
+from src.utils.class_subset import filter_and_remap_classes
 
 
 # ============================================================ #
@@ -98,8 +99,8 @@ class TestSpectralPreprocessor:
         pipe.fit(X_train)
         out_train = pipe.transform(X_train)
         out_test  = pipe.transform(X_test)
-        assert out_train.shape == X_train.shape
-        assert out_test.shape  == X_test.shape
+        assert out_train.shape == (len(X_train), 2, X_train.shape[1])
+        assert out_test.shape  == (len(X_test), 2, X_test.shape[1])
 
     def test_from_config(self):
         cfg = {
@@ -155,26 +156,38 @@ class TestAugmentations:
 class TestSpectralDataset:
     def test_output_shape(self, synthetic_data):
         X, y = synthetic_data
-        ds = SpectralDataset(X, y)
+        preprocessor = SpectralPreprocessor([]).fit(X)
+        ds = SpectralDataset(X, y, preprocessor=preprocessor)
         x_t, y_t = ds[0]
-        assert x_t.shape == torch.Size([1, 1000])   # (channel, length)
+        assert x_t.shape == torch.Size([2, 1000])   # (channels, length)
         assert y_t.dtype == torch.long
 
     def test_class_filter(self, synthetic_data):
         X, y = synthetic_data
-        ds = SpectralDataset(X, y, class_filter=[0, 2, 3, 5, 6])
+        class_filter = [0, 2, 3, 5, 6]
+        X, y = filter_and_remap_classes(X, y, class_filter)
+        preprocessor = SpectralPreprocessor([]).fit(X)
+        ds = SpectralDataset(
+            X,
+            y,
+            preprocessor=preprocessor,
+            expected_n_classes=len(class_filter),
+            class_filter=class_filter,
+        )
         for _, label in ds:
-            assert label.item() in [0, 2, 3, 5, 6]
+            assert label.item() in range(len(class_filter))
 
     def test_augmentation_only_in_training(self, synthetic_data):
         """Augmentation should not change data when training=False."""
         X, y = synthetic_data
         aug = AugmentationPipeline([GaussianNoise(max_std=0.5)], p=1.0)
-        ds_train = SpectralDataset(X, y, augmentation=aug, training=True)
-        ds_eval  = SpectralDataset(X, y, augmentation=aug, training=False)
+        preprocessor = SpectralPreprocessor([]).fit(X)
+        ds_train = SpectralDataset(X, y, augmentation=aug, training=True, preprocessor=preprocessor)
+        ds_eval  = SpectralDataset(X, y, augmentation=aug, training=False, preprocessor=preprocessor)
         # Eval dataset should return exact values (no noise)
         x_eval, _ = ds_eval[0]
-        assert np.allclose(x_eval.numpy()[0], X[0], atol=1e-6)
+        expected = preprocessor.transform(X[:1])[0]
+        assert np.allclose(x_eval.numpy(), expected, atol=1e-6)
 
     def test_length_consistent(self, synthetic_data):
         X, y = synthetic_data

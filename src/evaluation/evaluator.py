@@ -34,6 +34,12 @@ class ModelEvaluator:
         self.device = torch.device(device)
         self.model.to(self.device)
         self.model.eval()
+        shared_classes = self.cfg.get("dataset", {}).get("shared_classes", [])
+        if shared_classes:
+            assert self.n_classes == len(shared_classes), (
+                f"Evaluator n_classes must match shared_classes, "
+                f"got {self.n_classes} vs {len(shared_classes)}"
+            )
 
         aux_cfg = self.cfg.get("multitask", {}).get("auxiliary_shared_head", {})
         self.aux_enabled = aux_cfg.get("enabled", False)
@@ -47,43 +53,33 @@ class ModelEvaluator:
         loader: DataLoader,
         split_name: str,
     ) -> Dict:
-        all_main_logits, all_aux_logits, all_targets = [], [], []
+        all_main_logits, all_targets = [], []
 
         for batch in loader:
             x, y = self._parse_batch(batch)
             outputs = self._normalize_outputs(self.model(x))
             all_main_logits.append(outputs["main_logits"].cpu())
-            if outputs["aux_logits"] is not None:
-                all_aux_logits.append(outputs["aux_logits"].cpu())
             all_targets.append(y.cpu())
 
         main_logits = torch.cat(all_main_logits, dim=0)
         targets = torch.cat(all_targets, dim=0)
-        aux_logits = torch.cat(all_aux_logits, dim=0) if all_aux_logits else None
-
-        class_filter = getattr(loader.dataset, "class_filter", None)
-        if class_filter is not None:
-            from src.evaluation.clinical_utils import clinical_subset_eval
-
-            eval_logits, eval_targets = clinical_subset_eval(
-                logits=main_logits,
-                targets=targets,
-                valid_classes=class_filter,
-                aux_logits=aux_logits,
-                aux_blend=self.aux_blend,
-            )
-            n_classes = len(class_filter)
-        else:
-            eval_logits, eval_targets = main_logits, targets
-            n_classes = self.n_classes
+        self._assert_logits_and_targets(main_logits, targets, split_name)
+        eval_logits, eval_targets = main_logits, targets
+        n_classes = self.n_classes
 
         metrics = compute_metrics(eval_logits, eval_targets, n_classes)
         cm, present_classes = compute_confusion_matrix(eval_logits, eval_targets, n_classes)
+        inverse_class_map = getattr(loader.dataset, "inverse_class_map", {})
+        original_present_classes = [
+            inverse_class_map.get(int(cls), int(cls))
+            for cls in present_classes
+        ]
 
         self.results["splits"][split_name] = {
             "metrics": metrics,
             "confusion_matrix": cm.tolist(),
             "present_classes": present_classes,
+            "original_present_classes": original_present_classes,
             "n_samples": len(eval_targets),
             "predictions": eval_logits.argmax(dim=-1).numpy().tolist(),
             "targets": eval_targets.numpy().tolist(),
@@ -186,6 +182,25 @@ class ModelEvaluator:
         if isinstance(batch, (tuple, list)) and len(batch) == 2:
             return batch[0].to(self.device), batch[1].to(self.device)
         raise TypeError(f"Unsupported batch type: {type(batch)!r}")
+
+    def _assert_logits_and_targets(
+        self,
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        split_name: str,
+    ) -> None:
+        assert logits.shape[-1] == self.n_classes, (
+            f"{split_name} logits must have {self.n_classes} classes, "
+            f"got shape {tuple(logits.shape)}"
+        )
+        if targets.numel() == 0:
+            raise AssertionError(f"{split_name} has no targets")
+        assert int(targets.min()) >= 0, (
+            f"{split_name} targets must be non-negative, got {int(targets.min())}"
+        )
+        assert int(targets.max()) < self.n_classes, (
+            f"{split_name} targets must be < {self.n_classes}, got {int(targets.max())}"
+        )
 
 
 def compare_models(

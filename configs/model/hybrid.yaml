@@ -1,7 +1,7 @@
 model:
   name: hybrid
   signal_length: 1000
-  n_classes: 30
+  n_classes: 5
   handoff_blocks: 2
   d_model: 256
   n_heads: 8

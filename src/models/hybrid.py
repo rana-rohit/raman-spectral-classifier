@@ -83,6 +83,11 @@ class HybridCNNTransformer(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(d_model, n_classes),
         )
+        self.domain_classifier = nn.Sequential(
+            nn.Linear(d_model, 128),
+            nn.ReLU(),
+            nn.Linear(128, 2),
+        )
 
         self._init_weights()
 
@@ -115,13 +120,16 @@ class HybridCNNTransformer(nn.Module):
         self,
         x: torch.Tensor,
         return_attn: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
+    ) -> dict[str, torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]]:
         tokens, attn_maps = self._encode(x, return_attn=return_attn)
         cls_out = self.norm(tokens[:, 0, :])
         logits = self.classifier(cls_out)
         if return_attn:
             return logits, attn_maps
-        return logits
+        return {
+            "main_logits": logits,
+            "features": cls_out,
+        }
 
     def get_attention_maps(self, x: torch.Tensor) -> list:
         _, attn_maps = self.forward(x, return_attn=True)

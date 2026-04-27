@@ -33,6 +33,14 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
 
     model_cls = MODEL_REGISTRY[name]
     model_cfg = cfg.get("model", {})
+    shared_classes = cfg.get("dataset", {}).get("shared_classes", [])
+    task_mode = cfg.get("task", {}).get("mode", "shared_clinical_5")
+    n_classes = int(model_cfg.get("n_classes", len(shared_classes) or 5))
+    if task_mode == "shared_clinical_5":
+        assert n_classes == len(shared_classes), (
+            f"Shared-class task requires n_classes == len(shared_classes), "
+            f"got {n_classes} vs {len(shared_classes)}"
+        )
 
     # Determine input channels (1 = raw only, 2 = raw + derivative)
     deriv_cfg = cfg.get("preprocessing", cfg.get("derivative", {}))
@@ -45,7 +53,7 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
 
     common = {
         "signal_length": model_cfg.get("signal_length", 1000),
-        "n_classes": model_cfg.get("n_classes", 30),
+        "n_classes": n_classes,
         "in_channels": model_cfg.get("in_channels", default_in_channels),
     }
     specific = {

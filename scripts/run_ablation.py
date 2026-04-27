@@ -24,6 +24,7 @@ from src.training.trainer import build_trainer
 from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config
 from src.utils.seed import set_seed
+from src.utils.class_subset import filter_and_remap_classes
 
 
 def parse_args():
@@ -42,7 +43,12 @@ def parse_args():
 def _build_loaders_for_cfg(cfg: dict, seed: int) -> dict:
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
     registry.load_all()
-    X_ref, _ = registry.get_arrays("reference")
+    shared_classes = cfg["dataset"]["shared_classes"]
+    n_classes = cfg["dataset"]["n_classes_clinical"]
+    assert n_classes == len(shared_classes)
+    cfg["model"]["n_classes"] = n_classes
+    X_ref, y_ref = registry.get_arrays("reference")
+    X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
     augmentation = AugmentationPipeline.from_config(cfg["augmentation"])
@@ -59,6 +65,7 @@ def _build_loaders_for_cfg(cfg: dict, seed: int) -> dict:
             "seed": seed,
             "consistency": cfg.get("training", {}).get("consistency", {}),
         },
+        shared_classes=shared_classes,
     )
 
 
@@ -233,7 +240,7 @@ def main():
         "configs/model/hybrid.yaml",
     )
 
-    n_classes = cfg["dataset"]["n_classes_full"]
+    n_classes = cfg["dataset"]["n_classes_clinical"]
     exp_root = args.exp_dir
     os.makedirs(exp_root, exist_ok=True)
 
