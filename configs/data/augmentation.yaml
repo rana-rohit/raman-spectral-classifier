@@ -4,7 +4,7 @@
 # =============================================================================
 
 augmentation:
-  apply_probability: 0.2
+  apply_probability: 0.25
   seed: 42
   clip_min: -3.0
   clip_max: 3.0
