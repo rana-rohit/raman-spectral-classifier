@@ -49,7 +49,7 @@ training:
   
   dann:
     enabled: true
-    weight: 0.2
+    weight: 0.1
   
   coral:
     enabled: true
