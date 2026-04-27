@@ -4,7 +4,7 @@
 
 preprocessing:
   snv_normalization:
-    enabled: false
+    enabled: true
 
   per_sample_mean_subtraction:
     enabled: false  

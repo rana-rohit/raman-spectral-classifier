@@ -12,15 +12,15 @@ augmentation:
   steps:
     gaussian_noise:
       enabled: true
-      max_std: 0.05
+      max_std: 0.03
 
     baseline_shift:
       enabled: false
       max_shift: 0.1
 
     amplitude_scale:
-      enabled: false
-      factor: 0.15
+      enabled: true
+      factor: 0.1
 
     multiplicative_intensity:
       enabled: false
@@ -28,7 +28,7 @@ augmentation:
 
     baseline_drift:
       enabled: true
-      max_strength: 0.1
+      max_strength: 0.07
       n_control_points: 5
 
     polynomial_baseline:
@@ -38,7 +38,7 @@ augmentation:
 
     peak_broadening:
       enabled: true
-      max_sigma: 0.3
+      max_sigma: 0.2
 
     nonlinear_warp:
       enabled: false
@@ -47,7 +47,7 @@ augmentation:
 
     spectral_shift:
       enabled: true
-      max_shift: 3
+      max_shift: 2
 
     channel_dropout:
       enabled: false

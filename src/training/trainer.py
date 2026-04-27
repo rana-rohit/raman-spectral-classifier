@@ -269,8 +269,11 @@ class Trainer:
                         coral_term = coral_loss(feat_ref, feat_clin)
                             
             if x_clin is not None:
-                outputs_target = outputs_clin  # reuse computed forward
-                main_loss = self.loss_fn(outputs_target["main_logits"], y_clin)
+                outputs_target = outputs_clin
+                loss_src = self.loss_fn(outputs1["main_logits"], y)
+                loss_tgt = self.loss_fn(outputs_target["main_logits"], y_clin)
+
+                main_loss = 0.5 * loss_src + 0.5 * loss_tgt
             else:
                 main_loss = self.loss_fn(outputs1["main_logits"], y)
             
@@ -374,7 +377,7 @@ class Trainer:
                 "consistency_loss": total_consistency_loss / total,
                 "l2sp_loss": total_l2sp_loss / total,
                 "coral_loss": total_coral_loss / total,
-                "domain_loss": total_domain_loss / total,
+                "domain_loss": avg_domain_loss,
                 "accuracy": correct / total,
                 "lr": self.optimizer.param_groups[0]["lr"],
                 "epoch_time": time.time() - t0,
@@ -423,11 +426,7 @@ class Trainer:
                 x1 = x1.cpu().numpy()
                 x1_aug = []
                 for sample in x1:
-                    augmented = self.augment(sample[0][None, :])[0]
-                    if sample.shape[0] > 1:
-                        augmented = np.stack([augmented, sample[1]])
-                    else:
-                        augmented = augmented[None, :]
+                    augmented = self.augment(sample)
                     x1_aug.append(augmented)
 
                 x1 = torch.from_numpy(np.array(x1_aug)).float().contiguous()
@@ -451,12 +450,7 @@ class Trainer:
                     x1_aug = []
 
                     for sample in x1:
-                        augmented = self.augment(sample[0][None, :])[0]
-
-                        if sample.shape[0] > 1:
-                            augmented = np.stack([augmented, sample[1]])
-                        else:
-                            augmented = augmented[None, :]
+                        augmented = self.augment(sample)
 
                         x1_aug.append(augmented)
 
