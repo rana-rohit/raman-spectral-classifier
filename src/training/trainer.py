@@ -483,22 +483,34 @@ class Trainer:
 
     def _parse_batch(self, batch, augment=True):
         if isinstance(batch, dict):
-            x1 = batch["x1"]
+            x = batch["x1"]
+            y = batch["y"].to(self.device)
 
             if self.model.training and augment:
-                x1 = x1.cpu().numpy()
-                x1_aug = []
-                for sample in x1:
-                    augmented = self.augment(sample)
-                    x1_aug.append(augmented)
+                x_np = x.cpu().numpy()
 
-                x1 = torch.from_numpy(np.array(x1_aug)).float().contiguous()
+                if self.consistency_enabled:
+                    x1_aug = []
+                    x2_aug = []
 
-            x1 = x1.to(self.device)
+                    for sample in x_np:
+                        aug1 = self.augment(sample)
+                        aug2 = self.augment(sample)
 
-            y = batch["y"].to(self.device)   
+                        x1_aug.append(aug1)
+                        x2_aug.append(aug2)
 
-            x2 = None
+                    x1 = torch.from_numpy(np.array(x1_aug)).float().to(self.device)
+                    x2 = torch.from_numpy(np.array(x2_aug)).float().to(self.device)
+
+                else:
+                    x1_aug = [self.augment(sample) for sample in x_np]
+                    x1 = torch.from_numpy(np.array(x1_aug)).float().to(self.device)
+                    x2 = None
+
+            else:
+                x1 = x.to(self.device)
+                x2 = None
 
             return x1, x2, y
 
