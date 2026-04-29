@@ -40,7 +40,7 @@ training:
 
   consistency:
     enabled: true
-    loss_weight: 0.05
+    loss_weight: 0.1
     views: 2
 
   target_supervised:
