@@ -16,4 +16,4 @@ training:
 
   coral:
     enabled: true
-    weight: 0.1
+    weight: 0.05
