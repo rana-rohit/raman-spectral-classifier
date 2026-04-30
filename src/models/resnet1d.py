@@ -31,7 +31,7 @@ class ResidualBlock1D(nn.Module):
             padding=pad,
             bias=False,
         )
-        self.bn1 = nn.BatchNorm1d(out_channels)
+        self.bn1 = nn.Identity()
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv1d(
             out_channels,
@@ -41,12 +41,12 @@ class ResidualBlock1D(nn.Module):
             padding=pad,
             bias=False,
         )
-        self.bn2 = nn.BatchNorm1d(out_channels)
+        self.bn2 = nn.Identity()
 
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv1d(in_channels, out_channels, 1, stride=stride, bias=False),
-                nn.BatchNorm1d(out_channels),
+                nn.Identity(),
             )
         else:
             self.shortcut = nn.Identity()
@@ -78,9 +78,8 @@ class ResNet1D(nn.Module):
 
         self.stem = nn.Sequential(
             nn.Conv1d(in_channels, c1, stem_kernel, stride=1, padding=stem_kernel // 2, bias=False),
-            nn.BatchNorm1d(c1),
+            nn.Identity(),
             nn.ReLU(inplace=True),
-            # nn.MaxPool1d(2),
         )
 
         self.stage1 = self._make_stage(c1, c1, n_blocks[0], stride=1)
@@ -91,17 +90,9 @@ class ResNet1D(nn.Module):
         self.gap = nn.AdaptiveAvgPool1d(1)
         self.embedding_dim = c4
 
-        # Instance norm for domain invariance
-        self.instance_norm = nn.InstanceNorm1d(c4, affine=True)
-
         self.classifier = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(c4, n_classes),
-        )
-        self.domain_classifier = nn.Sequential(
-            nn.Linear(c4, 128),
-            nn.ReLU(),
-            nn.Linear(128, 2),
         )
 
         self._init_weights()
@@ -124,7 +115,6 @@ class ResNet1D(nn.Module):
         x = self.stage2(x)
         x = self.stage3(x)
         x = self.stage4(x)
-        # x = self.instance_norm(x)
         x = self.gap(x)
         return x.squeeze(-1)
 
@@ -146,9 +136,6 @@ class ResNet1D(nn.Module):
         for module in self.modules():
             if isinstance(module, nn.Conv1d):
                 nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
-            elif isinstance(module, nn.BatchNorm1d):
-                nn.init.ones_(module.weight)
-                nn.init.zeros_(module.bias)
             elif isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
                 nn.init.zeros_(module.bias)
