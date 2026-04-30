@@ -2,7 +2,7 @@ model:
   name: resnet1d
   signal_length: 1000
   n_classes: 5
-  channels: [64, 128, 256, 512]
+  channels: [32, 64, 128, 256]
   n_blocks: [2, 2, 2, 2]
-  stem_kernel: 15
+  stem_kernel: 7
   dropout: 0.3
