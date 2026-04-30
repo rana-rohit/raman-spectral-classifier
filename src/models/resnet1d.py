@@ -64,7 +64,7 @@ class ResNet1D(nn.Module):
         n_classes: int = 30,
         channels: List[int] | None = None,
         n_blocks: List[int] | None = None,
-        stem_kernel: int = 15,
+        stem_kernel: int = 7,
         dropout: float = 0.3,
         in_channels: int = 2,
     ) -> None:
@@ -80,7 +80,7 @@ class ResNet1D(nn.Module):
             nn.Conv1d(in_channels, c1, stem_kernel, stride=1, padding=stem_kernel // 2, bias=False),
             nn.BatchNorm1d(c1),
             nn.ReLU(inplace=True),
-            nn.MaxPool1d(2),
+            # nn.MaxPool1d(2),
         )
 
         self.stage1 = self._make_stage(c1, c1, n_blocks[0], stride=1)
@@ -124,7 +124,7 @@ class ResNet1D(nn.Module):
         x = self.stage2(x)
         x = self.stage3(x)
         x = self.stage4(x)
-        x = self.instance_norm(x)
+        # x = self.instance_norm(x)
         x = self.gap(x)
         return x.squeeze(-1)
 
