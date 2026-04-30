@@ -28,7 +28,7 @@ augmentation:
 
     baseline_drift:
       enabled: true
-      max_strength: 0.07
+      max_strength: 0.05
       n_control_points: 5
 
     polynomial_baseline:
@@ -38,7 +38,7 @@ augmentation:
 
     peak_broadening:
       enabled: true
-      max_sigma: 0.2
+      max_sigma: 0.15
 
     nonlinear_warp:
       enabled: false
@@ -47,7 +47,7 @@ augmentation:
 
     spectral_shift:
       enabled: true
-      max_shift: 2
+      max_shift: 1.5
 
     channel_dropout:
       enabled: false
