@@ -39,8 +39,8 @@ training:
     exclude_patterns: []
 
   consistency:
-    enabled: false
-    loss_weight: 0.02
+    enabled: true
+    loss_weight: 0.5
     views: 2
 
   target_supervised:
