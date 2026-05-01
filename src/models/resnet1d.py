@@ -82,10 +82,10 @@ class ResNet1D(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        self.stage1 = self._make_stage(c1, c1, n_blocks[0], stride=1)
-        self.stage2 = self._make_stage(c1, c2, n_blocks[1], stride=2)
-        self.stage3 = self._make_stage(c2, c3, n_blocks[2], stride=2)
-        self.stage4 = self._make_stage(c3, c4, n_blocks[3], stride=2)
+        self.stage1 = self._make_stage(c1, c1, n_blocks[0], stride=1, kernel_size=7)
+        self.stage2 = self._make_stage(c1, c2, n_blocks[1], stride=2, kernel_size=9)
+        self.stage3 = self._make_stage(c2, c3, n_blocks[2], stride=2, kernel_size=13)
+        self.stage4 = self._make_stage(c3, c4, n_blocks[3], stride=2, kernel_size=17)
 
         self.gap = nn.AdaptiveAvgPool1d(1)
         self.embedding_dim = c4
@@ -102,10 +102,11 @@ class ResNet1D(nn.Module):
         out_ch: int,
         n_blocks: int,
         stride: int,
+        kernel_size: int,
     ) -> nn.Sequential:
-        layers = [ResidualBlock1D(in_ch, out_ch, stride=stride)]
+        layers = [ResidualBlock1D(in_ch, out_ch, stride=stride, kernel_size=kernel_size)]
         for _ in range(n_blocks - 1):
-            layers.append(ResidualBlock1D(out_ch, out_ch, stride=1))
+            layers.append(ResidualBlock1D(out_ch, out_ch, stride=1, kernel_size=kernel_size))
         return nn.Sequential(*layers)
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
