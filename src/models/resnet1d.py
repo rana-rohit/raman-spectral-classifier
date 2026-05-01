@@ -94,13 +94,6 @@ class ResNet1D(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(c4, n_classes),
         )
-        
-        self.domain_classifier = nn.Sequential(
-            nn.Linear(c4, 128),
-            nn.ReLU(),
-            nn.Linear(128, 2),
-        )
-        
         self._init_weights()
 
     @staticmethod
