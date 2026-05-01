@@ -18,7 +18,7 @@ The core pipeline is heavily optimized for both speed and generalization:
 - **YAML-driven Configuration**: Complete control over data splits, preprocessing, augmentations, and model architectures via modular YAML files.
 - **FastAPI Inference**: Built-in production-ready REST API for model serving.
 
-## 💾 Dataset Handling
+## Dataset Handling
 
 Due to file size limits, the dataset (large `.npy` files) is **not** included in this repository. 
 
