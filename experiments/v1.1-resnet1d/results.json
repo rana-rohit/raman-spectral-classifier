@@ -1,0 +1,72 @@
+{
+  "experiment": "multiscale_resnet1d_milestone",
+  "model": "multiscale_resnet1d",
+  "parameters": 4847301,
+
+  "architecture": {
+    "channels": [32, 64, 128, 256],
+    "n_blocks": [2, 2, 2, 2],
+    "stem_kernel": 7,
+    "stage_kernels": [7, 11, 15, 21],
+    "dropout": 0.3
+  },
+
+  "metrics": {
+    "source_test": {
+      "accuracy": 0.584,
+      "f1_macro": 0.518,
+      "mcc": 0.515,
+      "roc_auc": 0.936
+    },
+
+    "clinical_2018": {
+      "accuracy": 0.973,
+      "f1_macro": 0.973,
+      "mcc": 0.966,
+      "roc_auc": 0.998,
+      "transfer_gap": -0.389
+    },
+
+    "clinical_2019": {
+      "accuracy": 0.934,
+      "f1_macro": 0.934,
+      "mcc": 0.918,
+      "roc_auc": 0.993,
+      "transfer_gap": -0.350
+    }
+  },
+
+  "augmentation": {
+    "apply_probability": 0.25,
+    "spectral_shift": 1.8,
+    "peak_broadening": 0.14,
+    "baseline_drift": 0.07
+  },
+
+  "classwise_f1": {
+    "source_test": [0.603, 0.411, 0.287, 0.823, 0.466],
+
+    "clinical_2018": [0.981, 0.966, 0.979, 0.969, 0.970],
+
+    "clinical_2019": [0.980, 0.940, 0.930, 0.901, 0.919]
+  },
+
+  "observations": {
+    "source_performance": "improved",
+    "clinical_performance": "excellent",
+    "ood_performance": "major improvement",
+    "representation_learning": "significantly improved",
+    "domain_generalization": "dramatically improved",
+    "domain_adaptation_required": false,
+    "key_finding": "multi-scale spectral context modeling outperformed explicit domain alignment methods"
+  },
+
+  "experimental_findings": {
+    "dann": "harmful",
+    "coral": "low impact",
+    "consistency_regularization": "harmful",
+    "strong_augmentation": "harmful",
+    "spectral_shift_invariance": "critical",
+    "large_receptive_fields": "critical"
+  }
+}
