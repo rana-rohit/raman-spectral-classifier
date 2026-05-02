@@ -1,0 +1,42 @@
+{
+  "experiment": "resnet1d_clean_baseline",
+  "model": "resnet1d",
+  "parameters": 960197,
+
+  "metrics": {
+    "source_test": {
+      "accuracy": 0.502,
+      "f1_macro": 0.4389,
+      "mcc": 0.4305,
+      "roc_auc": 0.8977
+    },
+    "clinical_2018": {
+      "accuracy": 0.952,
+      "f1_macro": 0.9521,
+      "mcc": 0.9401,
+      "roc_auc": 0.9965,
+      "transfer_gap": -0.45
+    },
+    "clinical_2019": {
+      "accuracy": 0.854,
+      "f1_macro": 0.8532,
+      "mcc": 0.8182,
+      "roc_auc": 0.9805,
+      "transfer_gap": -0.352
+    }
+  },
+
+  "classwise_f1": {
+    "source_test": [0.496, 0.254, 0.085, 0.782, 0.577],
+    "clinical_2018": [0.956, 0.932, 0.969, 0.948, 0.956],
+    "clinical_2019": [0.970, 0.869, 0.872, 0.740, 0.815]
+  },
+
+  "observations": {
+    "source_performance": "low",
+    "clinical_performance": "strong",
+    "ood_performance": "stable",
+    "representation_learning": "improved",
+    "domain_generalization": "unchanged"
+  }
+}

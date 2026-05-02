@@ -1,0 +1,220 @@
+dataset:
+  name: spectral_classifier
+  signal_length: 1000
+  n_classes_full: 30
+  n_classes_clinical: 5
+  shared_classes:
+  - 0
+  - 2
+  - 3
+  - 5
+  - 6
+  training_classes:
+  - 0
+  - 2
+  - 3
+  - 5
+  - 6
+  already_normalised: false
+task:
+  mode: shared_clinical_5
+  original_classes:
+  - 0
+  - 2
+  - 3
+  - 5
+  - 6
+  remapped_classes:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+splits:
+  reference:
+    x_file: X_reference.npy
+    y_file: y_reference.npy
+    role: source
+    n_samples: 60000
+    n_classes: 30
+    samples_per_class: 2000
+    use_for_preprocessor_fit: true
+  finetune:
+    x_file: X_finetune.npy
+    y_file: y_finetune.npy
+    role: adaptation
+    n_samples: 3000
+    n_classes: 30
+    samples_per_class: 100
+  test:
+    x_file: X_test.npy
+    y_file: y_test.npy
+    role: holdout
+    n_samples: 3000
+    n_classes: 30
+    samples_per_class: 100
+    access_policy: once
+  2018clinical:
+    x_file: X_2018clinical.npy
+    y_file: y_2018clinical.npy
+    role: ood_eval
+    n_samples: 10000
+    n_classes: 5
+    samples_per_class: 2000
+    eval_classes:
+    - 0
+    - 2
+    - 3
+    - 5
+    - 6
+  2019clinical:
+    x_file: X_2019clinical.npy
+    y_file: y_2019clinical.npy
+    role: ood_eval
+    n_samples: 2500
+    n_classes: 5
+    samples_per_class: 500
+    eval_classes:
+    - 0
+    - 2
+    - 3
+    - 5
+    - 6
+validation:
+  strategy: stratified_split
+  source_split: reference
+  val_fraction: 0.2
+  clinical_val_fraction: 0.2
+  clinical_eval_fraction: 0.2
+  random_seed: 42
+preprocessing:
+  snv_normalization:
+    enabled: true
+  per_sample_mean_subtraction:
+    enabled: false
+  savitzky_golay:
+    enabled: true
+    window_length: 11
+    polyorder: 3
+  clip:
+    enabled: true
+    min_val: -3.0
+    max_val: 3.0
+  pipeline:
+  - savitzky_golay
+  - snv_normalization
+  - clip
+derivative:
+  enabled: true
+  window_length: 11
+  polyorder: 3
+augmentation:
+  apply_probability: 0.25
+  seed: 42
+  clip_min: -3.0
+  clip_max: 3.0
+  steps:
+    gaussian_noise:
+      enabled: true
+      max_std: 0.03
+    baseline_shift:
+      enabled: false
+      max_shift: 0.1
+    amplitude_scale:
+      enabled: true
+      factor: 0.1
+    multiplicative_intensity:
+      enabled: false
+      factor: 0.25
+    baseline_drift:
+      enabled: true
+      max_strength: 0.05
+      n_control_points: 5
+    polynomial_baseline:
+      enabled: false
+      max_degree: 3
+      max_amplitude: 0.15
+    peak_broadening:
+      enabled: true
+      max_sigma: 0.17
+    nonlinear_warp:
+      enabled: false
+      max_shift: 1.5
+      n_control_points: 6
+    spectral_shift:
+      enabled: true
+      max_shift: 1.5
+    channel_dropout:
+      enabled: false
+      max_width: 10
+      max_drops: 1
+training:
+  max_epochs: 100
+  batch_size: 128
+  num_workers: 2
+  optimizer: adamw
+  lr: 0.0001
+  weight_decay: 0.0005
+  loss: cross_entropy
+  loss_kwargs: {}
+  class_weights:
+    enabled: true
+    source: train
+  scheduler: warmup_cosine
+  scheduler_cfg:
+    warmup_epochs: 5
+    total_epochs: 100
+    eta_min: 1.0e-06
+  early_stopping_patience: 10
+  monitor_metric: f1_macro
+  gradient_clip: 1.0
+  finetune_lr: 3.0e-05
+  finetune_epochs: 15
+  finetune_batch_size: 64
+  finetune_patience: 5
+  l2sp:
+    enabled: false
+    lambda: 0.001
+    exclude_patterns: []
+  consistency:
+    enabled: false
+    loss_weight: 0.5
+    views: 2
+  target_supervised:
+    enabled: true
+    weight: 1.0
+  dann:
+    enabled: false
+    weight: 0.2
+  coral:
+    enabled: false
+    weight: 0.05
+  freeze_bn: false
+multitask:
+  auxiliary_shared_head:
+    enabled: false
+    classes:
+    - 0
+    - 2
+    - 3
+    - 5
+    - 6
+    dropout: 0.0
+    loss_weight: 0.1
+    clinical_blend: 0.2
+model:
+  name: resnet1d
+  signal_length: 1000
+  n_classes: 5
+  channels:
+  - 32
+  - 64
+  - 128
+  - 256
+  n_blocks:
+  - 2
+  - 2
+  - 2
+  - 2
+  stem_kernel: 7
+  dropout: 0.3
