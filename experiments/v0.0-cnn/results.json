@@ -1,0 +1,19 @@
+{
+  "experiment": "cnn_baseline_v0",
+  "pretrain": {
+    "best_epoch": 41,
+    "clinical_val_f1": 0.9204127138905924,
+    "clinical_val_acc": 0.92,
+    "source_val_f1": 0.8961182654314678
+  },
+  "test": {
+    "2018clinical": {
+      "f1": 0.9107263313264596,
+      "acc": 0.9105
+    },
+    "2019clinical": {
+      "f1": 0.8498609271795651,
+      "acc": 0.85
+    }
+  }
+}
