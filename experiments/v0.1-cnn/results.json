@@ -1,0 +1,89 @@
+{
+  "experiment": "cnn_baseline_v1",
+  "model": "cnn",
+  "task": "5-class domain adaptation",
+
+  "splits": {
+    "test": {
+      "n_samples": 500,
+      "accuracy": 0.442,
+      "f1_macro": 0.41029600785999476,
+      "mcc": 0.35408827658948,
+      "roc_auc": 0.84494,
+
+      "per_class_f1": {
+        "class_0": 0.4461152882205514,
+        "class_1": 0.44604316546762596,
+        "class_2": 0.0,
+        "class_3": 0.541871921182266,
+        "class_4": 0.6174496644295302
+      },
+
+      "confusion_matrix": [
+        [89, 6, 2, 0, 3],
+        [65, 31, 2, 2, 0],
+        [100, 0, 0, 0, 0],
+        [45, 0, 0, 55, 0],
+        [0, 2, 6, 46, 46]
+      ]
+    },
+
+    "clinical_2018": {
+      "n_samples": 2000,
+      "accuracy": 0.908,
+      "f1_macro": 0.9081469485223845,
+      "mcc": 0.8873415115606506,
+      "roc_auc": 0.9952,
+      "transfer_gap": -0.466,
+
+      "per_class_f1": {
+        "class_0": 0.9125168236877523,
+        "class_1": 0.8960739030023094,
+        "class_2": 0.9467005076142132,
+        "class_3": 0.899884925201381,
+        "class_4": 0.8855585831062671
+      },
+
+      "confusion_matrix": [
+        [339, 51, 8, 2, 0],
+        [3, 388, 7, 1, 1],
+        [1, 26, 373, 0, 0],
+        [0, 1, 0, 391, 8],
+        [0, 0, 0, 75, 325]
+      ]
+    },
+
+    "clinical_2019": {
+      "n_samples": 500,
+      "accuracy": 0.854,
+      "f1_macro": 0.8541786473938373,
+      "mcc": 0.8193003423003203,
+      "roc_auc": 0.977895,
+      "transfer_gap": -0.412,
+
+      "per_class_f1": {
+        "class_0": 0.9587628865979382,
+        "class_1": 0.8789237668161434,
+        "class_2": 0.8494623655913979,
+        "class_3": 0.7669902912621359,
+        "class_4": 0.8167539267015708
+      },
+
+      "confusion_matrix": [
+        [93, 5, 2, 0, 0],
+        [1, 98, 1, 0, 0],
+        [0, 10, 79, 7, 4],
+        [0, 10, 2, 79, 9],
+        [0, 0, 2, 20, 78]
+      ]
+    }
+  },
+
+  "summary": {
+    "test_f1_macro": 0.4103,
+    "clinical_2018_f1_macro": 0.9081,
+    "clinical_2019_f1_macro": 0.8542,
+    "generalization_gap_2019": -0.065,
+    "key_observation": "Strong domain adaptation: low source performance but high clinical generalization"
+  }
+}
