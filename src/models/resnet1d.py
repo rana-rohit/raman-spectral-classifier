@@ -47,27 +47,6 @@ class DepthwiseSeparableConv1D(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.block(x)
 
-class SEBlock1D(nn.Module):
-    def __init__(self, channels: int, reduction: int = 16):
-        super().__init__()
-
-        self.pool = nn.AdaptiveAvgPool1d(1)
-
-        self.fc = nn.Sequential(
-            nn.Linear(channels, max(channels // reduction, 1)),
-            nn.ReLU(inplace=True),
-            nn.Linear(max(channels // reduction, 1), channels),
-            nn.Sigmoid(),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        b, c, _ = x.shape
-
-        weights = self.pool(x).view(b, c)
-        weights = self.fc(weights).view(b, c, 1)
-
-        return x * weights
-
 class ResidualBlock1D(nn.Module):
     def __init__(
         self,
@@ -114,7 +93,6 @@ class ResidualBlock1D(nn.Module):
                 bias=False,
             )
         self.bn2 = nn.Identity()
-        self.se = SEBlock1D(out_channels)
 
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -127,7 +105,6 @@ class ResidualBlock1D(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
-        out = self.se(out)
         out = out + self.shortcut(x)
         return self.relu(out)
 
@@ -152,7 +129,6 @@ class ResNet1D(nn.Module):
 
         self.stem = nn.Sequential(
             nn.Conv1d(in_channels, c1, stem_kernel, stride=1, padding=stem_kernel // 2, bias=False),
-            nn.Identity(),
             nn.ReLU(inplace=True),
         )
 
