@@ -41,7 +41,7 @@ class DepthwiseSeparableConv1D(nn.Module):
                 bias=False,
             ),
 
-            nn.BatchNorm1d(out_channels),
+            nn.Identity(),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -54,23 +54,44 @@ class ResidualBlock1D(nn.Module):
         out_channels: int,
         stride: int = 1,
         kernel_size: int = 3,
+        use_depthwise: bool = True,
     ) -> None:
         super().__init__()
 
-        self.conv1 = DepthwiseSeparableConv1D(
-            in_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-        )
+        if use_depthwise:
+            self.conv1 = DepthwiseSeparableConv1D(
+                in_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+            )
+        else:
+            self.conv1 = nn.Conv1d(
+                in_channels,
+                out_channels,
+                kernel_size,
+                stride=stride,
+                padding=kernel_size // 2,
+                bias=False,
+            )
         self.bn1 = nn.Identity()
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = DepthwiseSeparableConv1D(
-            out_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            stride=1,
-        )
+        if use_depthwise:
+            self.conv2 = DepthwiseSeparableConv1D(
+                out_channels,
+                out_channels,
+                kernel_size=kernel_size,
+                stride=1,
+            )
+        else:
+            self.conv2 = nn.Conv1d(
+                out_channels,
+                out_channels,
+                kernel_size,
+                stride=1,
+                padding=kernel_size // 2,
+                bias=False,
+            )
         self.bn2 = nn.Identity()
 
         if stride != 1 or in_channels != out_channels:
@@ -112,10 +133,37 @@ class ResNet1D(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        self.stage1 = self._make_stage(c1, c1, n_blocks[0], stride=1, kernel_size=7)
-        self.stage2 = self._make_stage(c1, c2, n_blocks[1], stride=2, kernel_size=9)
-        self.stage3 = self._make_stage(c2, c3, n_blocks[2], stride=2, kernel_size=13)
-        self.stage4 = self._make_stage(c3, c4, n_blocks[3], stride=2, kernel_size=17)
+        self.stage1 = self._make_stage(
+            c1, c1,
+            n_blocks[0],
+            stride=1,
+            kernel_size=7,
+            use_depthwise=True,
+        )
+
+        self.stage2 = self._make_stage(
+            c1, c2,
+            n_blocks[1],
+            stride=2,
+            kernel_size=9,
+            use_depthwise=True,
+        )
+
+        self.stage3 = self._make_stage(
+            c2, c3,
+            n_blocks[2],
+            stride=2,
+            kernel_size=13,
+            use_depthwise=False,
+        )
+
+        self.stage4 = self._make_stage(
+            c3, c4,
+            n_blocks[3],
+            stride=2,
+            kernel_size=17,
+            use_depthwise=False,
+        )
 
         self.gap = nn.AdaptiveAvgPool1d(1)
         self.embedding_dim = c4
@@ -133,10 +181,11 @@ class ResNet1D(nn.Module):
         n_blocks: int,
         stride: int,
         kernel_size: int,
+        use_depthwise: bool,
     ) -> nn.Sequential:
-        layers = [ResidualBlock1D(in_ch, out_ch, stride=stride, kernel_size=kernel_size)]
+        layers = [ResidualBlock1D(in_ch, out_ch, stride=stride, kernel_size=kernel_size, use_depthwise=use_depthwise)]
         for _ in range(n_blocks - 1):
-            layers.append(ResidualBlock1D(out_ch, out_ch, stride=1, kernel_size=kernel_size))
+            layers.append(ResidualBlock1D(out_ch, out_ch, stride=1, kernel_size=kernel_size, use_depthwise=use_depthwise))
         return nn.Sequential(*layers)
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
