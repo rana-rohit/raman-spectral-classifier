@@ -11,6 +11,41 @@ from typing import List
 import torch
 import torch.nn as nn
 
+class DepthwiseSeparableConv1D(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int = 1,
+    ) -> None:
+        super().__init__()
+
+        padding = kernel_size // 2
+
+        self.block = nn.Sequential(
+            nn.Conv1d(
+                in_channels,
+                in_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                groups=in_channels,
+                bias=False,
+            ),
+
+            nn.Conv1d(
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                bias=False,
+            ),
+
+            nn.BatchNorm1d(out_channels),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.block(x)
 
 class ResidualBlock1D(nn.Module):
     def __init__(
@@ -21,25 +56,20 @@ class ResidualBlock1D(nn.Module):
         kernel_size: int = 3,
     ) -> None:
         super().__init__()
-        pad = kernel_size // 2
 
-        self.conv1 = nn.Conv1d(
+        self.conv1 = DepthwiseSeparableConv1D(
             in_channels,
             out_channels,
-            kernel_size,
+            kernel_size=kernel_size,
             stride=stride,
-            padding=pad,
-            bias=False,
         )
         self.bn1 = nn.Identity()
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv1d(
+        self.conv2 = DepthwiseSeparableConv1D(
             out_channels,
             out_channels,
-            kernel_size,
+            kernel_size=kernel_size,
             stride=1,
-            padding=pad,
-            bias=False,
         )
         self.bn2 = nn.Identity()
 
