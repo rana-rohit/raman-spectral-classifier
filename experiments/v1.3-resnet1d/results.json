@@ -1,0 +1,145 @@
+{
+  "experiment": "v1.4_uniform_kernel_ablation",
+  "model": "hybrid_uniform_kernel_resnet1d",
+  "parameters": 2144069,
+
+  "architecture": {
+    "type": "Uniform-Kernel Hybrid ResNet1D",
+    "input_channels": 2,
+    "output_classes": 5,
+
+    "channels": [32, 64, 128, 256],
+    "residual_blocks": [2, 2, 2, 2],
+
+    "kernel_sizes": {
+      "stem": 7,
+      "stage1": 7,
+      "stage2": 7,
+      "stage3": 7,
+      "stage4": 7
+    },
+
+    "stage_configuration": {
+      "stage1": "depthwise_separable",
+      "stage2": "depthwise_separable",
+      "stage3": "standard_conv",
+      "stage4": "standard_conv"
+    },
+
+    "normalization": "none",
+    "dropout": 0.3
+  },
+
+  "training": {
+    "optimizer": "AdamW",
+    "learning_rate": 0.0001,
+    "weight_decay": 0.0005,
+    "scheduler": "warmup_cosine",
+    "batch_size": 128,
+    "early_stopping": true,
+
+    "target_supervised": {
+      "enabled": true,
+      "weight": 1.0
+    },
+
+    "dann": {
+      "enabled": false
+    },
+
+    "coral": {
+      "enabled": false
+    },
+
+    "consistency": {
+      "enabled": false
+    }
+  },
+
+  "augmentation": {
+    "apply_probability": 0.25,
+
+    "enabled_transforms": [
+      "gaussian_noise",
+      "amplitude_scale",
+      "baseline_drift",
+      "peak_broadening",
+      "spectral_shift"
+    ],
+
+    "parameters": {
+      "gaussian_noise_std": 0.03,
+      "baseline_drift_strength": 0.07,
+      "peak_broadening_sigma": 0.14,
+      "spectral_shift": 1.8
+    }
+  },
+
+  "metrics": {
+    "source_test": {
+      "accuracy": 0.582,
+      "f1_macro": 0.5690,
+      "mcc": 0.5120,
+      "roc_auc": 0.9300
+    },
+
+    "clinical_2018": {
+      "accuracy": 0.9030,
+      "f1_macro": 0.9020,
+      "mcc": 0.8780,
+      "roc_auc": 0.9860,
+      "transfer_gap": -0.3340
+    },
+
+    "clinical_2019": {
+      "accuracy": 0.8720,
+      "f1_macro": 0.8710,
+      "mcc": 0.8350,
+      "roc_auc": 0.9790,
+      "transfer_gap": -0.3030
+    }
+  },
+
+  "classwise_f1": {
+    "source_test": [
+      0.560,
+      0.522,
+      0.598,
+      0.741,
+      0.424
+    ],
+
+    "clinical_2018": [
+      0.919,
+      0.871,
+      0.896,
+      0.926,
+      0.898
+    ],
+
+    "clinical_2019": [
+      0.951,
+      0.864,
+      0.842,
+      0.812,
+      0.886
+    ]
+  },
+
+  "observations": {
+    "source_performance": "reduced",
+    "clinical_performance": "degraded",
+    "ood_performance": "significant degradation",
+    "representation_learning": "weaker",
+    "domain_generalization": "substantially reduced",
+
+    "key_findings": [
+      "Removing hierarchical receptive field scaling caused major OOD degradation",
+      "Uniform kernels significantly reduced Raman domain robustness",
+      "Large receptive fields were critical for high-level biochemical context modeling",
+      "Multi-scale spectral hierarchy was a primary contributor to transfer performance",
+      "Hybrid structure alone was insufficient without receptive field diversity"
+    ]
+  }
+}
+
