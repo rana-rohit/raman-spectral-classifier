@@ -86,7 +86,7 @@ validation:
   val_fraction: 0.2
   clinical_val_fraction: 0.2
   clinical_eval_fraction: 0.2
-  random_seed: 999
+  random_seed: 99
 preprocessing:
   snv_normalization:
     enabled: true
@@ -203,11 +203,11 @@ multitask:
     loss_weight: 0.1
     clinical_blend: 0.2
 experiment:
-  name: v1.3_hybrid_multiscale_resnet1d
-  category: hybrid_multiscale_resnet
+  name: v1.4_uniform_kernel_ablation
+  category: receptive_field_ablation
   seed: 999
 model:
-  name: hybrid_multiscale_resnet1d
+  name: hybrid_uniform_kernel_resnet1d
   signal_length: 1000
   n_classes: 5
   in_channels: 2
@@ -224,9 +224,9 @@ model:
   stem_kernel: 7
   stage_kernel_sizes:
     - 7
-    - 9
-    - 13
-    - 17
+    - 7
+    - 7
+    - 7
   stage_conv_types:
     - depthwise
     - depthwise
