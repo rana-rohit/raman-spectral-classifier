@@ -144,7 +144,7 @@ class ResNet1D(nn.Module):
             c1, c2,
             n_blocks[1],
             stride=2,
-            kernel_size=9,
+            kernel_size=7,
             use_depthwise=True,
         )
 
@@ -152,7 +152,7 @@ class ResNet1D(nn.Module):
             c2, c3,
             n_blocks[2],
             stride=2,
-            kernel_size=13,
+            kernel_size=7,
             use_depthwise=False,
         )
 
@@ -160,7 +160,7 @@ class ResNet1D(nn.Module):
             c3, c4,
             n_blocks[3],
             stride=2,
-            kernel_size=17,
+            kernel_size=7,
             use_depthwise=False,
         )
 
