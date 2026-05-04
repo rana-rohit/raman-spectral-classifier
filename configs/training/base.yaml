@@ -1,7 +1,5 @@
-# =============================================================================
 # configs/training/base.yaml
 # Shared defaults. Model-specific configs override these.
-# =============================================================================
 
 training:
   max_epochs: 100
