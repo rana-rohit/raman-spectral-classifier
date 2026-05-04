@@ -1,4 +1,4 @@
-# v1.3 — Hybrid Multi-Scale ResNet1D
+# v1.2 — Hybrid Multi-Scale ResNet1D
 
 ## 1. Objective
 
