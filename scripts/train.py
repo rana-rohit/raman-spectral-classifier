@@ -29,6 +29,9 @@ from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config, save_config
 from src.utils.seed import set_seed
 from src.utils.class_subset import filter_and_remap_classes
+from src.xai.saliency import compute_saliency
+from scripts.plot_saliency import plot_saliency
+from pathlib import Path
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train a spectral classifier")
@@ -37,6 +40,7 @@ def parse_args():
     p.add_argument("--exp-dir", default="experiments")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--override", nargs="*", default=[])
+    p.add_argument("--run-xai", action="store_true", help="Run saliency analysis after training")
     return p.parse_args()
 
 
@@ -160,7 +164,39 @@ def main():
 
     print(f"\n  Done. Training artifacts: {exp_dir}/")
     print(f"  Fine-tune artifacts:     {finetune_dir}/")
+    
+    # XAI BLOCK 
+    if args.run_xai:
+        print("\n[XAI] Generating saliency maps...")
 
+        xai_root = Path(exp_dir) / "xai"
+        xai_root.mkdir(parents=True, exist_ok=True)
+
+        # Use test loader (you can change later)
+        loader = loaders["test"]
+
+        model.eval()
+        device = next(model.parameters()).device
+
+        for idx, (x, y) in enumerate(loader):
+            if idx >= 10:
+                break
+
+            x = x[0:1].to(device)
+            label = y[0].item()
+
+            saliency = compute_saliency(model, x)
+
+            signal = x[0, 0].detach().cpu().numpy()
+
+            save_dir = xai_root / f"class_{label}"
+            save_dir.mkdir(parents=True, exist_ok=True)
+
+            save_path = save_dir / f"sample_{idx}.png"
+
+            plot_saliency(signal, saliency, save_path)
+
+        print(f"[XAI] Saved to {xai_root}")
 
 if __name__ == "__main__":
     main()
