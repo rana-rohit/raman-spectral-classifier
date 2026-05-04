@@ -73,7 +73,7 @@ class ResidualBlock1D(nn.Module):
                 padding=kernel_size // 2,
                 bias=False,
             )
-        self.bn1 = nn.BatchNorm1d(out_channels)
+        self.bn1 = nn.Identity()
         self.relu = nn.ReLU(inplace=True)
         if use_depthwise:
             self.conv2 = DepthwiseSeparableConv1D(
@@ -91,12 +91,11 @@ class ResidualBlock1D(nn.Module):
                 padding=kernel_size // 2,
                 bias=False,
             )
-        self.bn2 = nn.BatchNorm1d(out_channels)
+        self.bn2 = nn.Identity()
 
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
                 nn.Conv1d(in_channels, out_channels, 1, stride=stride, bias=False),
-                nn.BatchNorm1d(out_channels),
             )
         else:
             self.shortcut = nn.Identity()
@@ -128,7 +127,6 @@ class ResNet1D(nn.Module):
 
         self.stem = nn.Sequential(
             nn.Conv1d(in_channels, c1, stem_kernel, stride=1, padding=stem_kernel // 2, bias=False),
-            nn.BatchNorm1d(c1),
             nn.ReLU(inplace=True),
         )
 
