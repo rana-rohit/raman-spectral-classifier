@@ -218,3 +218,7 @@ class ResNet1D(nn.Module):
 
     def n_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    
+    def forward_logits(self, x: torch.Tensor) -> torch.Tensor:
+        features = self.forward_features(x)
+        return self.classifier(features)
