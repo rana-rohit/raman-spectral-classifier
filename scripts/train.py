@@ -172,29 +172,40 @@ def main():
         xai_root = Path(exp_dir) / "xai"
         xai_root.mkdir(parents=True, exist_ok=True)
 
-        # Use test loader (you can change later)
-        loader = loaders["test"]
+        loader = loaders["2018clinical"]
 
         model.eval()
         device = next(model.parameters()).device
 
-        for idx, (x, y) in enumerate(loader):
-            if idx >= 10:
+        class_counts = {i: 0 for i in range(n_classes)}
+
+        for x, y in loader:
+            for i in range(x.shape[0]):
+
+                label = y[i].item()
+
+                if class_counts[label] >= 2:
+                    continue
+
+                xi = x[i:i+1].to(device)
+
+                saliency = compute_saliency(model, xi)
+                signal = xi[0].mean(dim=0).detach().cpu().numpy()
+
+                save_dir = xai_root / f"class_{label}"
+                save_dir.mkdir(parents=True, exist_ok=True)
+
+                save_path = save_dir / f"sample_{class_counts[label]}.png"
+
+                plot_saliency(signal, saliency, save_path)
+
+                class_counts[label] += 1
+
+                if all(v >= 2 for v in class_counts.values()):
+                    break
+
+            if all(v >= 2 for v in class_counts.values()):
                 break
-
-            x = x[0:1].to(device)
-            label = y[0].item()
-
-            saliency = compute_saliency(model, x)
-
-            signal = x[0, 0].detach().cpu().numpy()
-
-            save_dir = xai_root / f"class_{label}"
-            save_dir.mkdir(parents=True, exist_ok=True)
-
-            save_path = save_dir / f"sample_{idx}.png"
-
-            plot_saliency(signal, saliency, save_path)
 
         print(f"[XAI] Saved to {xai_root}")
 
