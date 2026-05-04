@@ -1,5 +1,5 @@
 {
-  "experiment": "v1.4_uniform_kernel_ablation",
+  "experiment": "v1.3_uniform_kernel_ablation",
   "model": "hybrid_uniform_kernel_resnet1d",
   "parameters": 2144069,
 
