@@ -1,0 +1,145 @@
+{
+  "experiment": "v1.4_batchnorm_ablation",
+  "model": "hybrid_multiscale_resnet1d_bn",
+  "parameters": 2144069,
+
+  "architecture": {
+    "type": "Hybrid Multi-Scale ResNet1D",
+    "input_channels": 2,
+    "output_classes": 5,
+
+    "channels": [32, 64, 128, 256],
+    "residual_blocks": [2, 2, 2, 2],
+
+    "kernel_sizes": {
+      "stem": 7,
+      "stage1": 7,
+      "stage2": 9,
+      "stage3": 13,
+      "stage4": 17
+    },
+
+    "stage_configuration": {
+      "stage1": "depthwise_separable",
+      "stage2": "depthwise_separable",
+      "stage3": "standard_conv",
+      "stage4": "standard_conv"
+    },
+
+    "normalization": "batchnorm",
+    "dropout": 0.3
+  },
+
+  "training": {
+    "optimizer": "AdamW",
+    "learning_rate": 0.0001,
+    "weight_decay": 0.0005,
+    "scheduler": "warmup_cosine",
+    "batch_size": 128,
+    "early_stopping": true,
+
+    "target_supervised": {
+      "enabled": true,
+      "weight": 1.0
+    },
+
+    "dann": {
+      "enabled": false
+    },
+
+    "coral": {
+      "enabled": false
+    },
+
+    "consistency": {
+      "enabled": false
+    }
+  },
+
+  "augmentation": {
+    "apply_probability": 0.25,
+
+    "enabled_transforms": [
+      "gaussian_noise",
+      "amplitude_scale",
+      "baseline_drift",
+      "peak_broadening",
+      "spectral_shift"
+    ],
+
+    "parameters": {
+      "gaussian_noise_std": 0.03,
+      "baseline_drift_strength": 0.07,
+      "peak_broadening_sigma": 0.14,
+      "spectral_shift": 1.8
+    }
+  },
+
+  "metrics": {
+    "source_test": {
+      "accuracy": 0.4100,
+      "f1_macro": 0.3668,
+      "mcc": 0.3263,
+      "roc_auc": 0.8337
+    },
+
+    "clinical_2018": {
+      "accuracy": 0.8970,
+      "f1_macro": 0.8977,
+      "mcc": 0.8735,
+      "roc_auc": 0.9909,
+      "transfer_gap": -0.4870
+    },
+
+    "clinical_2019": {
+      "accuracy": 0.8420,
+      "f1_macro": 0.8406,
+      "mcc": 0.8060,
+      "roc_auc": 0.9798,
+      "transfer_gap": -0.4320
+    }
+  },
+
+  "classwise_f1": {
+    "source_test": [
+      0.4378,
+      0.6875,
+      0.0000,
+      0.0676,
+      0.6410
+    ],
+
+    "clinical_2018": [
+      0.9211,
+      0.8854,
+      0.9282,
+      0.8824,
+      0.8717
+    ],
+
+    "clinical_2019": [
+      0.9458,
+      0.8879,
+      0.8439,
+      0.7685,
+      0.7568
+    ]
+  },
+
+  "observations": {
+    "source_performance": "severely degraded",
+    "clinical_performance": "degraded",
+    "ood_performance": "significant degradation",
+    "representation_learning": "collapsed for some classes",
+    "domain_generalization": "substantially reduced",
+
+    "key_findings": [
+      "Batch Normalization caused severe degradation across all datasets",
+      "Source-domain performance collapsed significantly",
+      "One class failed completely (F1 = 0.0), indicating representation failure",
+      "Normalization disrupted intensity-sensitive spectral features",
+      "OOD robustness decreased substantially compared to normalization-free model",
+      "Batch-dependent statistics introduced domain-specific bias"
+    ]
+  }
+}
