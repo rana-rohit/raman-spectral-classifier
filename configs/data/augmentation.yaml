@@ -1,7 +1,5 @@
-# =============================================================================
 # configs/data/augmentation.yaml
 # Applied only during training. Never at validation or evaluation.
-# =============================================================================
 
 augmentation:
   apply_probability: 0.25
