@@ -16,7 +16,7 @@ from src.utils.config import load_config
 from src.utils.seed import set_seed
 from src.utils.class_subset import filter_and_remap_classes
 
-from src.xai.saliency import compute_saliency
+from src.xai.saliency import compute_saliency, compute_smoothgrad
 from scripts.plot_saliency import plot_saliency
 
 
@@ -124,14 +124,17 @@ def main():
             xi = x[i:i+1].to(device)
 
             saliency = compute_saliency(model, xi)
+            smooth_saliency = compute_smoothgrad(model, xi)
             signal = xi[0].mean(dim=0).detach().cpu().numpy()
 
             save_dir = xai_root / f"class_{label}"
             save_dir.mkdir(parents=True, exist_ok=True)
 
-            save_path = save_dir / f"sample_{class_counts[label]}.png"
+            save_path_sal = save_dir / f"sample_{class_counts[label]}_saliency.png"
+            save_path_sg = save_dir / f"sample_{class_counts[label]}_smoothgrad.png"
 
-            plot_saliency(signal, saliency, save_path)
+            plot_saliency(signal, saliency, save_path_sal)
+            plot_saliency(signal, smooth_saliency, save_path_sg)
 
             class_counts[label] += 1
 
