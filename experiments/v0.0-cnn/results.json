@@ -1,5 +1,5 @@
 {
-  "experiment": "cnn_baseline_v0",
+  "experiment": "v0.0_cnn_baseline",
   "pretrain": {
     "best_epoch": 41,
     "clinical_val_f1": 0.9204127138905924,
