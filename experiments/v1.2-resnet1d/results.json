@@ -1,5 +1,5 @@
 {
-  "experiment": "v1.3_hybrid_multiscale_resnet1d",
+  "experiment": "v1.2_hybrid_multiscale_resnet1d",
   "model": "hybrid_multiscale_resnet1d",
   "parameters": 2144069,
 
