@@ -94,10 +94,11 @@ def main():
 
     model = get_model(args.model, cfg)
     load_best_model(exp_dir, model)
-
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     model.eval()
-    device = next(model.parameters()).device
-
+    
     # -----------------------------
     # XAI
     # -----------------------------
@@ -106,7 +107,7 @@ def main():
     xai_root = Path(exp_dir) / "xai"
     xai_root.mkdir(parents=True, exist_ok=True)
 
-    loader = loaders["2018clinical"]
+    loader = loaders["ood"]["2018clinical"]
 
     class_counts = {i: 0 for i in range(n_classes)}
 
