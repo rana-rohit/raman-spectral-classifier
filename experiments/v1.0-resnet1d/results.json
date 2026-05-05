@@ -1,5 +1,5 @@
 {
-  "experiment": "resnet1d_clean_baseline",
+  "experiment": "v1.0-resnet1d",
   "model": "resnet1d",
   "parameters": 960197,
 
