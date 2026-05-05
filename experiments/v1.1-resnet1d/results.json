@@ -1,5 +1,5 @@
 {
-  "experiment": "multiscale_resnet1d_milestone",
+  "experiment": "v1.1_multiscale_resnet1d",
   "model": "multiscale_resnet1d",
   "parameters": 4847301,
 
