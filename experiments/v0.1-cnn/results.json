@@ -1,5 +1,5 @@
 {
-  "experiment": "cnn_baseline_v1",
+  "experiment": "v0.1_cnn_baseline",
   "model": "cnn",
   "task": "5-class domain adaptation",
 
