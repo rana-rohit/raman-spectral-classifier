@@ -98,7 +98,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
-    
+
     # -----------------------------
     # XAI
     # -----------------------------
@@ -116,7 +116,9 @@ def main():
 
             label = y[i].item()
 
-            if class_counts[label] >= 2:
+            limit = 5 if label == 2 else 2
+
+            if class_counts[label] >= limit:
                 continue
 
             xi = x[i:i+1].to(device)
@@ -133,7 +135,7 @@ def main():
 
             class_counts[label] += 1
 
-        if all(v >= 2 for v in class_counts.values()):
+        if all(class_counts[i] >= (5 if i == 2 else 2) for i in class_counts):
             break
 
     print(f"[XAI] Saved to {xai_root}")
