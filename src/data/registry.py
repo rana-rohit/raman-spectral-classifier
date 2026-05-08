@@ -46,11 +46,12 @@ class DataRegistry:
 
     def __init__(self, data_root: str, cfg: dict) -> None:
         self.data_root = data_root
+        self.cfg = cfg
         self._splits: Dict[str, SplitMeta] = {}
         self._shared_classes: List[int] = cfg["dataset"].get("shared_classes", [])
         self._signal_length: int = cfg["dataset"]["signal_length"]
         self._n_classes_full: int = cfg["dataset"]["n_classes_full"]
-
+        
         self._register_from_cfg(cfg)
 
     # ------------------------------------------------------------------ #
