@@ -1,6 +1,5 @@
 model:
   name: cnn
-  semantic_space: compact_transfer_space
   signal_length: 1000
   n_classes: 5  
   in_channels: 2
