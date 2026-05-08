@@ -151,6 +151,7 @@ def main():
         augmentation,
         loader_cfg,
         shared_classes=shared_classes,
+        n_classes=n_classes,
     )
 
     print(f"  Train:        {len(loaders['train'].dataset):,} samples")
@@ -244,7 +245,7 @@ def main():
         xai_root = Path(exp_dir) / "xai"
         xai_root.mkdir(parents=True, exist_ok=True)
 
-        loader = loaders["2018clinical"]
+        loader = loaders["ood"]["2018clinical"]
 
         model.eval()
         device = next(model.parameters()).device
