@@ -21,7 +21,12 @@ def load_backbone_weights(
     Used for transfer learning when output dimensions differ.
     """
 
-    checkpoint = torch.load(path, map_location=device)
+    checkpoint_path = resolve_best_checkpoint_path(path)
+
+    checkpoint = torch.load(
+        checkpoint_path,
+        map_location=device,
+    )
 
     pretrained_state = checkpoint["model_state"]
     current_state = model.state_dict()
@@ -48,7 +53,7 @@ def load_backbone_weights(
     model.load_state_dict(current_state)
 
     return checkpoint
-    
+
 def save_checkpoint(
     path: str,
     model: torch.nn.Module,
