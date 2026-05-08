@@ -28,6 +28,7 @@ def build_all_loaders(
     augmentation,
     cfg: dict,
     shared_classes,
+    n_classes,
 ) -> Dict:
     batch_size = cfg.get("batch_size", 256)
     num_workers = cfg.get("num_workers", 4)
@@ -39,16 +40,13 @@ def build_all_loaders(
     consistency_cfg = cfg.get("consistency") or {}
     if shared_classes is not None:
         shared_classes = [int(cls) for cls in sorted(shared_classes)]
-    if shared_classes is not None:
-        n_classes = len(shared_classes)
-    else:
-        n_classes = cfg["dataset"]["n_classes_full"]
-    if shared_classes is not None:
+
         class_map, inverse_class_map = class_maps(shared_classes)
+
     else:
         class_map = None
         inverse_class_map = None
-    
+
     train_views = 2 if consistency_cfg.get("enabled", False) else 1
     # If consistency training enabled, return multiple augmented views per sample
     if train_views not in (1, 2):
