@@ -40,7 +40,13 @@ class ModelEvaluator:
         shared_classes = (
             self.cfg.get("task", {}).get("clinical_labels", [])
         )
-        if shared_classes:
+
+        stage = self.cfg.get("task", {}).get(
+            "stage",
+            "transfer_5class",
+        )
+
+        if stage == "transfer_5class":
             assert self.n_classes == len(shared_classes), (
                 f"Evaluator n_classes must match shared_classes, "
                 f"got {self.n_classes} vs {len(shared_classes)}"
