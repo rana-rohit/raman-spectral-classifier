@@ -29,6 +29,10 @@ from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config, save_config
 from src.utils.seed import set_seed
 from src.utils.class_subset import filter_and_remap_classes
+from metadata.clinical import (
+    CLINICAL_LABELS,
+    CLINICAL_LABEL_INVERSE_REMAP
+)
 from src.xai.saliency import compute_saliency
 from scripts.plot_saliency import plot_saliency
 from pathlib import Path
@@ -71,13 +75,25 @@ def main():
         f"configs/model/{args.model}.yaml",
     )
     cfg = apply_overrides(dict(cfg), args.override)
-    shared_classes = cfg["dataset"]["shared_classes"]
-    n_classes = cfg["dataset"]["n_classes_clinical"]
-    assert n_classes == len(shared_classes), (
-        f"n_classes_clinical must match shared_classes, "
-        f"got {n_classes} vs {len(shared_classes)}"
-    )
+
+    # TASK CONFIGURATION
+    task_cfg = cfg["task"]
+
+    task_name = task_cfg["name"]
+    label_space = task_cfg["label_space"]
+
+    shared_classes = task_cfg["clinical_labels"]
+
+    n_classes = len(shared_classes)
+
     cfg["model"]["n_classes"] = n_classes
+
+
+    print("\n==================================================")
+    print(f" Active Task   : {task_name}")
+    print(f" Label Space   : {label_space}")
+    print(f" Clinical IDs  : {shared_classes}")
+    print("==================================================")
 
     exp_name = args.exp_name or f"{args.model}_{time.strftime('%Y%m%d_%H%M%S')}"
     exp_dir = os.path.join(args.exp_dir, exp_name)
@@ -117,8 +133,21 @@ def main():
         shared_classes=shared_classes,
     )
 
-    print(f"  Train: {len(loaders['train'].dataset):,} samples")
+    print(f"  Train:        {len(loaders['train'].dataset):,} samples")
     print(f"  Source val:   {len(loaders['source_val'].dataset):,} samples")
+
+    print("\n  Clinical Label Semantics")
+
+    for label_id in shared_classes:
+
+        clinical_info = CLINICAL_LABELS[int(label_id)]
+
+        print(
+            f"    {label_id} -> "
+            f"{clinical_info['species']} -> "
+            f"{clinical_info['treatment']}"
+        )
+
     if "clinical_val" in loaders:
         print(f"  Clinical val: {len(loaders['clinical_val'].dataset):,} samples")
 
@@ -126,6 +155,14 @@ def main():
     model = get_model(args.model, cfg)
     model_summary(model) 
     
+    print("\n==================================================")
+    print(" TRAINING TASK SUMMARY")
+    print("==================================================")
+
+    print(f"Task Name      : {task_name}")
+    print(f"Num Classes    : {n_classes}")
+    print(f"Label Space    : {label_space}")
+
     print("\n[3/4] Training...")
     trainer = build_trainer(
         model=model,
@@ -177,14 +214,17 @@ def main():
         model.eval()
         device = next(model.parameters()).device
 
-        class_counts = {i: 0 for i in range(n_classes)}
+        class_counts = {
+            remapped_label: 0
+            for remapped_label in range(n_classes)
+        }
 
         for x, y in loader:
             for i in range(x.shape[0]):
 
-                label = y[i].item()
+                label = int(y[i].item())
 
-                if class_counts[label] >= 2:
+                if label not in class_counts or class_counts[label] >= 2:
                     continue
 
                 xi = x[i:i+1].to(device)
@@ -192,7 +232,19 @@ def main():
                 saliency = compute_saliency(model, xi)
                 signal = xi[0].mean(dim=0).detach().cpu().numpy()
 
-                save_dir = xai_root / f"class_{label}"
+                original_label = CLINICAL_LABEL_INVERSE_REMAP[label]
+                clinical_info = CLINICAL_LABELS[original_label]
+
+                species = clinical_info["species"]
+                treatment = clinical_info["treatment"]
+
+                safe_name = (
+                    f"{species}_{treatment}"
+                    .replace(" ", "_")
+                    .replace("/", "_")
+                )
+
+                save_dir = xai_root / safe_name
                 save_dir.mkdir(parents=True, exist_ok=True)
 
                 save_path = save_dir / f"sample_{class_counts[label]}.png"
