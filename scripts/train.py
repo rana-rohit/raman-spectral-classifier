@@ -110,7 +110,7 @@ def main():
             "in isolate_space"
         )
 
-        clinical_sparse_ids = None
+        clinical_sparse_ids = []
         n_classes = cfg["dataset"]["n_classes_full"]
 
     elif stage == "pretrain_treatment_8class":
@@ -129,7 +129,7 @@ def main():
             "in global_treatment_space"
         )
 
-        clinical_sparse_ids = None
+        clinical_sparse_ids = []
         n_classes = 8
 
     elif stage == "transfer_5class":
@@ -165,7 +165,7 @@ def main():
     print(f" Active Task   : {task_name}")
     print(f" Label Space   : {label_space}")
     
-    if clinical_sparse_ids is not None:
+    if len(clinical_sparse_ids) > 0:
         print(
             f" Clinical IDs  : "
             f"{clinical_sparse_ids}"
@@ -202,20 +202,27 @@ def main():
     augmentation = AugmentationPipeline.from_config(cfg["augmentation"])
     if len(augmentation.steps) == 0 or augmentation.p == 0:
         augmentation = None
+    
+    cfg["batch_size"] = (
+        cfg.get("training", {})
+        .get("batch_size", 256)
+    )
 
-    loader_cfg = {
-        "batch_size": cfg.get("training", {}).get("batch_size", 256),
-        "num_workers": cfg.get("training", {}).get("num_workers", 4),
-        "validation": cfg["validation"],
-        "seed": args.seed,
-        "consistency": cfg.get("training", {}).get("consistency", {}),
-    }
+    cfg["num_workers"] = (
+        cfg.get("training", {})
+        .get("num_workers", 4)
+    )
+
+    cfg["consistency"] = (
+        cfg.get("training", {})
+        .get("consistency", {})
+    )
 
     loaders = build_all_loaders(
         registry,
         preprocessor,
         augmentation,
-        loader_cfg,
+        cfg,
         clinical_sparse_ids=clinical_sparse_ids,
         n_classes=n_classes,
     )
@@ -223,7 +230,7 @@ def main():
     print(f"  Train:        {len(loaders['train'].dataset):,} samples")
     print(f"  Source val:   {len(loaders['source_val'].dataset):,} samples")
     
-    if clinical_sparse_ids is not None:
+    if len(clinical_sparse_ids) > 0:
         print("\n  Sparse Global Treatment IDs")
 
         for label_id in clinical_sparse_ids:
