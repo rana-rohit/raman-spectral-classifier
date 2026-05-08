@@ -11,7 +11,24 @@ Computes:
 - Matthews Correlation Coefficient
 - Confusion matrix
 
-All metrics are used by the production shared 5-class clinical pipeline.
+Supports metrics for:
+
+- isolate-space pretraining
+- compact transfer-space evaluation
+- clinical OOD transfer analysis
+
+Transfer-learning experiments operate in:
+compact transfer-space labels:
+[0,1,2,3,4]
+
+NOTE:
+Current metrics operate at spectrum-level.
+
+Future upgrades may include:
+- patient-level aggregation
+- LOOCV evaluation
+- uncertainty calibration
+- ensemble consensus metrics
 """
 
 from __future__ import annotations
@@ -54,11 +71,42 @@ def compute_metrics(
     probs = F.softmax(logits, dim=-1).detach().cpu().numpy()
     preds = logits.argmax(dim=-1).detach().cpu().numpy()
     y     = targets.detach().cpu().numpy()
+    # --------------------------------------------------------
+    # Compact transfer-space integrity check
+    # Transfer evaluation must operate on:  
+    # [0,1,2,3,4]
+    # Sparse clinical labels:
+    # [0,2,3,5,6]
+    # should never appear after remapping.
+    # --------------------------------------------------------
+
+    if n_classes == 5:
+        unexpected = (
+            set(np.unique(y).tolist())
+            - set([0,1,2,3,4])
+        )
+        if unexpected:
+            raise AssertionError(
+                "Metrics received invalid compact "
+                f"transfer labels: {sorted(unexpected)}"
+            )
+    # --------------------------------------------------------
+    # Only evaluate classes actually present
+    # in predictions or targets.
+    # Prevents empty-class instability during:
+    # - transfer folds
+    # - ablations
+    # - small validation subsets
+    # --------------------------------------------------------
 
     present_classes = np.unique(np.concatenate([y, preds]))
 
     # Core metrics
     accuracy = (preds == y).mean()
+    if np.isnan(accuracy):
+        raise ValueError(
+            "Accuracy computation produced NaN"
+        )
     macro_f1 = _macro_f1(y, preds, present_classes)
     mcc      = _matthews_corrcoef(y, preds)
 
@@ -86,7 +134,17 @@ def compute_metrics(
 
     return metrics
 
-
+# --------------------------------------------------------
+# Confusion matrix operates ONLY on
+# present classes for cleaner visualization.
+#
+# Semantic interpretation depends on:
+#
+# - isolate-space
+# - compact transfer-space
+#
+# determined externally by evaluator.
+# --------------------------------------------------------
 def compute_confusion_matrix(
     logits: torch.Tensor,
     targets: torch.Tensor,
@@ -107,7 +165,17 @@ def compute_confusion_matrix(
         cm[idx_map[true], idx_map[pred]] += 1
     return cm, present
 
-
+# --------------------------------------------------------
+# Domain-transfer degradation metric
+#
+# Measures performance drop from:
+#
+# reference-domain ->
+# clinical OOD domain
+#
+# Larger gap indicates:
+# weaker domain generalization.
+# --------------------------------------------------------
 def compute_transfer_gap(
     source_metrics: Dict[str, float],
     ood_metrics: Dict[str, float],

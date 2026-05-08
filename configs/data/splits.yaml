@@ -2,29 +2,27 @@ dataset:
   name: spectral_classifier
   signal_length: 1000
   n_classes_full: 30
-  n_classes_clinical: 5
-  shared_classes: [0, 2, 3, 5, 6]
-  training_classes: [0, 2, 3, 5, 6]
   already_normalised: false
 
 task:
   name: clinical_5_treatment_transfer
   stage: transfer_5class
   pretrained_exp_dir: /content/drive/MyDrive/raman_results/v2best
-  label_space: treatment_8
+  label_space: sparse_global_treatment_space
 
-  clinical_labels:
-    - 0   # Vancomycin -> S. aureus
-    - 2   # Penicillin -> E. faecalis
-    - 3   # Daptomycin -> E. faecium
-    - 5   # Ciprofloxacin -> E. coli
-    - 6   # TZP -> P. aeruginosa
+  clinical_sparse_global_ids:
+    - 0   # Meropenem
+    - 2   # TZP
+    - 3   # Vancomycin
+    - 5   # Penicillin
+    - 6   # Daptomycin
 
 splits:
   reference:
     x_file: X_reference.npy
     y_file: y_reference.npy
     role: source
+    label_space: isolate_space
     n_samples: 60000
     n_classes: 30
     samples_per_class: 2000
@@ -33,7 +31,8 @@ splits:
   finetune:
     x_file: X_finetune.npy
     y_file: y_finetune.npy
-    role: adaptation
+    role: transfer_source
+    label_space: isolate_space
     n_samples: 3000
     n_classes: 30
     samples_per_class: 100
@@ -41,7 +40,8 @@ splits:
   test:
     x_file: X_test.npy
     y_file: y_test.npy
-    role: holdout
+    role: isolate_holdout
+    label_space: isolate_space
     n_samples: 3000
     n_classes: 30
     samples_per_class: 100
@@ -51,6 +51,7 @@ splits:
     x_file: X_2018clinical.npy
     y_file: y_2018clinical.npy
     role: ood_eval
+    label_space: sparse_global_treatment_space
     n_samples: 10000
     n_classes: 5
     samples_per_class: 2000
@@ -60,6 +61,7 @@ splits:
     x_file: X_2019clinical.npy
     y_file: y_2019clinical.npy
     role: ood_eval
+    label_space: sparse_global_treatment_space
     n_samples: 2500
     n_classes: 5
     samples_per_class: 500
@@ -69,6 +71,10 @@ validation:
   strategy: stratified_split
   source_split: reference
   val_fraction: 0.20
+  # TODO:
+  # replace spectrum-level validation
+  # with patient-level LOOCV
+  # once patient metadata pipeline is integrated.
   clinical_val_fraction: 0.20
   clinical_eval_fraction: 0.20
   random_seed: 42

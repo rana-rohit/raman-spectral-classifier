@@ -1,5 +1,6 @@
 model:
   name: resnet1d
+  semantic_space: compact_transfer_space
   signal_length: 1000
   n_classes: 5
   channels: [32, 64, 128, 256]

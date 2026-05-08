@@ -2,6 +2,11 @@
 src/models/registry.py
 
 Model factory for all supported spectral architectures.
+
+Supports:
+- isolate-space pretraining
+- compact transfer-space finetuning
+- ontology-aware multitask heads
 """
 
 from __future__ import annotations
@@ -33,16 +38,37 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
 
     model_cls = MODEL_REGISTRY[name]
     model_cfg = cfg.get("model", {})
-    shared_classes = cfg.get("dataset", {}).get("shared_classes", [])
+    clinical_sparse_ids = (
+        cfg.get("task", {}).get("clinical_labels", [])
+    )
     stage = cfg.get("task", {}).get("stage", "transfer_5class")
 
-    n_classes = int(model_cfg.get("n_classes", len(shared_classes) or 5))
-
+    n_classes = int(
+        model_cfg.get(
+            "n_classes",
+            len(clinical_sparse_ids) or 5,
+        )
+    )
+    
+    # --------------------------------------------------------
+    # Transfer-learning semantic integrity
+    #
+    # transfer_5class operates in:
+    # compact transfer-space
+    #
+    # Compact labels:
+    # [0,1,2,3,4]
+    #
+    # derived from sparse clinical IDs:
+    # [0,2,3,5,6]
+    # --------------------------------------------------------
     if stage == "transfer_5class":
-        assert n_classes == len(shared_classes), (
-            f"transfer_5class requires "
-            f"n_classes == len(shared_classes), "
-            f"got {n_classes} vs {len(shared_classes)}"
+        assert n_classes == len(clinical_sparse_ids), (
+            "transfer_5class requires "
+            "n_classes == number of "
+            "clinical sparse IDs, "
+            f"got {n_classes} vs "
+            f"{len(clinical_sparse_ids)}"
         )
 
     # Determine input channels (1 = raw only, 2 = raw + derivative)
@@ -66,13 +92,25 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
     }
 
     model = model_cls(**common, **specific)
-
-    aux_cfg = cfg.get("multitask", {}).get("auxiliary_shared_head", {})
+   
+    # --------------------------------------------------------
+    # Optional ontology-aware auxiliary head
+    #
+    # Uses sparse clinical ontology IDs to
+    # supervise auxiliary transfer objectives.
+    # --------------------------------------------------------
+    aux_cfg = cfg.get("multitask", {}).get("auxiliary_clinical_head", {})
     if aux_cfg.get("enabled", False):
-        shared_class_ids = aux_cfg.get("classes", cfg.get("dataset", {}).get("shared_classes", []))
+        clinical_sparse_ids_aux = aux_cfg.get(
+            "classes",
+            cfg.get("task", {}).get(
+                "clinical_labels",
+                []
+            )
+        )
         model = MultiHeadSpectralModel(
             backbone=model,
-            shared_class_ids=shared_class_ids,
+            shared_class_ids=clinical_sparse_ids_aux,
             aux_dropout=aux_cfg.get("dropout", 0.0),
         )
 

@@ -1,10 +1,32 @@
+"""
+src/utils/class_subset.py
+
+Ontology-aware utilities for:
+- subset filtering
+- sparse clinical label remapping
+- compact transfer-space conversion
+
+Semantic spaces:
+
+1. Clinical sparse space:
+   [0,2,3,5,6]
+
+2. Compact transfer space:
+   [0,1,2,3,4]
+
+This module implements the transition between them.
+"""
+
 from __future__ import annotations
 
 from typing import Sequence
 
 import torch
 import numpy as np
-
+from metadata.ontology import (
+    COMPACT_LABEL_MAP,
+    INVERSE_COMPACT_LABEL_MAP,
+)
 
 def subset_mask(targets: torch.Tensor, class_ids: Sequence[int]) -> torch.Tensor:
     if not class_ids:
@@ -22,11 +44,21 @@ def remap_targets_to_subset(
     if not class_ids:
         return targets.long()
 
-    # Shared 5-class training stores labels as [0..4] already.
+    # Compact transfer-space labels are already contiguous:
+    # [0,1,2,3,4]
+    # In this case no sparse->compact remapping is needed.
     if targets.numel() > 0 and int(targets.min()) >= 0 and int(targets.max()) < len(class_ids):
         return targets.long()
 
     mapping = {int(cls): idx for idx, cls in enumerate(class_ids)}
+    unknown = set(
+        targets.detach().cpu().tolist()
+    ) - set(mapping.keys())
+
+    if unknown:
+        raise ValueError(
+            f"Unknown sparse labels encountered: {sorted(unknown)}"
+        )
     mapped = [mapping[int(label)] for label in targets.detach().cpu().tolist()]
     return torch.as_tensor(mapped, dtype=torch.long, device=targets.device)
 
@@ -59,9 +91,27 @@ def prepare_subset_eval_logits(
 
     return main_logits, targets.long()
 
+# ------------------------------------------------------------
+# Sparse clinical-space -> compact transfer-space
+#
+# Example:
+#
+# sparse labels:
+#   [0,2,3,5,6]
+#
+# compact labels:
+#   [0,1,2,3,4]
+#
+# Used during:
+# - transfer learning
+# - finetuning
+# - clinical OOD evaluation
+# ------------------------------------------------------------
 def filter_and_remap_classes(X, y, keep_classes):
     keep_classes = np.array(sorted(keep_classes))
-
+    if len(np.unique(keep_classes)) != len(keep_classes):
+        raise ValueError("Duplicate class IDs detected in keep_classes")
+        
     mask = np.isin(y, keep_classes)
 
     if mask.shape[0] != X.shape[0]:
@@ -91,6 +141,16 @@ def filter_and_remap_classes(X, y, keep_classes):
 
 def class_maps(keep_classes):
     keep_classes = [int(cls) for cls in sorted(keep_classes)]
-    class_map = {cls: idx for idx, cls in enumerate(keep_classes)}
-    inverse_class_map = {idx: cls for cls, idx in class_map.items()}
+    if keep_classes == [0, 2, 3, 5, 6]:
+        class_map = COMPACT_LABEL_MAP
+        inverse_class_map = INVERSE_COMPACT_LABEL_MAP
+    else:
+        class_map = {
+            cls: idx
+            for idx, cls in enumerate(keep_classes)
+        }
+        inverse_class_map = {
+            idx: cls
+            for cls, idx in class_map.items()
+        }
     return class_map, inverse_class_map

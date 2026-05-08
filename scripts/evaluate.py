@@ -21,7 +21,6 @@ from src.models.registry import get_model
 from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config
 from src.utils.seed import set_seed
-from src.utils.class_subset import filter_and_remap_classes
 
 
 def parse_args():
@@ -38,20 +37,74 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     registry.load_all()
 
     task_cfg = cfg["task"]
-    shared_classes = task_cfg["clinical_labels"]
-    n_classes = len(shared_classes)
-    cfg["model"]["n_classes"] = n_classes
+    clinical_sparse_ids = task_cfg.get(
+        "clinical_sparse_global_ids",
+        None,
+    )
+    stage = task_cfg["stage"]
+    label_space = task_cfg["label_space"]
     
+    if stage == "pretrain_30class":
+        clinical_sparse_ids = None
+        n_classes = cfg["dataset"]["n_classes_full"]
+
+    elif stage == "pretrain_treatment_8class":
+        clinical_sparse_ids = None
+        n_classes = 8
+
+    elif stage == "transfer_5class":
+        clinical_sparse_ids = task_cfg.get(
+            "clinical_sparse_global_ids",
+            None,
+        )
+        n_classes = len(clinical_sparse_ids)
+
+    else:
+        raise ValueError(
+            f"Unknown evaluation stage: {stage}"
+        )
+    cfg = dict(cfg)
+    cfg["model"] = dict(cfg["model"])
+    cfg["model"]["n_classes"] = n_classes
+
+    # --------------------------------------------------------
+    # Semantic-space integrity checks
+    # --------------------------------------------------------
+
+    if stage == "pretrain_30class":
+        assert label_space == "isolate_space"
+        assert cfg["model"]["semantic_space"] == "isolate_space"
+        assert n_classes == 30
+
+    elif stage == "pretrain_treatment_8class":
+        assert label_space == "global_treatment_space"
+        assert cfg["model"]["semantic_space"] == "global_treatment_space"
+        assert n_classes == 8
+
+    elif stage == "transfer_5class":
+        assert label_space == "sparse_global_treatment_space"
+        assert cfg["model"]["semantic_space"] == "compact_transfer_space"
+        assert n_classes == 5
+        assert clinical_sparse_ids == [0, 2, 3, 5, 6], (
+            "transfer_5class must use "
+            "verified sparse global treatment IDs"
+        )
+
     print("\n==================================================")
     print(" EVALUATION TASK")
     print("==================================================")
     print(f"Task Name    : {task_cfg['name']}")
-    print(f"Label Space  : {task_cfg.get('label_space', 'unknown')}")
-    print(f"Classes      : {shared_classes}")
+    print(f"Stage        : {stage}")
+    print(f"Label Space  : {label_space}")
+    print(f"Num Classes  : {n_classes}")
+
+    if clinical_sparse_ids is not None:
+        print(f"Clinical IDs : {clinical_sparse_ids}")
+
     print("==================================================")
     
+    # Fit preprocessor on FULL reference set (matches pretrained backbone)
     X_ref, y_ref = registry.get_arrays("reference")
-    X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
 
@@ -70,7 +123,8 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
             "seed": seed,
             "consistency": cfg.get("training", {}).get("consistency", {}),
         },
-        shared_classes=shared_classes,
+        clinical_sparse_ids=clinical_sparse_ids,
+        n_classes=n_classes,
     )
     return loaders, n_classes
 
@@ -79,6 +133,8 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
     cfg_path = os.path.join(exp_dir, "config.yaml")
     cfg = load_config(cfg_path)
     task_cfg = cfg["task"]
+    stage = task_cfg["stage"]
+    label_space = task_cfg["label_space"]
     loaders, n_classes = build_eval_loaders(cfg, seed)
 
     model_name = cfg.get("model", {}).get("name", "unknown")
@@ -86,6 +142,47 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
 
     print(f"\nLoading best checkpoint from {exp_dir}...")
     checkpoint = load_best_model(exp_dir, model)
+    checkpoint_cfg = checkpoint.get("config", {})
+
+    checkpoint_stage = (
+        checkpoint_cfg
+        .get("task", {})
+        .get("stage", None)
+    )
+
+    assert checkpoint_stage == stage, (
+        "Checkpoint stage mismatch:\n"
+        f"Expected: {stage}\n"
+        f"Found: {checkpoint_stage}"
+    )
+    checkpoint_label_space = (
+        checkpoint_cfg
+        .get("task", {})
+        .get("label_space", None)
+    )
+
+    assert checkpoint_label_space == label_space, (
+        "Checkpoint label-space mismatch:\n"
+        f"Expected: {label_space}\n"
+        f"Found: {checkpoint_label_space}"
+    )
+
+    checkpoint_model_space = (
+        checkpoint_cfg
+        .get("model", {})
+        .get("semantic_space", None)
+    )
+
+    assert (
+        checkpoint_model_space
+        == cfg["model"]["semantic_space"]
+    ), (
+        "Checkpoint model semantic-space mismatch:\n"
+        f"Expected: "
+        f"{cfg['model']['semantic_space']}\n"
+        f"Found: {checkpoint_model_space}"
+    )
+    
     print(f"  Checkpoint epoch: {checkpoint.get('epoch', '?')}")
 
     evaluator = ModelEvaluator(
@@ -97,7 +194,7 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
     )
     results = evaluator.evaluate_all(loaders)
     results["task"] = task_cfg["name"]
-    eval_path = os.path.join(exp_dir, "eval_results_latest.json")
+    eval_path = os.path.join(exp_dir, f"{stage}_eval_results.json")
     evaluator.save(eval_path)
 
     print(f"\nSaved evaluation results to:\n  {eval_path}")

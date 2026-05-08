@@ -2,6 +2,12 @@
 src/training/trainer.py
 
 Core training engine shared across all model families.
+
+Supports:
+- isolate-space pretraining
+- compact transfer-space finetuning
+- clinical domain adaptation
+- ontology-aware auxiliary supervision
 """
 
 from __future__ import annotations
@@ -85,21 +91,38 @@ class Trainer:
         self.exp_dir = Path(exp_dir)
         self.n_classes = n_classes
         self.reference_state = reference_state
-        shared_classes = (
+        clinical_sparse_ids = (
             cfg.get("task", {})
-            .get("clinical_labels", [])
+            .get("clinical_sparse_global_ids", [])
         )
 
         stage = cfg.get("task", {}).get(
             "stage",
             "transfer_5class",
         )
-
+        
+        # --------------------------------------------------------
+        # Transfer-learning semantic integrity
+        #
+        # transfer_5class operates in:
+        # compact transfer-space
+        #
+        # using labels:
+        # [0,1,2,3,4]
+        #
+        # derived from sparse clinical IDs:
+        # [0,2,3,5,6]
+        # --------------------------------------------------------
         if stage == "transfer_5class":
-            assert self.n_classes == len(shared_classes), (
-                f"transfer_5class requires "
-                f"n_classes == len(shared_classes), "
-                f"got {self.n_classes} vs {len(shared_classes)}"
+            assert self.n_classes == len(clinical_sparse_ids), (
+
+                "transfer_5class requires "
+
+                "n_classes == number of "
+                "clinical sparse IDs, "
+
+                f"got {self.n_classes} vs "
+                f"{len(clinical_sparse_ids)}"
             )
 
         self.dann_cfg = self.train_cfg.get("dann", {})
@@ -114,6 +137,22 @@ class Trainer:
         self.target_supervised_enabled = target_cfg.get("enabled", True)
         self.target_supervised_weight = float(target_cfg.get("weight", 1.0))
 
+        # --------------------------------------------------------
+        # MULTITASK SEMANTIC INTEGRITY
+        # Clinical targets are ALWAYS treatments.
+        # If the model is in isolate-space (Stage 1), we CANNOT
+        # perform target supervision, because it would force the
+        # model to map clinical treatments to isolates 0,2,3,5,6
+        # (e.g. treating Meropenem as C. albicans).
+        # --------------------------------------------------------
+        if self.target_supervised_enabled and stage == "pretrain_30class":
+            print(
+                "[Audit Fix] WARNING: Disabling target_supervised because "
+                "clinical labels (treatments) cannot be supervised in "
+                "isolate-space. This prevents catastrophic semantic corruption."
+            )
+            self.target_supervised_enabled = False
+
         self.clinical_loader = self.loaders.get("clinical_train", None)
 
         if self.clinical_loader is not None:
@@ -121,10 +160,10 @@ class Trainer:
         else:
             self.clinical_iter = None
 
-        self.aux_cfg = cfg.get("multitask", {}).get("auxiliary_shared_head", {})
-        self.shared_class_ids = self.aux_cfg.get(
+        self.aux_cfg = cfg.get("multitask", {}).get("auxiliary_clinical_head", {})
+        self.clinical_sparse_ids = self.aux_cfg.get(
             "classes",
-            cfg.get("task", {}).get("clinical_labels", []),
+            cfg.get("task", {}).get("clinical_sparse_global_ids", []),
         )
         self.aux_loss_weight = (
             self.aux_cfg.get("loss_weight", 0.0)
@@ -159,7 +198,7 @@ class Trainer:
         # Optionally freeze BatchNorm running statistics.
         # Useful during pretraining with multi-forward passes, but should
         # be disabled during finetuning to allow domain adaptation.
-        if self.train_cfg.get("freeze_bn", True):
+        if self.train_cfg.get("freeze_bn", False):
             for m in self.model.modules():
                 if isinstance(m, nn.BatchNorm1d):
                     m.eval()                 # freeze running mean/var
@@ -547,22 +586,57 @@ class Trainer:
             return x.to(self.device), None, y.to(self.device)
 
         raise TypeError(f"Unsupported batch type: {type(batch)!r}")
-
+    
+    # --------------------------------------------------------
+    # Auxiliary clinical-head supervision
+    #
+    # Uses sparse clinical ontology IDs to
+    # determine which samples participate
+    # in auxiliary transfer supervision.
+    # --------------------------------------------------------
+    
     def _compute_aux_loss(
         self,
         outputs: dict[str, torch.Tensor | None],
         targets: torch.Tensor,
     ) -> torch.Tensor:
         aux_logits = outputs.get("aux_logits")
-        if aux_logits is None or not self.shared_class_ids:
+        if aux_logits is None or not self.clinical_sparse_ids:
             return self._zero_loss()
 
-        mask = subset_mask(targets, self.shared_class_ids)
+        stage = self.cfg.get("task", {}).get("stage", "transfer_5class")
+
+        # --------------------------------------------------------
+        # If we are in isolate space, targets are isolates [0..29]. 
+        # We MUST map them to treatments before applying 
+        # clinical_sparse_ids (which are treatment IDs).
+        # Otherwise the aux head learns to classify isolates 
+        # instead of treatments, causing semantic corruption!
+        # --------------------------------------------------------
+        if stage == "pretrain_30class":
+            from metadata.ontology import ISOLATE_TO_TREATMENT
+            mapped_targets = torch.tensor(
+                [ISOLATE_TO_TREATMENT[int(t.item())] for t in targets],
+                device=targets.device
+            )
+        else:
+            mapped_targets = targets
+
+        mask = subset_mask(mapped_targets, self.clinical_sparse_ids)
         if not mask.any():
             return self._zero_loss()
 
-        aux_targets = remap_targets_to_subset(targets[mask], self.shared_class_ids)
+        aux_targets = remap_targets_to_subset(mapped_targets[mask], self.clinical_sparse_ids)
         return self.loss_fn(aux_logits[mask], aux_targets)
+    
+    # --------------------------------------------------------
+    # Consistency regularization
+    #
+    # Operates entirely in compact transfer-space.
+    #
+    # Sparse clinical labels should never appear
+    # after remapping.
+    # --------------------------------------------------------
 
     def _compute_consistency_loss(
         self,
@@ -581,9 +655,38 @@ class Trainer:
             loss_type=loss_type,
             temperature=temperature,
         )
-
+        
+        # Consistency loss operates directly on auxiliary
+        # logits, assuming semantic alignment is already
+        # enforced by auxiliary target remapping during
+        # supervised optimization.
+        
         if outputs1["aux_logits"] is not None and outputs2["aux_logits"] is not None:
-            mask = subset_mask(targets, self.shared_class_ids)
+            stage = self.cfg.get(
+                "task",
+                {},
+            ).get(
+                "stage",
+                "transfer_5class",
+            )
+
+            if stage == "pretrain_30class":
+
+                from metadata.ontology import ISOLATE_TO_TREATMENT
+
+                mapped_targets = torch.tensor(
+                    [
+                        ISOLATE_TO_TREATMENT[int(t.item())]
+                        for t in targets
+                    ],
+                    device=targets.device,
+                )
+
+            else:
+
+                mapped_targets = targets
+
+            mask = subset_mask(mapped_targets, self.clinical_sparse_ids)
             if mask.any():
                 total = total + consistency_loss(
                     outputs1["aux_logits"][mask],
@@ -612,8 +715,47 @@ class Trainer:
             f"{split_name} targets must be non-negative, got {int(targets.min())}"
         )
         assert int(targets.max()) < self.n_classes, (
-            f"{split_name} targets must be < {self.n_classes}, got {int(targets.max())}"
+            f"{split_name} targets must be < "
+            f"{self.n_classes}, "
+            f"got {int(targets.max())}"
         )
+
+        # --------------------------------------------------------
+        # Compact transfer-space integrity check
+        #
+        # Sparse clinical labels:
+        # [0,2,3,5,6]
+        #
+        # should NEVER appear after remapping.
+        #
+        # Trainer operates strictly in:
+        # compact transfer-space:
+        #
+        # [0,1,2,3,4]
+        # --------------------------------------------------------
+        unique_targets = sorted(
+            torch.unique(targets).cpu().tolist()
+        )
+
+        stage = self.cfg.get(
+            "task",
+            {},
+        ).get(
+            "stage",
+            "transfer_5class",
+        )
+
+        if stage == "transfer_5class":
+            unexpected = (
+                set(unique_targets)
+                - set([0,1,2,3,4])
+            )
+            if unexpected:
+                raise AssertionError(
+                    f"{split_name} contains invalid "
+                    f"compact transfer labels: "
+                    f"{sorted(unexpected)}"
+                )
 
 
 def build_trainer(

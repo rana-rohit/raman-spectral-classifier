@@ -10,7 +10,6 @@ import argparse
 import os
 import sys
 import time
-import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -28,13 +27,14 @@ from src.training.trainer import build_trainer
 from src.utils.checkpoint import (
     load_best_model,
     load_backbone_weights,
+    resolve_best_checkpoint_path,
 )
 from src.utils.config import load_config, save_config
 from src.utils.seed import set_seed
-from src.utils.class_subset import filter_and_remap_classes
-from metadata.clinical import (
+from metadata.ontology import (
     CLINICAL_LABELS,
-    CLINICAL_LABEL_INVERSE_REMAP
+    INVERSE_COMPACT_LABEL_MAP,
+    ONTOLOGY_VERSION,
 )
 from src.xai.saliency import compute_saliency
 from scripts.plot_saliency import plot_saliency
@@ -87,31 +87,95 @@ def main():
 
     stage = task_cfg["stage"]
 
-    clinical_labels = task_cfg["clinical_labels"]
+    clinical_sparse_global_ids = task_cfg.get(
+        "clinical_sparse_global_ids",
+        None,
+    )
 
     if stage == "pretrain_30class":
+        assert (
+            label_space == "isolate_space"
+        ), (
+            "pretrain_30class must operate "
+            "on isolate_space"
+        )
 
-        shared_classes = None
+        assert (
+            cfg["model"]["semantic_space"]
+            == "isolate_space"
+        ), (
+            "Stage-1 model must operate "
+            "in isolate_space"
+        )
+
+        clinical_sparse_ids = None
         n_classes = cfg["dataset"]["n_classes_full"]
+
+    elif stage == "pretrain_treatment_8class":
+        assert (
+            label_space == "global_treatment_space"
+        ), (
+            "pretrain_treatment_8class must operate "
+            "on global_treatment_space"
+        )
+        
+        assert (
+            cfg["model"]["semantic_space"]
+            == "global_treatment_space"
+        ), (
+            "Treatment pretraining model must operate "
+            "in global_treatment_space"
+        )
+
+        clinical_sparse_ids = None
+        n_classes = 8
 
     elif stage == "transfer_5class":
 
-        shared_classes = clinical_labels
-        n_classes = len(shared_classes)
+        clinical_sparse_ids = clinical_sparse_global_ids
+        n_classes = len(clinical_sparse_ids)
 
     else:
         raise ValueError(f"Unknown training stage: {stage}")
 
     cfg["model"]["n_classes"] = n_classes
+    
+    # --------------------------------------------------------
+    # Semantic-space integrity checks
+    # --------------------------------------------------------
+    if stage == "transfer_5class":
+        assert (
+            label_space == "sparse_global_treatment_space"
+        ), (
+            "transfer_5class must operate "
+            "on sparse_global_treatment_space"
+        )
 
+        assert (
+            cfg["model"]["semantic_space"]
+            == "compact_transfer_space"
+        ), (
+            "Transfer model must operate "
+            "in compact_transfer_space"
+        )
 
     print("\n==================================================")
     print(f" Active Task   : {task_name}")
     print(f" Label Space   : {label_space}")
-    if shared_classes is not None:
-        print(f" Clinical IDs  : {shared_classes}")
+    
+    if clinical_sparse_ids is not None:
+        print(
+            f" Clinical IDs  : "
+            f"{clinical_sparse_ids}"
+        )
+
     else:
-        print(" Clinical IDs  : ALL 30 REFERENCE CLASSES")
+
+        print(
+            f" Semantic Space: "
+            f"{label_space}"
+        )
+
     print("==================================================")
 
     exp_name = args.exp_name or f"{args.model}_{time.strftime('%Y%m%d_%H%M%S')}"
@@ -127,9 +191,9 @@ def main():
 
     X_ref, y_ref = registry.get_arrays("reference")
 
-    if shared_classes is not None:
-        X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
-
+    # Always fit preprocessor on the FULL reference set.
+    # The pretrained backbone learned under this normalization.
+    # Filtering before fitting creates a statistical mismatch.
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
 
@@ -150,18 +214,24 @@ def main():
         preprocessor,
         augmentation,
         loader_cfg,
-        shared_classes=shared_classes,
+        clinical_sparse_ids=clinical_sparse_ids,
         n_classes=n_classes,
     )
 
     print(f"  Train:        {len(loaders['train'].dataset):,} samples")
     print(f"  Source val:   {len(loaders['source_val'].dataset):,} samples")
     
-    if shared_classes is not None:
-        print("\n  Clinical Label Semantics")
-        for label_id in shared_classes:
+    if clinical_sparse_ids is not None:
+        print("\n  Sparse Global Treatment IDs")
+
+        for label_id in clinical_sparse_ids:
+
             clinical_info = CLINICAL_LABELS[int(label_id)]
-            print(f"    {label_id} -> {clinical_info['species']} -> {clinical_info['treatment']}")
+
+            print(
+                f"    {label_id} "
+                f"-> {clinical_info['global_treatment']}"
+            )
 
     if "clinical_val" in loaders:
         print(f"  Clinical val: {len(loaders['clinical_val'].dataset):,} samples")
@@ -178,9 +248,20 @@ def main():
         )
 
         print("\nLoading pretrained backbone...")
-        checkpoint = load_backbone_weights(
-            pretrained_dir,
-            model,
+        pretrained_ckpt = resolve_best_checkpoint_path(pretrained_dir)
+
+        checkpoint = load_backbone_weights(pretrained_ckpt,model)
+        checkpoint_cfg = checkpoint.get("config", {})
+
+        checkpoint_stage = (
+            checkpoint_cfg
+            .get("task", {})
+            .get("stage", None)
+        )
+
+        assert checkpoint_stage == "pretrain_treatment_8class", (
+            "transfer_5class should load "
+            "a treatment-pretrained checkpoint"
         )
 
         print(
@@ -193,6 +274,7 @@ def main():
     print(" TRAINING TASK SUMMARY")
     print("==================================================")
 
+    print(f"Ontology Ver. : {ONTOLOGY_VERSION}")
     print(f"Task Name      : {task_name}")
     print(f"Num Classes    : {n_classes}")
     print(f"Label Space    : {label_space}")
@@ -207,11 +289,29 @@ def main():
     )
     trainer.fit()
     load_best_model(exp_dir, model)
+    
+    # --------------------------------------------------------
+    # Stage 1:
+    # isolate-space pretraining
+    #
+    # 30-class spectral representation learning.
+    # --------------------------------------------------------
+    if stage in {
+        "pretrain_30class",
+        "pretrain_treatment_8class",
+    }:
 
-    if stage == "pretrain_30class":
-        print("\n[4/4] Final evaluation (pretraining checkpoint)...")
+        print(
+            "\n[4/4] Final evaluation "
+            "(pretraining checkpoint)..."
+        )
+
     else:
-        print("\n[4/4] Final evaluation (transfer checkpoint)...")
+
+        print(
+            "\n[4/4] Final evaluation "
+            "(transfer checkpoint)..."
+        )
 
     evaluator = ModelEvaluator(
         model=model,
@@ -221,10 +321,20 @@ def main():
         cfg=cfg,
     )
     evaluator.evaluate_all(loaders)
+
     if stage == "pretrain_30class":
-        results_name = "pretrain_results.json"
+        results_name = (
+            "pretrain_30class_results.json"
+        )
+
+    elif stage == "pretrain_treatment_8class":
+        results_name = (
+            "pretrain_treatment_8class_results.json"
+        )
     else:
-        results_name = "transfer_results.json"
+        results_name = (
+            "transfer_5class_results.json"
+        )
 
     evaluator.save(os.path.join(exp_dir, results_name))
 
@@ -233,6 +343,11 @@ def main():
     if stage == "transfer_5class":
         print("\n[Finetune Phase] Adapting model to new domain...")
         finetune_dir = os.path.join(exp_dir, "finetune")
+        assert n_classes == 5, (
+            "Finetuning must operate "
+            "in compact transfer-space"
+        )
+        
         finetune(
             model=model,
             pretrained_exp_dir=exp_dir,
@@ -247,8 +362,16 @@ def main():
 
     print(f"\n  Done. Training artifacts: {exp_dir}/")
     
-    # XAI BLOCK 
-    if args.run_xai and shared_classes is not None:
+    # --------------------------------------------------------
+    # XAI analysis operates on:
+    # compact transfer-space predictions
+    #
+    # Predictions are restored back to:
+    # sparse clinical ontology IDs
+    #
+    # before semantic visualization.
+    # --------------------------------------------------------
+    if args.run_xai and clinical_sparse_ids is not None:
         print("\n[XAI] Generating saliency maps...")
 
         xai_root = Path(exp_dir) / "xai"
@@ -276,15 +399,18 @@ def main():
 
                 saliency = compute_saliency(model, xi)
                 signal = xi[0].mean(dim=0).detach().cpu().numpy()
-
-                original_label = CLINICAL_LABEL_INVERSE_REMAP[label]
+                
+                assert label in INVERSE_COMPACT_LABEL_MAP, (
+                    f"Unknown compact label: {label}"
+                )
+                
+                original_label = INVERSE_COMPACT_LABEL_MAP[label]
                 clinical_info = CLINICAL_LABELS[original_label]
 
-                species = clinical_info["species"]
-                treatment = clinical_info["treatment"]
+                treatment = clinical_info["global_treatment"]
 
                 safe_name = (
-                    f"{species}_{treatment}"
+                    f"treatment_{original_label}_{treatment}"
                     .replace(" ", "_")
                     .replace("/", "_")
                 )

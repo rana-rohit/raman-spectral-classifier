@@ -18,7 +18,10 @@ from torch.utils.data import DataLoader
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.dataset import SpectralDataset
 from src.data.registry import DataRegistry
-from src.utils.class_subset import class_maps, filter_and_remap_classes
+from src.utils.class_subset import (
+    class_maps,
+    filter_and_remap_classes,
+)
 from sklearn.model_selection import train_test_split
 
 
@@ -27,7 +30,7 @@ def build_all_loaders(
     preprocessor: SpectralPreprocessor,
     augmentation,
     cfg: dict,
-    shared_classes,
+    clinical_sparse_ids,
     n_classes,
 ) -> Dict:
     batch_size = cfg.get("batch_size", 256)
@@ -38,10 +41,11 @@ def build_all_loaders(
     clinical_val_fraction = cfg["validation"].get("clinical_val_fraction", val_fraction)
     clinical_eval_fraction = cfg["validation"].get("clinical_eval_fraction", val_fraction)
     consistency_cfg = cfg.get("consistency") or {}
-    if shared_classes is not None:
-        shared_classes = [int(cls) for cls in sorted(shared_classes)]
+    stage = cfg.get("task", {}).get("stage", "transfer_5class")
+    if clinical_sparse_ids is not None:
+        clinical_sparse_ids = [int(cls) for cls in sorted(clinical_sparse_ids)]
 
-        class_map, inverse_class_map = class_maps(shared_classes)
+        class_map, inverse_class_map = class_maps(clinical_sparse_ids)
 
     else:
         class_map = None
@@ -53,8 +57,18 @@ def build_all_loaders(
         raise ValueError("train_views must be 1 or 2")
 
     loaders = {}
+    
+    # --------------------------------------------------------
+    # REFERENCE DOMAIN
+    #
+    # If clinical_sparse_ids is None:
+    #     isolate-space (30-class pretraining)
+    #
+    # Else:
+    #        compact transfer-space (5-class)
+    # --------------------------------------------------------
 
-    X_ref, y_ref, ref_ids = _load_shared_split(registry, "reference", shared_classes)
+    X_ref, y_ref, ref_ids = _load_shared_split(registry, "reference", clinical_sparse_ids, stage=stage)
 
     ref_idx = np.arange(len(y_ref))
     tr_idx, val_idx = train_test_split(
@@ -77,7 +91,7 @@ def build_all_loaders(
         n_views=train_views,
         preprocessor=preprocessor,
         expected_n_classes=n_classes,
-        class_filter=shared_classes,
+        class_filter=clinical_sparse_ids,
         class_map=class_map,
         inverse_class_map=inverse_class_map,
         sample_ids=tr_ids,
@@ -90,18 +104,29 @@ def build_all_loaders(
         preprocessor=preprocessor,
         shuffle=False,
         expected_n_classes=n_classes,
-        class_filter=shared_classes,
+        class_filter=clinical_sparse_ids,
         class_map=class_map,
         inverse_class_map=inverse_class_map,
         sample_ids=val_ids,
     )
     loaders["val"] = loaders["source_val"]
+    
+    # --------------------------------------------------------
+    # REFERENCE-DOMAIN HOLDOUT EVALUATION
+    #
+    # IMPORTANT:
+    # In transfer mode, this evaluates compact
+    # transfer-space performance on reference-domain spectra.
+    #
+    # This is NOT 30-class isolate evaluation.
+    # --------------------------------------------------------
 
     X_test, y_test, test_ids = _load_shared_split(
         registry,
         "test",
-        shared_classes,
+        clinical_sparse_ids,
         allow_holdout=True,
+        stage=stage,
     )
     loaders["test"] = _make_loader(
         X_test, y_test,
@@ -111,12 +136,23 @@ def build_all_loaders(
         shuffle=False,
         preprocessor=preprocessor,
         expected_n_classes=n_classes,
-        class_filter=shared_classes,
+        class_filter=clinical_sparse_ids,
         class_map=class_map,
         inverse_class_map=inverse_class_map,
         sample_ids=test_ids,
     )
     
+    # --------------------------------------------------------
+    # CLINICAL OOD DOMAIN
+    #
+    # Clinical datasets already exist in sparse
+    # clinical treatment-space:
+    #
+    # [0,2,3,5,6]
+    #
+    # and are remapped internally to compact labels.
+    # --------------------------------------------------------
+
     # -----------------------------
     # CLINICAL LOADER (for domain adaptation / DANN)
     # -----------------------------
@@ -131,7 +167,8 @@ def build_all_loaders(
             X_clin, y_clin, clin_ids = _load_shared_split(
                 registry,
                 split_name,
-                shared_classes,
+                clinical_sparse_ids,
+                stage=stage,
             )
             (
                 X_pool,
@@ -181,7 +218,7 @@ def build_all_loaders(
                 seed=seed + 10 + idx,
                 preprocessor=preprocessor,
                 expected_n_classes=n_classes,
-                class_filter=shared_classes,
+                class_filter=clinical_sparse_ids,
                 class_map=class_map,
                 inverse_class_map=inverse_class_map,
                 sample_ids=ids_eval,
@@ -212,7 +249,7 @@ def build_all_loaders(
             n_views=train_views,   
             preprocessor=preprocessor,
             expected_n_classes=n_classes,
-            class_filter=shared_classes,
+            class_filter=clinical_sparse_ids,
             class_map=class_map,
             inverse_class_map=inverse_class_map,
             sample_ids=np.asarray(clinical_train_ids),
@@ -228,7 +265,7 @@ def build_all_loaders(
             seed=seed + 6,
             preprocessor=preprocessor,
             expected_n_classes=n_classes,
-            class_filter=shared_classes,
+            class_filter=clinical_sparse_ids,
             class_map=class_map,
             inverse_class_map=inverse_class_map,
             sample_ids=np.asarray(clinical_val_ids),
@@ -238,7 +275,7 @@ def build_all_loaders(
     except Exception as e:
         print("WARNING: Clinical data not found:", e)
 
-    X_ft, y_ft, ft_ids = _load_shared_split(registry, "finetune", shared_classes)
+    X_ft, y_ft, ft_ids = _load_shared_split(registry, "finetune", clinical_sparse_ids, stage=stage)
     loaders["finetune"] = _make_loader(
         X_ft, y_ft,
         augmentation=_clone_augmentation(augmentation),
@@ -250,7 +287,7 @@ def build_all_loaders(
         n_views=train_views,
         preprocessor=preprocessor,
         expected_n_classes=n_classes,
-        class_filter=shared_classes,
+        class_filter=clinical_sparse_ids,
         class_map=class_map,
         inverse_class_map=inverse_class_map,
         sample_ids=ft_ids,
@@ -331,45 +368,105 @@ def _seed_worker(worker_id: int) -> None:
 def _load_shared_split(
     registry: DataRegistry,
     split_name: str,
-    shared_classes: list[int] | None,
+    clinical_sparse_ids: list[int] | None,
     allow_holdout: bool = False,
+    stage: str = "transfer_5class",
 ):
+    from metadata.ontology import ISOLATE_TO_TREATMENT
+
     X, y = registry.get_arrays(
         split_name,
         allow_holdout=allow_holdout,
     )
 
-    # PRETRAINING MODE
-    # Use full label space without filtering/remapping
-    if shared_classes is None:
+    # --------------------------------------------------------
+    # PRETRAINING MODE 1: ISOLATE SPACE
+    # --------------------------------------------------------
+    if stage == "pretrain_30class":
+        sample_ids = np.asarray(
+            [f"{split_name}:{idx}" for idx in range(len(y))]
+        )
+        return X, y, sample_ids
+
+    split_cfg = registry.cfg["splits"][split_name]
+
+    label_space = split_cfg.get("label_space")
+
+    if label_space is None:
+        raise ValueError(
+            f"{split_name} missing label_space metadata"
+        )
+
+    is_isolate_space = (
+        label_space == "isolate_space"
+    )
+
+    # --------------------------------------------------------
+    # PRETRAINING MODE 2: GLOBAL TREATMENT SPACE (Stage 2)
+    # --------------------------------------------------------
+    if stage == "pretrain_treatment_8class":
+        if is_isolate_space:
+            y_treatment = np.array(
+                [ISOLATE_TO_TREATMENT[int(label)] for label in y],
+                dtype=np.int64,
+            )
+        else:
+            y_treatment = y
 
         sample_ids = np.asarray(
             [f"{split_name}:{idx}" for idx in range(len(y))]
         )
 
-        return X, y, sample_ids
+        _assert_label_range(split_name, y_treatment, 8)
+        return X, y_treatment, sample_ids
 
-    # TRANSFER MODE
-    # Filter + remap to compact clinical labels
-    mask = np.isin(y, shared_classes)
+    # --------------------------------------------------------
+    # TRANSFER MODE (Stage 3): COMPACT TRANSFER SPACE
+    # --------------------------------------------------------
+    if is_isolate_space:
+        # Step 1: Map isolate IDs → global treatment IDs
+        y_treatment = np.array(
+            [ISOLATE_TO_TREATMENT[int(label)] for label in y],
+            dtype=np.int64,
+        )
 
-    sample_ids = np.asarray(
-        [f"{split_name}:{idx}" for idx in np.flatnonzero(mask)]
-    )
+        # Step 2: Filter to clinical treatment subset
+        mask = np.isin(y_treatment, clinical_sparse_ids)
 
-    X, y = filter_and_remap_classes(
-        X,
-        y,
-        shared_classes,
-    )
+        sample_ids = np.asarray(
+            [f"{split_name}:{idx}" for idx in np.flatnonzero(mask)]
+        )
+
+        X_filtered = X[mask]
+        y_filtered = y_treatment[mask]
+
+        # Step 3: Remap global treatment → compact
+        X_filtered, y_compact = filter_and_remap_classes(
+            X_filtered,
+            y_filtered,
+            clinical_sparse_ids,
+        )
+    else:
+        # Clinical data: already in global treatment-space
+        mask = np.isin(y, clinical_sparse_ids)
+
+        sample_ids = np.asarray(
+            [f"{split_name}:{idx}" for idx in np.flatnonzero(mask)]
+        )
+
+        X_filtered, y_compact = filter_and_remap_classes(
+            X,
+            y,
+            clinical_sparse_ids,
+        )
 
     _assert_label_range(
         split_name,
-        y,
-        len(shared_classes),
+        y_compact,
+        len(clinical_sparse_ids),
     )
 
-    return X, y, sample_ids
+    return X_filtered, y_compact, sample_ids
 
 
 def _assert_label_range(split_name: str, labels: np.ndarray, n_classes: int) -> None:

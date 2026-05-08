@@ -1,7 +1,17 @@
 """
 src/evaluation/evaluator.py
 
-Full evaluation suite for in-domain and clinical splits.
+Evaluation suite for:
+
+1. Reference-domain evaluation
+2. Clinical OOD evaluation
+3. Compact transfer-space metrics
+
+Supports semantic restoration between:
+
+- compact transfer labels
+- sparse clinical labels
+- clinical treatment semantics
 """
 
 from __future__ import annotations
@@ -37,8 +47,11 @@ class ModelEvaluator:
         self.device = torch.device(device)
         self.model.to(self.device)
         self.model.eval()
-        shared_classes = (
-            self.cfg.get("task", {}).get("clinical_labels", [])
+        clinical_sparse_ids = (
+            self.cfg.get("task", {}).get(
+                "clinical_sparse_global_ids",
+                []
+            )
         )
 
         stage = self.cfg.get("task", {}).get(
@@ -47,12 +60,16 @@ class ModelEvaluator:
         )
 
         if stage == "transfer_5class":
-            assert self.n_classes == len(shared_classes), (
-                f"Evaluator n_classes must match shared_classes, "
-                f"got {self.n_classes} vs {len(shared_classes)}"
+            assert self.n_classes == len(clinical_sparse_ids), (
+
+                "Evaluator n_classes must match number of "
+                "clinical sparse IDs, "
+
+                f"got {self.n_classes} vs "
+                f"{len(clinical_sparse_ids)}"
             )
 
-        aux_cfg = self.cfg.get("multitask", {}).get("auxiliary_shared_head", {})
+        aux_cfg = self.cfg.get("multitask", {}).get("auxiliary_clinical_head", {})
         self.aux_enabled = aux_cfg.get("enabled", False)
         self.aux_blend = aux_cfg.get("clinical_blend", 0.5)
 
@@ -81,30 +98,73 @@ class ModelEvaluator:
         metrics = compute_metrics(eval_logits, eval_targets, n_classes)
         cm, present_classes = compute_confusion_matrix(eval_logits, eval_targets, n_classes)
         inverse_class_map = getattr(loader.dataset, "inverse_class_map", {})
+        
+        # Restore original sparse clinical IDs from
+        # compact transfer-space labels.
         original_present_classes = [
             inverse_class_map.get(int(cls), int(cls))
             for cls in present_classes
         ]
         
+        # --------------------------------------------------------
+        # Semantic restoration layer
+        # Convert compact transfer labels:
+        #   [0,1,2,3,4]
+        #
+        # back into sparse clinical IDs:
+        #   [0,2,3,5,6]
+        #   
+        # and attach human-readable
+        # treatment/species semantics.
+        # --------------------------------------------------------
+        stage = self.cfg.get(
+            "task",
+            {},
+        ).get(
+            "stage",
+            "transfer_5class",
+        )
         clinical_semantics = {}
 
-        for compact_idx in present_classes:
-            compact_idx = int(compact_idx)
-            if compact_idx in CLINICAL_LABEL_INVERSE_REMAP:
+        if stage == "transfer_5class":
 
-                original_label = CLINICAL_LABEL_INVERSE_REMAP[compact_idx]
+            for compact_idx in present_classes:
 
-                clinical_semantics[str(compact_idx)] = {
-                    "original_label": original_label,
-                    "species": CLINICAL_LABELS[original_label]["species"],
-                    "treatment": CLINICAL_LABELS[original_label]["treatment"],
-                }
+                compact_idx = int(compact_idx)
+
+                if compact_idx in CLINICAL_LABEL_INVERSE_REMAP:
+
+                    original_label = (
+                        CLINICAL_LABEL_INVERSE_REMAP[
+                            compact_idx
+                        ]
+                    )
+
+                    clinical_semantics[
+                        str(compact_idx)
+                    ] = {
+                        "original_label": original_label,
+                        "species": CLINICAL_LABELS[
+                            original_label
+                        ]["clinical_species"],
+                        "treatment": CLINICAL_LABELS[
+                            original_label
+                        ]["global_treatment"],
+                    }
         
         self.results["splits"][split_name] = {
             "metrics": {
                 k: float(v) if isinstance(v, np.floating) else v
                 for k, v in metrics.items()
             },
+            "semantic_space": self.cfg.get(
+                "model",
+                {},
+            ).get(
+                "semantic_space",
+                "unknown",
+            ),
+            "n_classes": int(self.n_classes),
             "confusion_matrix": cm.tolist(),
             "present_classes": [int(x) for x in present_classes],
             "original_present_classes": [int(x) for x in original_present_classes],
@@ -112,14 +172,34 @@ class ModelEvaluator:
             "n_samples": int(len(eval_targets)),
             "predictions": eval_logits.argmax(dim=-1).numpy().tolist(),
             "targets": eval_targets.numpy().tolist(),
-            "label_semantics": {
-                str(compact_idx): int(original_idx)
-                for compact_idx, original_idx
-                in inverse_class_map.items()
-            }
+            "compact_to_sparse_label_map": (
+                {
+                    str(compact_idx): int(original_idx)
+                    for compact_idx, original_idx
+                    in inverse_class_map.items()
+                }
+                if stage == "transfer_5class"
+                else {}
+            ),
         }
         return metrics
-
+    
+    # --------------------------------------------------------
+    # Evaluation protocol
+    #
+    # test:
+    #   reference-domain transfer evaluation
+    #
+    # ood:
+    #   clinical-domain transfer evaluation
+    #
+    # During transfer-learning experiments:
+    #
+    # BOTH evaluations operate in:
+    # compact transfer-space
+    #
+    # NOT isolate-space.
+    # --------------------------------------------------------
     def evaluate_all(
         self,
         loaders: Dict,
@@ -223,18 +303,66 @@ class ModelEvaluator:
         targets: torch.Tensor,
         split_name: str,
     ) -> None:
+
         assert logits.shape[-1] == self.n_classes, (
-            f"{split_name} logits must have {self.n_classes} classes, "
+            f"{split_name} logits must have "
+            f"{self.n_classes} classes, "
             f"got shape {tuple(logits.shape)}"
         )
+
         if targets.numel() == 0:
-            raise AssertionError(f"{split_name} has no targets")
+            raise AssertionError(
+                f"{split_name} has no targets"
+            )
+
         assert int(targets.min()) >= 0, (
-            f"{split_name} targets must be non-negative, got {int(targets.min())}"
+            f"{split_name} targets must be non-negative, "
+            f"got {int(targets.min())}"
         )
+
         assert int(targets.max()) < self.n_classes, (
-            f"{split_name} targets must be < {self.n_classes}, got {int(targets.max())}"
+            f"{split_name} targets must be < "
+            f"{self.n_classes}, "
+            f"got {int(targets.max())}"
         )
+
+        unique_targets = sorted(
+            torch.unique(targets).cpu().tolist()
+        )
+
+        # --------------------------------------------------------
+        # Compact transfer-space integrity check
+        #
+        # Transfer tasks MUST use compact labels:
+        # [0,1,2,3,4]
+        #
+        # Sparse clinical labels:
+        # [0,2,3,5,6]
+        #
+        # should never appear at evaluator stage.
+        # --------------------------------------------------------
+
+        stage = self.cfg.get(
+            "task",
+            {},
+        ).get(
+            "stage",
+            "transfer_5class",
+        )
+
+        if stage == "transfer_5class":
+
+            expected = [0, 1, 2, 3, 4]
+
+            unexpected = set(unique_targets) - set(expected)
+
+            if unexpected:
+                raise AssertionError(
+
+                    f"{split_name} contains unexpected "
+                    f"compact transfer labels: "
+                    f"{sorted(unexpected)}"
+                )
 
 
 def compare_models(

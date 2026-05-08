@@ -14,11 +14,14 @@ from src.models.registry import get_model
 from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config
 from src.utils.seed import set_seed
-from src.utils.class_subset import filter_and_remap_classes
 
 from src.xai.saliency import compute_saliency, compute_smoothgrad
 from scripts.plot_saliency import plot_saliency
-
+from metadata.ontology import (
+    COMPACT_TO_GLOBAL,
+    GLOBAL_TREATMENTS,
+    CLINICAL_LABEL_METADATA,
+)
 
 # -----------------------------
 # ARGUMENTS
@@ -48,9 +51,57 @@ def main():
         f"configs/model/{args.model}.yaml",
     )
 
-    shared_classes = cfg["dataset"]["shared_classes"]
-    n_classes = cfg["dataset"]["n_classes_clinical"]
+    task_cfg = cfg["task"]
+    stage = task_cfg["stage"]
+    label_space = task_cfg["label_space"]
+    if stage == "pretrain_30class":
+        clinical_sparse_ids = None
+        n_classes = 30
+    elif stage == "pretrain_treatment_8class":
+        clinical_sparse_ids = None
+        n_classes = 8
+    elif stage == "transfer_5class":
+        clinical_sparse_ids = task_cfg["clinical_sparse_global_ids"]
+        n_classes = len(clinical_sparse_ids)
+    else:
+        raise ValueError(
+            f"Unknown XAI stage: {stage}"
+        )
     cfg["model"]["n_classes"] = n_classes
+    # --------------------------------------------------------
+    # Semantic-space integrity checks
+    # --------------------------------------------------------
+    if stage == "pretrain_30class":
+        assert label_space == "isolate_space"
+        assert (
+            cfg["model"]["semantic_space"]
+            == "isolate_space"
+        )
+        assert n_classes == 30
+    elif stage == "pretrain_treatment_8class":
+        assert (
+            label_space
+            == "global_treatment_space"
+        )
+
+        assert (
+            cfg["model"]["semantic_space"]
+            == "global_treatment_space"
+        )
+        assert n_classes == 8
+    elif stage == "transfer_5class":
+        assert (
+            label_space
+            == "sparse_global_treatment_space"
+        )
+        assert (
+            cfg["model"]["semantic_space"]
+            == "compact_transfer_space"
+        )
+        assert n_classes == 5
+        assert clinical_sparse_ids == [
+            0, 2, 3, 5, 6
+        ]
 
     exp_dir = os.path.join(args.exp_dir, args.exp_name)
 
@@ -62,9 +113,8 @@ def main():
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
     registry.load_all()
 
+    # Fit preprocessor on FULL reference set (matches pretrained backbone)
     X_ref, y_ref = registry.get_arrays("reference")
-    X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
-
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
 
@@ -84,7 +134,8 @@ def main():
         preprocessor,
         augmentation,
         loader_cfg,
-        shared_classes=shared_classes,
+        clinical_sparse_ids=clinical_sparse_ids,
+        n_classes=n_classes,
     )
 
     # -----------------------------
@@ -93,8 +144,57 @@ def main():
     print("[XAI] Loading model...")
 
     model = get_model(args.model, cfg)
-    load_best_model(exp_dir, model)
-    
+    checkpoint = load_best_model(
+        exp_dir,
+        model,
+    )
+    checkpoint_cfg = checkpoint.get(
+        "config",
+        {},
+    )
+
+    checkpoint_stage = (
+        checkpoint_cfg
+        .get("task", {})
+        .get("stage", None)
+    )
+
+    checkpoint_label_space = (
+        checkpoint_cfg
+        .get("task", {})
+        .get("label_space", None)
+    )
+
+    checkpoint_model_space = (
+        checkpoint_cfg
+        .get("model", {})
+        .get("semantic_space", None)
+    )
+
+    assert checkpoint_stage == stage, (
+        "Checkpoint stage mismatch:\n"
+        f"Expected: {stage}\n"
+        f"Found: {checkpoint_stage}"
+    )
+
+    assert (
+        checkpoint_label_space
+        == label_space
+    ), (
+        "Checkpoint label-space mismatch:\n"
+        f"Expected: {label_space}\n"
+        f"Found: {checkpoint_label_space}"
+    )
+
+    assert (
+        checkpoint_model_space
+        == cfg["model"]["semantic_space"]
+    ), (
+        "Checkpoint model semantic-space mismatch:\n"
+        f"Expected: "
+        f"{cfg['model']['semantic_space']}\n"
+        f"Found: {checkpoint_model_space}"
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
@@ -107,7 +207,17 @@ def main():
     xai_root = Path(exp_dir) / "xai"
     xai_root.mkdir(parents=True, exist_ok=True)
 
-    loader = loaders["ood"]["2018clinical"]
+
+    xai_split = (
+        cfg.get("xai", {})
+        .get("split", "2018clinical")
+    )
+
+    assert xai_split in loaders["ood"], (
+        f"Unknown XAI split: {xai_split}"
+    )
+
+    loader = loaders["ood"][xai_split]
 
     class_counts = {i: 0 for i in range(n_classes)}
 
@@ -116,7 +226,10 @@ def main():
 
             label = y[i].item()
 
-            limit = 5 if label == 2 else 2
+            if stage == "transfer_5class":
+                limit = 5 if label == 2 else 2
+            else:
+                limit = 2
 
             if class_counts[label] >= limit:
                 continue
@@ -127,7 +240,39 @@ def main():
             smooth_saliency = compute_smoothgrad(model, xi)
             signal = xi[0].mean(dim=0).detach().cpu().numpy()
 
-            save_dir = xai_root / f"class_{label}"
+            if stage == "transfer_5class":
+                global_id = COMPACT_TO_GLOBAL[label]
+                treatment_name = (
+                    GLOBAL_TREATMENTS[global_id]
+                )
+
+                clinical_info = (
+                    CLINICAL_LABEL_METADATA[global_id]
+                )
+
+            elif stage == "pretrain_treatment_8class":
+
+                global_id = label
+
+                treatment_name = (
+                    GLOBAL_TREATMENTS[global_id]
+                )
+
+            else:
+
+                global_id = label
+
+                treatment_name = (
+                    f"isolate_{label}"
+                )
+
+            safe_name = (
+                f"{global_id}_{treatment_name}"
+                .replace(" ", "_")
+                .replace("/", "_")
+            )
+
+            save_dir = xai_root / safe_name
             save_dir.mkdir(parents=True, exist_ok=True)
 
             save_path_sal = save_dir / f"sample_{class_counts[label]}_saliency.png"
@@ -138,7 +283,20 @@ def main():
 
             class_counts[label] += 1
 
-        if all(class_counts[i] >= (5 if i == 2 else 2) for i in class_counts):
+        if stage == "transfer_5class":
+            done = all(
+                class_counts[i] >= (
+                    5 if i == 2 else 2
+                )
+                for i in class_counts
+            )
+        else:
+            done = all(
+                class_counts[i] >= 2
+                for i in class_counts
+            )
+
+        if done:
             break
 
     print(f"[XAI] Saved to {xai_root}")

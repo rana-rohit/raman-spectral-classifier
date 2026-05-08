@@ -80,6 +80,24 @@ def save_checkpoint(
             p.numel() for p in model.parameters()
             if p.requires_grad
         ),
+        "stage": config.get("task", {}).get("stage"),
+        "label_space": config.get(
+            "task",
+            {},
+        ).get(
+            "label_space"
+        ),
+        "ontology_version": config.get(
+            "ontology_version",
+            "unknown",
+        ),
+        "semantic_space": config.get(
+            "model",
+            {},
+        ).get(
+            "semantic_space",
+            None,
+        ),
     }
     torch.save(checkpoint, path)
 
@@ -124,6 +142,24 @@ def load_checkpoint(
     Returns the full checkpoint dict so caller can access metrics/config.
     """
     checkpoint = torch.load(path, map_location=device)
+    
+    if "semantic_space" in checkpoint:
+        checkpoint_space = checkpoint["semantic_space"]
+        model_space = getattr(
+            model,
+            "semantic_space",
+            None,
+        )
+
+        if (
+            model_space is not None
+            and checkpoint_space is not None
+            and model_space != checkpoint_space
+        ):
+            raise ValueError(
+                "Checkpoint semantic space mismatch: "
+                f"{checkpoint_space} vs {model_space}"
+            )
     model.load_state_dict(checkpoint["model_state"])
     if optimizer is not None and "optimizer_state" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
