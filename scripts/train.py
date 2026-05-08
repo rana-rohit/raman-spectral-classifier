@@ -208,7 +208,11 @@ def main():
     trainer.fit()
     load_best_model(exp_dir, model)
 
-    print("\n[4/4] Final evaluation (pre-finetune, best checkpoint)...")
+    if stage == "pretrain_30class":
+        print("\n[4/4] Final evaluation (pretraining checkpoint)...")
+    else:
+        print("\n[4/4] Final evaluation (transfer checkpoint)...")
+
     evaluator = ModelEvaluator(
         model=model,
         model_name=args.model,
@@ -217,9 +221,14 @@ def main():
         cfg=cfg,
     )
     evaluator.evaluate_all(loaders)
-    evaluator.save(os.path.join(exp_dir, "pretrain_results.json"))
+    if stage == "pretrain_30class":
+        results_name = "pretrain_results.json"
+    else:
+        results_name = "transfer_results.json"
 
-    print(f"\n  Pretrain results saved in {exp_dir}/")
+    evaluator.save(os.path.join(exp_dir, results_name))
+
+    print(f"\n  Results saved in {exp_dir}/")
     
     if stage == "transfer_5class":
         print("\n[Finetune Phase] Adapting model to new domain...")
