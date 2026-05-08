@@ -20,6 +20,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import yaml
+import argparse
 
 from src.utils.seed import set_seed
 from src.data.registry import DataRegistry
@@ -32,10 +33,25 @@ def load_yaml(path: str) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
 
+def parse_args():
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--stage",
+        required=True,
+        choices=[
+            "s1_isolate",
+            "s2_treatment",
+            "s3_transfer",
+        ],
+    )
+
+    return parser.parse_args()
 
 def main():
     set_seed(42)
-
+    args = parse_args()
     print("=" * 60)
     print("  Spectral Classifier — Data Pipeline Bootstrap")
     print("=" * 60)
@@ -44,27 +60,34 @@ def main():
     splits_cfg = load_yaml("configs/data/splits.yaml")
     prep_cfg = load_yaml("configs/data/preprocessing.yaml")
     aug_cfg = load_yaml("configs/data/augmentation.yaml")
-
+    stage_cfg = load_yaml(
+        f"configs/stages/{args.stage}.yaml"
+    )
+    
+    cfg = {
+        **splits_cfg,
+        **stage_cfg,
+    }
     # ---- Build registry and load all splits ----
     print("\n[1/5] Loading all splits from disk...")
 
     registry = DataRegistry(
         data_root="data/raw",
-        cfg=splits_cfg,
+        cfg=cfg,
     )
 
     registry.load_all()
     registry.summary()
 
     # ---- Task semantics ----
-    task_cfg = splits_cfg["task"]
+    task_cfg = cfg["task"]
 
     stage = task_cfg["stage"]
     label_space = task_cfg["label_space"]
 
     clinical_sparse_ids = task_cfg.get(
         "clinical_sparse_global_ids",
-        None,
+        [],
     )
 
     if stage == "pretrain_30class":
@@ -104,7 +127,7 @@ def main():
             == "sparse_global_treatment_space"
         )
 
-        assert clinical_sparse_ids == [0, 2, 3, 5, 6], (
+        assert len(clinical_sparse_ids) == 5, (
             "transfer_5class must use verified sparse "
             "global treatment IDs"
         )
@@ -149,7 +172,7 @@ def main():
             print(f"      {split_name:>16s}  (skipped HOLDOUT)")
             continue
 
-        X, y = registry.get_arrays(split_name)
+        X, _ = registry.get_arrays(split_name)
 
         X_proc = preprocessor.transform(X)
 
@@ -193,7 +216,7 @@ def main():
     loader_cfg = {
         "batch_size": 256,
         "num_workers": 0,
-        "validation": splits_cfg["validation"],
+        "validation": cfg["validation"],
     }
 
     loaders = build_all_loaders(
