@@ -37,7 +37,8 @@ def build_all_loaders(
     clinical_val_fraction = cfg["validation"].get("clinical_val_fraction", val_fraction)
     clinical_eval_fraction = cfg["validation"].get("clinical_eval_fraction", val_fraction)
     consistency_cfg = cfg.get("consistency") or {}
-    shared_classes = [int(cls) for cls in sorted(shared_classes)]
+    if shared_classes is not None:
+        shared_classes = [int(cls) for cls in sorted(shared_classes)]
     n_classes = len(shared_classes)
     class_map, inverse_class_map = class_maps(shared_classes)
     
