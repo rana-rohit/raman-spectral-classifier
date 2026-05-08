@@ -55,7 +55,6 @@ def compute_metrics(
     preds = logits.argmax(dim=-1).detach().cpu().numpy()
     y     = targets.detach().cpu().numpy()
 
-    all_classes = np.arange(n_classes)
     present_classes = np.unique(np.concatenate([y, preds]))
 
     # Core metrics
@@ -92,13 +91,14 @@ def compute_confusion_matrix(
     logits: torch.Tensor,
     targets: torch.Tensor,
     n_classes: int,
-) -> np.ndarray:
+) -> tuple[np.ndarray, list[int]]:
     """Returns (n_classes, n_classes) confusion matrix (rows=true, cols=pred)."""
     if logits.numel() == 0 or targets.numel() == 0:
         return np.zeros((0, 0), dtype=int), []
 
-    preds = logits.argmax(dim=-1).numpy()
-    y     = targets.numpy()
+    preds = logits.argmax(dim=-1).detach().cpu().numpy()
+    y     = targets.detach().cpu().numpy()
+    
     present = sorted(np.unique(np.concatenate([y, preds])).tolist())
     n = len(present)
     idx_map = {cls: i for i, cls in enumerate(present)}
@@ -166,6 +166,7 @@ def _roc_auc_ovr(y_true, probs, classes) -> float:
     """One-vs-rest macro AUC using the trapezoidal rule."""
     aucs = []
     for cls in classes:
+        cls = int(cls)
         binary_y = (y_true == cls).astype(float)
         scores   = probs[:, cls]
         auc = _binary_auc(binary_y, scores)
