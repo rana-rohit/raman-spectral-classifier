@@ -25,7 +25,10 @@ from src.evaluation.evaluator import ModelEvaluator
 from src.models.registry import get_model, model_summary
 from src.training.finetuner import finetune
 from src.training.trainer import build_trainer
-from src.utils.checkpoint import load_best_model
+from src.utils.checkpoint import (
+    load_best_model,
+    load_backbone_weights,
+)
 from src.utils.config import load_config, save_config
 from src.utils.seed import set_seed
 from src.utils.class_subset import filter_and_remap_classes
@@ -82,9 +85,22 @@ def main():
     task_name = task_cfg["name"]
     label_space = task_cfg["label_space"]
 
-    shared_classes = task_cfg["clinical_labels"]
+    stage = task_cfg["stage"]
 
-    n_classes = len(shared_classes)
+    clinical_labels = task_cfg["clinical_labels"]
+
+    if stage == "pretrain_30class":
+
+        shared_classes = None
+        n_classes = cfg["dataset"]["n_classes_full"]
+
+    elif stage == "transfer_5class":
+
+        shared_classes = clinical_labels
+        n_classes = len(shared_classes)
+
+    else:
+        raise ValueError(f"Unknown training stage: {stage}")
 
     cfg["model"]["n_classes"] = n_classes
 
@@ -92,7 +108,10 @@ def main():
     print("\n==================================================")
     print(f" Active Task   : {task_name}")
     print(f" Label Space   : {label_space}")
-    print(f" Clinical IDs  : {shared_classes}")
+    if shared_classes is not None:
+        print(f" Clinical IDs  : {shared_classes}")
+    else:
+        print(" Clinical IDs  : ALL 30 REFERENCE CLASSES")
     print("==================================================")
 
     exp_name = args.exp_name or f"{args.model}_{time.strftime('%Y%m%d_%H%M%S')}"
@@ -108,7 +127,8 @@ def main():
 
     X_ref, y_ref = registry.get_arrays("reference")
 
-    X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
+    if shared_classes is not None:
+        X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
 
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
@@ -135,24 +155,37 @@ def main():
 
     print(f"  Train:        {len(loaders['train'].dataset):,} samples")
     print(f"  Source val:   {len(loaders['source_val'].dataset):,} samples")
-
-    print("\n  Clinical Label Semantics")
-
-    for label_id in shared_classes:
-
-        clinical_info = CLINICAL_LABELS[int(label_id)]
-
-        print(
-            f"    {label_id} -> "
-            f"{clinical_info['species']} -> "
-            f"{clinical_info['treatment']}"
-        )
+    
+    if shared_classes is not None:
+        print("\n  Clinical Label Semantics")
+        for label_id in shared_classes:
+            clinical_info = CLINICAL_LABELS[int(label_id)]
+            print(f"    {label_id} -> {clinical_info['species']} -> {clinical_info['treatment']}")
 
     if "clinical_val" in loaders:
         print(f"  Clinical val: {len(loaders['clinical_val'].dataset):,} samples")
 
     print("\n[2/4] Building model...")
     model = get_model(args.model, cfg)
+
+    if stage == "transfer_5class":
+        pretrained_dir = task_cfg.get("pretrained_exp_dir")
+
+        if pretrained_dir is None:
+            raise ValueError(
+            "transfer_5class requires pretrained_exp_dir"
+        )
+
+        print("\nLoading pretrained backbone...")
+        checkpoint = load_backbone_weights(
+            pretrained_dir,
+            model,
+        )
+
+        print(
+            f"  Loaded pretrained checkpoint "
+            f"(epoch {checkpoint.get('epoch', '?')})"
+        )
     model_summary(model) 
     
     print("\n==================================================")
@@ -186,24 +219,26 @@ def main():
     evaluator.save(os.path.join(exp_dir, "pretrain_results.json"))
 
     print(f"\n  Pretrain results saved in {exp_dir}/")
-    print("\n[Finetune Phase] Adapting model to new domain...")
+    
+    if stage == "transfer_5class":
+        print("\n[Finetune Phase] Adapting model to new domain...")
+        finetune_dir = os.path.join(exp_dir, "finetune")
+        finetune(
+            model=model,
+            pretrained_exp_dir=exp_dir,
+            loaders=loaders,
+            cfg=cfg,
+            exp_dir=finetune_dir,
+            freeze_epochs=3,
+            n_classes=n_classes,
+        )
 
-    finetune_dir = os.path.join(exp_dir, "finetune")
-    finetune(
-        model=model,
-        pretrained_exp_dir=exp_dir,
-        loaders=loaders,
-        cfg=cfg,
-        exp_dir=finetune_dir,
-        freeze_epochs=3,
-        n_classes=n_classes,
-    )
+        print(f"\n  Fine-tune artifacts: {finetune_dir}/")
 
     print(f"\n  Done. Training artifacts: {exp_dir}/")
-    print(f"  Fine-tune artifacts:     {finetune_dir}/")
     
     # XAI BLOCK 
-    if args.run_xai:
+    if args.run_xai and shared_classes is not None:
         print("\n[XAI] Generating saliency maps...")
 
         xai_root = Path(exp_dir) / "xai"
