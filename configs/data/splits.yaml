@@ -9,7 +9,8 @@ dataset:
 
 task:
   name: clinical_5_treatment_transfer
-  stage: pretrain_30class
+  stage: transfer_5class
+  pretrained_exp_dir: /content/drive/MyDrive/raman_results/v2best
   label_space: treatment_8
 
   clinical_labels:
