@@ -9,7 +9,7 @@ dataset:
 
 task:
   name: clinical_5_treatment_transfer
-
+  stage: pretrain_30class
   label_space: treatment_8
 
   clinical_labels:
