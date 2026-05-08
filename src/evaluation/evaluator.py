@@ -16,7 +16,10 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from src.evaluation.metrics import compute_confusion_matrix, compute_metrics, compute_transfer_gap
-
+from metadata.clinical import (
+    CLINICAL_LABELS,
+    CLINICAL_LABEL_INVERSE_REMAP
+)
 
 class ModelEvaluator:
     def __init__(
@@ -34,7 +37,9 @@ class ModelEvaluator:
         self.device = torch.device(device)
         self.model.to(self.device)
         self.model.eval()
-        shared_classes = self.cfg.get("dataset", {}).get("shared_classes", [])
+        shared_classes = (
+            self.cfg.get("task", {}).get("clinical_labels", [])
+        )
         if shared_classes:
             assert self.n_classes == len(shared_classes), (
                 f"Evaluator n_classes must match shared_classes, "
@@ -74,15 +79,38 @@ class ModelEvaluator:
             inverse_class_map.get(int(cls), int(cls))
             for cls in present_classes
         ]
+        
+        clinical_semantics = {}
 
+        for compact_idx in present_classes:
+            compact_idx = int(compact_idx)
+            if compact_idx in CLINICAL_LABEL_INVERSE_REMAP:
+
+                original_label = CLINICAL_LABEL_INVERSE_REMAP[compact_idx]
+
+                clinical_semantics[str(compact_idx)] = {
+                    "original_label": original_label,
+                    "species": CLINICAL_LABELS[original_label]["species"],
+                    "treatment": CLINICAL_LABELS[original_label]["treatment"],
+                }
+        
         self.results["splits"][split_name] = {
-            "metrics": metrics,
+            "metrics": {
+                k: float(v) if isinstance(v, np.floating) else v
+                for k, v in metrics.items()
+            },
             "confusion_matrix": cm.tolist(),
-            "present_classes": present_classes,
-            "original_present_classes": original_present_classes,
-            "n_samples": len(eval_targets),
+            "present_classes": [int(x) for x in present_classes],
+            "original_present_classes": [int(x) for x in original_present_classes],
+            "clinical_semantics": clinical_semantics,
+            "n_samples": int(len(eval_targets)),
             "predictions": eval_logits.argmax(dim=-1).numpy().tolist(),
             "targets": eval_targets.numpy().tolist(),
+            "label_semantics": {
+                str(compact_idx): int(original_idx)
+                for compact_idx, original_idx
+                in inverse_class_map.items()
+            }
         }
         return metrics
 
