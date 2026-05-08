@@ -21,7 +21,12 @@ def load_backbone_weights(
     Used for transfer learning when output dimensions differ.
     """
 
-    checkpoint_path = resolve_best_checkpoint_path(path)
+    path_obj = Path(path)
+
+    if path_obj.is_file():
+        checkpoint_path = str(path_obj)
+    else:
+        checkpoint_path = resolve_best_checkpoint_path(path)
 
     checkpoint = torch.load(
         checkpoint_path,
