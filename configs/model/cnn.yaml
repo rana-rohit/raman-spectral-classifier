@@ -2,10 +2,10 @@ model:
   name: cnn
   signal_length: 1000
   n_classes: 5
-  in_channels: 2
+  in_channels: 1
   channels: [32, 64, 128, 256]
   kernel_sizes: [7, 15, 15, 31]
-  dropout: 0.5
+  dropout: 0.3
 
 training:
   scheduler: warmup_cosine
@@ -15,5 +15,5 @@ training:
     eta_min: 0.000001
 
   coral:
-    enabled: true
+    enabled: false
     weight: 0.05
