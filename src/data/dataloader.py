@@ -39,8 +39,15 @@ def build_all_loaders(
     consistency_cfg = cfg.get("consistency") or {}
     if shared_classes is not None:
         shared_classes = [int(cls) for cls in sorted(shared_classes)]
-    n_classes = len(shared_classes)
-    class_map, inverse_class_map = class_maps(shared_classes)
+    if shared_classes is not None:
+        n_classes = len(shared_classes)
+    else:
+        n_classes = registry.cfg["dataset"]["n_classes_full"]
+    if shared_classes is not None:
+        class_map, inverse_class_map = class_maps(shared_classes)
+    else:
+        class_map = None
+        inverse_class_map = None
     
     train_views = 2 if consistency_cfg.get("enabled", False) else 1
     # If consistency training enabled, return multiple augmented views per sample
@@ -326,14 +333,44 @@ def _seed_worker(worker_id: int) -> None:
 def _load_shared_split(
     registry: DataRegistry,
     split_name: str,
-    shared_classes: list[int],
+    shared_classes: list[int] | None,
     allow_holdout: bool = False,
 ):
-    X, y = registry.get_arrays(split_name, allow_holdout=allow_holdout)
+    X, y = registry.get_arrays(
+        split_name,
+        allow_holdout=allow_holdout,
+    )
+
+    # PRETRAINING MODE
+    # Use full label space without filtering/remapping
+    if shared_classes is None:
+
+        sample_ids = np.asarray(
+            [f"{split_name}:{idx}" for idx in range(len(y))]
+        )
+
+        return X, y, sample_ids
+
+    # TRANSFER MODE
+    # Filter + remap to compact clinical labels
     mask = np.isin(y, shared_classes)
-    sample_ids = np.asarray([f"{split_name}:{idx}" for idx in np.flatnonzero(mask)])
-    X, y = filter_and_remap_classes(X, y, shared_classes)
-    _assert_label_range(split_name, y, len(shared_classes))
+
+    sample_ids = np.asarray(
+        [f"{split_name}:{idx}" for idx in np.flatnonzero(mask)]
+    )
+
+    X, y = filter_and_remap_classes(
+        X,
+        y,
+        shared_classes,
+    )
+
+    _assert_label_range(
+        split_name,
+        y,
+        len(shared_classes),
+    )
+
     return X, y, sample_ids
 
 
