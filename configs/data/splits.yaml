@@ -31,7 +31,7 @@ splits:
   finetune:
     x_file: X_finetune.npy
     y_file: y_finetune.npy
-    role: transfer_source
+    role: adaptation
     label_space: isolate_space
     n_samples: 3000
     n_classes: 30
