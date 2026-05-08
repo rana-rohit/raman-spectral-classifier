@@ -42,7 +42,7 @@ def build_all_loaders(
     if shared_classes is not None:
         n_classes = len(shared_classes)
     else:
-        n_classes = registry.cfg["dataset"]["n_classes_full"]
+        n_classes = cfg["dataset"]["n_classes_full"]
     if shared_classes is not None:
         class_map, inverse_class_map = class_maps(shared_classes)
     else:
