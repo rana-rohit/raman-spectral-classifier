@@ -40,7 +40,7 @@ splits:
   test:
     x_file: X_test.npy
     y_file: y_test.npy
-    role: isolate_holdout
+    role: holdout
     label_space: isolate_space
     n_samples: 3000
     n_classes: 30
