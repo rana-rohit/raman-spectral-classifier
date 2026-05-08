@@ -41,7 +41,15 @@ def build_all_loaders(
     clinical_val_fraction = cfg["validation"].get("clinical_val_fraction", val_fraction)
     clinical_eval_fraction = cfg["validation"].get("clinical_eval_fraction", val_fraction)
     consistency_cfg = cfg.get("consistency") or {}
-    stage = cfg.get("task", {}).get("stage", "transfer_5class")
+    stage = cfg.get("task", {}).get(
+        "stage",
+        None,
+    )
+
+    if stage is None:
+        raise ValueError(
+            "Missing task.stage in dataloader config"
+        )
     if clinical_sparse_ids is not None:
         clinical_sparse_ids = [int(cls) for cls in sorted(clinical_sparse_ids)]
 
@@ -59,13 +67,16 @@ def build_all_loaders(
     loaders = {}
     
     # --------------------------------------------------------
-    # REFERENCE DOMAIN
+    # Stage-dependent reference-domain behavior:
     #
-    # If clinical_sparse_ids is None:
-    #     isolate-space (30-class pretraining)
+    #- pretrain_30class:
+    #   isolate-space labels
     #
-    # Else:
-    #        compact transfer-space (5-class)
+    #- pretrain_treatment_8class:
+    #   global treatment-space labels
+    #
+    #- transfer_5class:
+    #   compact transfer-space labels
     # --------------------------------------------------------
 
     X_ref, y_ref, ref_ids = _load_shared_split(registry, "reference", clinical_sparse_ids, stage=stage)
@@ -423,6 +434,11 @@ def _load_shared_split(
     # --------------------------------------------------------
     # TRANSFER MODE (Stage 3): COMPACT TRANSFER SPACE
     # --------------------------------------------------------
+    assert clinical_sparse_ids is not None
+    assert len(clinical_sparse_ids) > 0, (
+        "transfer_5class requires "
+        "clinical_sparse_ids"
+    )
     if is_isolate_space:
         # Step 1: Map isolate IDs → global treatment IDs
         y_treatment = np.array(
