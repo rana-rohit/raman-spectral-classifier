@@ -44,7 +44,7 @@ class ConvBlock(nn.Module):
             ),
             nn.BatchNorm1d(out_channels),
             nn.ReLU(inplace=True),
-            nn.Dropout1d(p=0.05),
+            nn.Dropout1d(p=0.02),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -62,6 +62,7 @@ class CNN1D(nn.Module):
         in_channels: int = 1,
     ) -> None:
         super().__init__()
+        del signal_length
         channels = channels or [32, 64, 128, 256]
         kernel_sizes = kernel_sizes or [7, 15, 15, 31]
 
@@ -88,7 +89,7 @@ class CNN1D(nn.Module):
             nn.Linear(c4, n_classes),
         )
         
-        # Domain classifier (for DANN)
+        # Optional domain head for future DANN/domain-adaptation experiments
         self.domain_classifier = nn.Sequential(
             nn.Linear(c4, 128),
             nn.ReLU(),
@@ -113,11 +114,12 @@ class CNN1D(nn.Module):
     
         return feat.squeeze(-1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         feat = self.forward_features(x)
 
         return {
             "main_logits": self.classifier(feat),
+            "aux_logits": None,
             "features": feat,
         }
 
