@@ -91,7 +91,23 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
         if k not in ("name", "signal_length", "n_classes", "in_channels")
     }
 
-    model = model_cls(**common, **specific)
+    model_kwargs = {
+        **common,
+        **specific,
+    }
+
+    non_constructor_keys = {
+        "semantic_space",
+    }
+
+    for key in non_constructor_keys:
+        model_kwargs.pop(key, None)
+
+    model = model_cls(**model_kwargs)
+    model.semantic_space = model_cfg.get(
+        "semantic_space",
+        None,
+    )
    
     # --------------------------------------------------------
     # Optional ontology-aware auxiliary head
