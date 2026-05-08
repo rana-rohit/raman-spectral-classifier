@@ -34,11 +34,14 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
     model_cls = MODEL_REGISTRY[name]
     model_cfg = cfg.get("model", {})
     shared_classes = cfg.get("dataset", {}).get("shared_classes", [])
-    task_mode = cfg.get("task", {}).get("mode", "shared_clinical_5")
+    stage = cfg.get("task", {}).get("stage", "transfer_5class")
+
     n_classes = int(model_cfg.get("n_classes", len(shared_classes) or 5))
-    if task_mode == "shared_clinical_5":
+
+    if stage == "transfer_5class":
         assert n_classes == len(shared_classes), (
-            f"Shared-class task requires n_classes == len(shared_classes), "
+            f"transfer_5class requires "
+            f"n_classes == len(shared_classes), "
             f"got {n_classes} vs {len(shared_classes)}"
         )
 
