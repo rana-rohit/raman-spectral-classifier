@@ -39,7 +39,7 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
     model_cls = MODEL_REGISTRY[name]
     model_cfg = cfg.get("model", {})
     clinical_sparse_ids = (
-        cfg.get("task", {}).get("clinical_labels", [])
+        cfg.get("task", {}).get("clinical_sparse_global_ids", [])
     )
     stage = cfg.get("task", {}).get("stage", "transfer_5class")
 
@@ -104,7 +104,7 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
         clinical_sparse_ids_aux = aux_cfg.get(
             "classes",
             cfg.get("task", {}).get(
-                "clinical_labels",
+                "clinical_sparse_global_ids",
                 []
             )
         )
