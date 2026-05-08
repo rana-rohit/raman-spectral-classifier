@@ -1,0 +1,17 @@
+task:
+  name: clinical_transfer
+  stage: transfer_5class
+  label_space: sparse_global_treatment_space
+
+  clinical_sparse_global_ids:
+    - 0
+    - 2
+    - 3
+    - 5
+    - 6
+
+  pretrained_exp_dir: /content/drive/MyDrive/raman_results/stage2_cnn
+
+model:
+  n_classes: 5
+  semantic_space: compact_transfer_space

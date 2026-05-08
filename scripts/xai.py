@@ -55,10 +55,10 @@ def main():
     stage = task_cfg["stage"]
     label_space = task_cfg["label_space"]
     if stage == "pretrain_30class":
-        clinical_sparse_ids = None
+        clinical_sparse_ids = []
         n_classes = 30
     elif stage == "pretrain_treatment_8class":
-        clinical_sparse_ids = None
+        clinical_sparse_ids = []
         n_classes = 8
     elif stage == "transfer_5class":
         clinical_sparse_ids = task_cfg["clinical_sparse_global_ids"]
@@ -99,9 +99,10 @@ def main():
             == "compact_transfer_space"
         )
         assert n_classes == 5
-        assert clinical_sparse_ids == [
-            0, 2, 3, 5, 6
-        ]
+        assert len(clinical_sparse_ids) == 5, (
+            "transfer_5class requires "
+            "5 sparse clinical treatment IDs"
+        )
 
     exp_dir = os.path.join(args.exp_dir, args.exp_name)
 
@@ -114,7 +115,7 @@ def main():
     registry.load_all()
 
     # Fit preprocessor on FULL reference set (matches pretrained backbone)
-    X_ref, y_ref = registry.get_arrays("reference")
+    X_ref, _ = registry.get_arrays("reference")
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
 

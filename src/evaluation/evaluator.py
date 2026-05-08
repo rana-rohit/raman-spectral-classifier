@@ -56,9 +56,12 @@ class ModelEvaluator:
 
         stage = self.cfg.get("task", {}).get(
             "stage",
-            "transfer_5class",
+            None,
         )
-
+        if stage is None:
+            raise ValueError(
+                "Missing task.stage in evaluator config"
+            )
         if stage == "transfer_5class":
             assert self.n_classes == len(clinical_sparse_ids), (
 
@@ -122,8 +125,12 @@ class ModelEvaluator:
             {},
         ).get(
             "stage",
-            "transfer_5class",
+            None,
         )
+        if stage is None:
+            raise ValueError(
+                "Missing task.stage in evaluator config"
+            )
         clinical_semantics = {}
 
         if stage == "transfer_5class":

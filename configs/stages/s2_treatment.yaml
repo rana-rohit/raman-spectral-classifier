@@ -1,0 +1,8 @@
+task:
+  name: treatment_pretraining
+  stage: pretrain_treatment_8class
+  label_space: global_treatment_space
+
+model:
+  n_classes: 8
+  semantic_space: global_treatment_space

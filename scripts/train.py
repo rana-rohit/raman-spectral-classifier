@@ -43,6 +43,7 @@ from pathlib import Path
 def parse_args():
     p = argparse.ArgumentParser(description="Train a spectral classifier")
     p.add_argument("--model", required=True, choices=["cnn", "resnet1d", "transformer", "hybrid"])
+    p.add_argument("--stage", required=True, choices=["s1_isolate","s2_treatment","s3_transfer"])
     p.add_argument("--exp-name", default=None)
     p.add_argument("--exp-dir", default="experiments")
     p.add_argument("--seed", type=int, default=42)
@@ -75,6 +76,7 @@ def main():
         "configs/data/preprocessing.yaml",
         "configs/data/augmentation.yaml",
         "configs/training/base.yaml",
+        f"configs/stages/{args.stage}.yaml",
         f"configs/model/{args.model}.yaml",
     )
     cfg = apply_overrides(dict(cfg), args.override)
@@ -89,7 +91,7 @@ def main():
 
     clinical_sparse_global_ids = task_cfg.get(
         "clinical_sparse_global_ids",
-        None,
+        [],
     )
 
     if stage == "pretrain_30class":

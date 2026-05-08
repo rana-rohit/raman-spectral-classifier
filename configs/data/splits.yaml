@@ -4,19 +4,6 @@ dataset:
   n_classes_full: 30
   already_normalised: false
 
-task:
-  name: clinical_5_treatment_transfer
-  stage: transfer_5class
-  pretrained_exp_dir: /content/drive/MyDrive/raman_results/v2best
-  label_space: sparse_global_treatment_space
-
-  clinical_sparse_global_ids:
-    - 0   # Meropenem
-    - 2   # TZP
-    - 3   # Vancomycin
-    - 5   # Penicillin
-    - 6   # Daptomycin
-
 splits:
   reference:
     x_file: X_reference.npy

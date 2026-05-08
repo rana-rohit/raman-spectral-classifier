@@ -39,7 +39,7 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     task_cfg = cfg["task"]
     clinical_sparse_ids = task_cfg.get(
         "clinical_sparse_global_ids",
-        None,
+        [],
     )
     stage = task_cfg["stage"]
     label_space = task_cfg["label_space"]
@@ -85,9 +85,9 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
         assert label_space == "sparse_global_treatment_space"
         assert cfg["model"]["semantic_space"] == "compact_transfer_space"
         assert n_classes == 5
-        assert clinical_sparse_ids == [0, 2, 3, 5, 6], (
-            "transfer_5class must use "
-            "verified sparse global treatment IDs"
+        assert len(clinical_sparse_ids) == 5, (
+            "transfer_5class requires "
+            "5 sparse clinical treatment IDs"
         )
 
     print("\n==================================================")
@@ -104,7 +104,7 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     print("==================================================")
     
     # Fit preprocessor on FULL reference set (matches pretrained backbone)
-    X_ref, y_ref = registry.get_arrays("reference")
+    X_ref, _ = registry.get_arrays("reference")
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
 

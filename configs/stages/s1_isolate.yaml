@@ -1,0 +1,8 @@
+task:
+  name: isolate_pretraining
+  stage: pretrain_30class
+  label_space: isolate_space
+
+model:
+  n_classes: 30
+  semantic_space: isolate_space
