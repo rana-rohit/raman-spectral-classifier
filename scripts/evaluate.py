@@ -37,14 +37,19 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
     registry.load_all()
 
-    shared_classes = cfg["dataset"]["shared_classes"]
-    n_classes = cfg["dataset"]["n_classes_clinical"]
-    assert n_classes == len(shared_classes), (
-        f"n_classes_clinical must match shared_classes, "
-        f"got {n_classes} vs {len(shared_classes)}"
-    )
+    task_cfg = cfg["task"]
+    shared_classes = task_cfg["clinical_labels"]
+    n_classes = len(shared_classes)
     cfg["model"]["n_classes"] = n_classes
-
+    
+    print("\n==================================================")
+    print(" EVALUATION TASK")
+    print("==================================================")
+    print(f"Task Name    : {task_cfg['name']}")
+    print(f"Label Space  : {task_cfg.get('label_space', 'unknown')}")
+    print(f"Classes      : {shared_classes}")
+    print("==================================================")
+    
     X_ref, y_ref = registry.get_arrays("reference")
     X_ref, _ = filter_and_remap_classes(X_ref, y_ref, shared_classes)
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
@@ -73,6 +78,7 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
 def evaluate_one(exp_dir: str, seed: int) -> dict:
     cfg_path = os.path.join(exp_dir, "config.yaml")
     cfg = load_config(cfg_path)
+    task_cfg = cfg["task"]
     loaders, n_classes = build_eval_loaders(cfg, seed)
 
     model_name = cfg.get("model", {}).get("name", "unknown")
@@ -90,7 +96,11 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
         cfg=dict(cfg),
     )
     results = evaluator.evaluate_all(loaders)
-    evaluator.save(os.path.join(exp_dir, "eval_results.json"))
+    results["task"] = task_cfg["name"]
+    eval_path = os.path.join(exp_dir, "eval_results_latest.json")
+    evaluator.save(eval_path)
+
+    print(f"\nSaved evaluation results to:\n  {eval_path}")
     return results
 
 

@@ -23,7 +23,7 @@ def save_checkpoint(
 ) -> None:
     """
     Save a full training checkpoint.
-    If is_best=True, also copies to <dir>/best.pt
+    If is_best=True, also copies to <dir>/best_model.pt
     """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -32,12 +32,17 @@ def save_checkpoint(
         "model_state":     model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "metrics":         metrics,
+        "best_metric_name": config["training"]["monitor_metric"],
         "config":          config,
+        "n_parameters": sum(
+            p.numel() for p in model.parameters()
+            if p.requires_grad
+        ),
     }
     torch.save(checkpoint, path)
 
     if is_best:
-        best_path = str(Path(path).parent / "best.pt")
+        best_path = str(Path(path).parent / "best_model.pt")
         torch.save(checkpoint, best_path)
 
 
@@ -45,13 +50,15 @@ def resolve_best_checkpoint_path(experiment_dir: str) -> str:
     """
     Resolve the canonical best checkpoint for an experiment.
 
-    New runs save the best checkpoint under ``checkpoints/best.pt``.
-    Older runs may have used ``best.pt`` at the experiment root, so we
+    New runs save the best checkpoint under ``checkpoints/best_model.pt``.
+    Older runs may have used ``best_model.pt`` at the experiment root, so we
     support both locations for backward compatibility.
     """
     exp_path = Path(experiment_dir)
     candidates = [
+        exp_path / "checkpoints" / "best_model.pt",
         exp_path / "checkpoints" / "best.pt",
+        exp_path / "best_model.pt",
         exp_path / "best.pt",
     ]
     for candidate in candidates:
