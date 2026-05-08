@@ -85,7 +85,10 @@ class Trainer:
         self.exp_dir = Path(exp_dir)
         self.n_classes = n_classes
         self.reference_state = reference_state
-        shared_classes = cfg.get("dataset", {}).get("shared_classes", [])
+        shared_classes = (
+            cfg.get("task", {})
+            .get("clinical_labels", [])
+        )
         if shared_classes:
             assert self.n_classes == len(shared_classes), (
                 f"Shared-class training requires n_classes == len(shared_classes), "
@@ -113,7 +116,7 @@ class Trainer:
         self.aux_cfg = cfg.get("multitask", {}).get("auxiliary_shared_head", {})
         self.shared_class_ids = self.aux_cfg.get(
             "classes",
-            cfg.get("dataset", {}).get("shared_classes", []),
+            cfg.get("task", {}).get("clinical_labels", []),
         )
         self.aux_loss_weight = (
             self.aux_cfg.get("loss_weight", 0.0)
