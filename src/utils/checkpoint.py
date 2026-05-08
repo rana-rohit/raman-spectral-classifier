@@ -11,7 +11,44 @@ from typing import Any, Dict, Optional
 
 import torch
 
+def load_backbone_weights(
+    path: str,
+    model: torch.nn.Module,
+    device: str = "cpu",
+) -> dict:
+    """
+    Load pretrained weights EXCEPT classifier head.
+    Used for transfer learning when output dimensions differ.
+    """
 
+    checkpoint = torch.load(path, map_location=device)
+
+    pretrained_state = checkpoint["model_state"]
+    current_state = model.state_dict()
+
+    filtered_state = {}
+
+    for key, value in pretrained_state.items():
+
+        # Skip classifier layers
+        if key.startswith("classifier"):
+            continue
+
+        # Skip incompatible shapes
+        if key not in current_state:
+            continue
+
+        if current_state[key].shape != value.shape:
+            continue
+
+        filtered_state[key] = value
+
+    current_state.update(filtered_state)
+
+    model.load_state_dict(current_state)
+
+    return checkpoint
+    
 def save_checkpoint(
     path: str,
     model: torch.nn.Module,
