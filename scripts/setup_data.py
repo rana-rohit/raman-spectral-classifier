@@ -213,17 +213,14 @@ def main():
         "smoke-testing batch shapes..."
     )
 
-    loader_cfg = {
-        "batch_size": 256,
-        "num_workers": 0,
-        "validation": cfg["validation"],
-    }
+    cfg["batch_size"] = 256
+    cfg["num_workers"] = 0
 
     loaders = build_all_loaders(
         registry,
         preprocessor,
         augmentation,
-        loader_cfg,
+        cfg,
         clinical_sparse_ids=clinical_sparse_ids,
         n_classes=n_classes,
     )
