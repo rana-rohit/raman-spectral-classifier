@@ -89,11 +89,19 @@ class Trainer:
             cfg.get("task", {})
             .get("clinical_labels", [])
         )
-        if shared_classes:
+
+        stage = cfg.get("task", {}).get(
+            "stage",
+            "transfer_5class",
+        )
+
+        if stage == "transfer_5class":
             assert self.n_classes == len(shared_classes), (
-                f"Shared-class training requires n_classes == len(shared_classes), "
+                f"transfer_5class requires "
+                f"n_classes == len(shared_classes), "
                 f"got {self.n_classes} vs {len(shared_classes)}"
             )
+
         self.dann_cfg = self.train_cfg.get("dann", {})
         self.dann_enabled = self.dann_cfg.get("enabled", False)
         self.dann_weight = self.dann_cfg.get("weight", 0.5)
