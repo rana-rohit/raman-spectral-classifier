@@ -20,7 +20,7 @@ from scripts.plot_saliency import plot_saliency
 from metadata.ontology import (
     COMPACT_TO_GLOBAL,
     GLOBAL_TREATMENTS,
-    CLINICAL_LABEL_METADATA,
+    CLINICAL_LABELS,
 )
 
 # -----------------------------
@@ -248,7 +248,7 @@ def main():
                 )
 
                 clinical_info = (
-                    CLINICAL_LABEL_METADATA[global_id]
+                    CLINICAL_LABELS[global_id]
                 )
 
             elif stage == "pretrain_treatment_8class":
