@@ -28,10 +28,9 @@ from metadata.ontology import (
 # -----------------------------
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--model", required=True)
     p.add_argument("--exp-dir", required=True)
-    p.add_argument("--exp-name", required=True)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--split", default=None)
     return p.parse_args()
 
 
@@ -44,11 +43,10 @@ def main():
 
     # Load config (same as train.py)
     cfg = load_config(
-        "configs/data/splits.yaml",
-        "configs/data/preprocessing.yaml",
-        "configs/data/augmentation.yaml",
-        "configs/training/base.yaml",
-        f"configs/model/{args.model}.yaml",
+        os.path.join(
+            args.exp_dir,
+            "config.yaml",
+        )
     )
 
     task_cfg = cfg["task"]
@@ -61,50 +59,21 @@ def main():
         clinical_sparse_ids = []
         n_classes = 8
     elif stage == "transfer_5class":
-        clinical_sparse_ids = task_cfg["clinical_sparse_global_ids"]
+        clinical_sparse_ids = (
+            task_cfg["clinical_sparse_global_ids"]
+        )
         n_classes = len(clinical_sparse_ids)
+
     else:
         raise ValueError(
             f"Unknown XAI stage: {stage}"
         )
+    
     cfg["model"]["n_classes"] = n_classes
     # --------------------------------------------------------
     # Semantic-space integrity checks
     # --------------------------------------------------------
-    if stage == "pretrain_30class":
-        assert label_space == "isolate_space"
-        assert (
-            cfg["model"]["semantic_space"]
-            == "isolate_space"
-        )
-        assert n_classes == 30
-    elif stage == "pretrain_treatment_8class":
-        assert (
-            label_space
-            == "global_treatment_space"
-        )
-
-        assert (
-            cfg["model"]["semantic_space"]
-            == "global_treatment_space"
-        )
-        assert n_classes == 8
-    elif stage == "transfer_5class":
-        assert (
-            label_space
-            == "sparse_global_treatment_space"
-        )
-        assert (
-            cfg["model"]["semantic_space"]
-            == "compact_transfer_space"
-        )
-        assert n_classes == 5
-        assert len(clinical_sparse_ids) == 5, (
-            "transfer_5class requires "
-            "5 sparse clinical treatment IDs"
-        )
-
-    exp_dir = os.path.join(args.exp_dir, args.exp_name)
+    exp_dir = args.exp_dir
 
     # -----------------------------
     # DATA
@@ -123,28 +92,62 @@ def main():
     if len(augmentation.steps) == 0 or augmentation.p == 0:
         augmentation = None
 
-    loader_cfg = {
-        "batch_size": cfg.get("training", {}).get("batch_size", 256),
-        "num_workers": cfg.get("training", {}).get("num_workers", 4),
-        "validation": cfg["validation"],
-        "seed": args.seed,
-    }
+    cfg["batch_size"] = (
+        cfg.get("training", {})
+        .get("batch_size", 256)
+    )
+
+    cfg["num_workers"] = (
+        cfg.get("training", {})
+        .get("num_workers", 4)
+    )
+
+    cfg["consistency"] = (
+        cfg.get("training", {})
+        .get("consistency", {})
+    )
 
     loaders = build_all_loaders(
         registry,
         preprocessor,
         augmentation,
-        loader_cfg,
+        cfg,
         clinical_sparse_ids=clinical_sparse_ids,
         n_classes=n_classes,
     )
+
+    xai_split = (
+        args.split
+        or cfg.get("xai", {}).get("split")
+    )
+
+    if xai_split is None:
+        raise ValueError(
+            "No XAI split specified"
+        )
+
+    if xai_split in loaders:
+        loader = loaders[xai_split]
+
+    elif xai_split in loaders.get("ood", {}):
+        loader = loaders["ood"][xai_split]
+
+    else:
+        raise ValueError(
+            f"Unknown XAI split: {xai_split}"
+        )
 
     # -----------------------------
     # MODEL
     # -----------------------------
     print("[XAI] Loading model...")
 
-    model = get_model(args.model, cfg)
+    model_name = cfg["model"]["name"]
+
+    model = get_model(
+        model_name,
+        cfg,
+    )
     checkpoint = load_best_model(
         exp_dir,
         model,
@@ -207,18 +210,6 @@ def main():
 
     xai_root = Path(exp_dir) / "xai"
     xai_root.mkdir(parents=True, exist_ok=True)
-
-
-    xai_split = (
-        cfg.get("xai", {})
-        .get("split", "2018clinical")
-    )
-
-    assert xai_split in loaders["ood"], (
-        f"Unknown XAI split: {xai_split}"
-    )
-
-    loader = loaders["ood"][xai_split]
 
     class_counts = {i: 0 for i in range(n_classes)}
 

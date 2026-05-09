@@ -15,3 +15,6 @@ task:
 model:
   n_classes: 5
   semantic_space: compact_transfer_space
+
+xai:
+  split: 2018clinical
