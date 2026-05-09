@@ -45,11 +45,11 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     label_space = task_cfg["label_space"]
     
     if stage == "pretrain_30class":
-        clinical_sparse_ids = None
+        clinical_sparse_ids = []
         n_classes = cfg["dataset"]["n_classes_full"]
 
     elif stage == "pretrain_treatment_8class":
-        clinical_sparse_ids = None
+        clinical_sparse_ids = []
         n_classes = 8
 
     elif stage == "transfer_5class":
@@ -98,7 +98,7 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     print(f"Label Space  : {label_space}")
     print(f"Num Classes  : {n_classes}")
 
-    if clinical_sparse_ids is not None:
+    if len(clinical_sparse_ids) > 0:
         print(f"Clinical IDs : {clinical_sparse_ids}")
 
     print("==================================================")
@@ -111,18 +111,27 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     augmentation = AugmentationPipeline.from_config(cfg["augmentation"])
     if len(augmentation.steps) == 0 or augmentation.p == 0:
         augmentation = None
+    
+    cfg["batch_size"] = (
+        cfg.get("training", {})
+        .get("batch_size", 512)
+    )
+
+    cfg["num_workers"] = (
+        cfg.get("training", {})
+        .get("num_workers", 4)
+    )
+
+    cfg["consistency"] = (
+        cfg.get("training", {})
+        .get("consistency", {})
+    )
 
     loaders = build_all_loaders(
         registry,
         preprocessor,
         augmentation,
-        {
-            "batch_size": cfg.get("training", {}).get("batch_size", 512),
-            "num_workers": cfg.get("training", {}).get("num_workers", 4),
-            "validation": cfg["validation"],
-            "seed": seed,
-            "consistency": cfg.get("training", {}).get("consistency", {}),
-        },
+        cfg,
         clinical_sparse_ids=clinical_sparse_ids,
         n_classes=n_classes,
     )
