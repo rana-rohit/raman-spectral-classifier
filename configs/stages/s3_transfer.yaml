@@ -10,7 +10,7 @@ task:
     - 5
     - 6
 
-  pretrained_exp_dir: /content/drive/MyDrive/raman_results/stage2_cnn
+  pretrained_exp_dir: /content/drive/MyDrive/raman_results/resnet_s2_treatment
 
 model:
   n_classes: 5
