@@ -415,7 +415,7 @@ class Trainer:
                         )
                     domain_logits = self.model.domain_classifier(feat_all)
 
-                    domain_loss = nn.CrossEntropyLoss()(domain_logits, domain_labels)
+                    domain_loss = nn.CrossEntropyLoss(label_smoothing=0.05)(domain_logits, domain_labels)
                     
                     if epoch == 1 and len(source_logits) == 0:
                         print(f"DOMAIN LOSS SAMPLE: {domain_loss.item():.4f}")
