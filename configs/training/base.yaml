@@ -41,6 +41,11 @@ training:
     loss_weight: 0.5
     views: 2
   
+  supcon:
+    enabled: false
+    weight: 0.05
+    temperature: 0.1
+  
   target_supervised:
     enabled: true
     weight: 1.0

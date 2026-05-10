@@ -23,7 +23,12 @@ from torch.utils.data import DataLoader
 from torch.autograd import Function
 
 from src.evaluation.metrics import compute_metrics
-from src.training.losses import consistency_loss, get_loss, coral_loss
+from src.training.losses import (
+    consistency_loss,
+    get_loss,
+    coral_loss,
+    SupConLoss,
+)
 from src.training.regularizers import L2SPRegularizer
 from src.training.scheduler import get_scheduler
 from src.utils.checkpoint import save_checkpoint
@@ -174,6 +179,12 @@ class Trainer:
         self.consistency_cfg = self.train_cfg.get("consistency", {})
         self.consistency_enabled = self.consistency_cfg.get("enabled", False)
         self.consistency_weight = self.consistency_cfg.get("loss_weight", 0.0)
+        self.supcon_cfg = self.train_cfg.get("supcon", {})
+        self.supcon_enabled = self.supcon_cfg.get("enabled", False)
+        self.supcon_weight = self.supcon_cfg.get("weight", 0.0)
+        self.supcon_loss = SupConLoss(
+            temperature=self.supcon_cfg.get("temperature", 0.1)
+        )
         self.supervised_on_both_views = self.consistency_cfg.get("supervised_on_both_views", True)
 
         self.l2sp = None
@@ -299,6 +310,7 @@ class Trainer:
         total_target_loss = 0.0
         total_aux_loss = 0.0
         total_consistency_loss = 0.0
+        total_supcon_loss = 0.0
         total_l2sp_loss = 0.0
         total_coral_loss = 0.0
         total_domain_loss = 0.0
@@ -370,6 +382,26 @@ class Trainer:
                 outputs2 = self._normalize_outputs(self.model(x2))
 
             consistency_term = self._compute_consistency_loss(outputs1, outputs2, y)
+            supcon_term = self._zero_loss()
+
+            if (
+                self.supcon_enabled
+                and outputs2 is not None
+            ):
+                feat1 = outputs1.get("features")
+                feat2 = outputs2.get("features")
+
+                if feat1 is not None and feat2 is not None:
+
+                    features = torch.stack(
+                        [feat1, feat2],
+                        dim=1,
+                    )
+
+                    supcon_term = self.supcon_loss(
+                        features,
+                        y,
+                    )
 
             l2sp_term = self.l2sp(self.model) if self.l2sp is not None else self._zero_loss()
             
@@ -379,6 +411,7 @@ class Trainer:
                 main_loss
                 + self.aux_loss_weight * aux_loss
                 + self.consistency_weight * consistency_term
+                + self.supcon_weight * supcon_term
                 + l2sp_term
                 + coral_weight * coral_term
             )
@@ -438,6 +471,7 @@ class Trainer:
             total_target_loss += target_loss.item() * batch_size
             total_aux_loss += aux_loss.item() * batch_size
             total_consistency_loss += consistency_term.item() * batch_size
+            total_supcon_loss += supcon_term.item() * batch_size
             total_l2sp_loss += l2sp_term.item() * batch_size
             total_coral_loss += coral_term.item() * batch_size
             total += batch_size
@@ -476,6 +510,7 @@ class Trainer:
                 "target_loss": total_target_loss / total,
                 "aux_loss": total_aux_loss / total,
                 "consistency_loss": total_consistency_loss / total,
+                "supcon_loss": total_supcon_loss / total,
                 "l2sp_loss": total_l2sp_loss / total,
                 "coral_loss": total_coral_loss / total,
                 "domain_loss": avg_domain_loss,

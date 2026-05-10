@@ -100,6 +100,62 @@ class FocalLoss(nn.Module):
             return focal.sum()
         return focal
 
+class SupConLoss(nn.Module):
+    """
+    Supervised Contrastive Loss
+
+    Expected input:
+        features: (B, V, D)
+            B = batch size
+            V = number of views
+            D = embedding dimension
+
+        labels: (B,)
+    """
+
+    def __init__(
+        self,
+        temperature: float = 0.1,
+    ) -> None:
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        labels: torch.Tensor,
+    ) -> torch.Tensor:
+
+        device = features.device
+
+        B, V, D = features.shape
+
+        features = F.normalize(features, dim=-1)
+        features = features.view(B * V, D)
+
+        labels = labels.repeat_interleave(V)
+        sim_matrix = torch.matmul(features, features.T)
+        sim_matrix = sim_matrix / self.temperature
+        sim_matrix = sim_matrix - sim_matrix.max(dim=1, keepdim=True)[0].detach()
+        labels = labels.contiguous().view(-1, 1)
+        mask = torch.eq(labels, labels.T).float().to(device)
+        logits_mask = torch.ones_like(mask) - torch.eye(B * V, device=device)
+
+        mask = mask * logits_mask
+
+        exp_logits = torch.exp(sim_matrix) * logits_mask
+
+        log_prob = sim_matrix - torch.log(
+            exp_logits.sum(dim=1, keepdim=True) + 1e-8
+        )
+        mean_log_prob_pos = (
+            (mask * log_prob).sum(dim=1)
+            / mask.sum(dim=1).clamp_min(1e-8)
+        )
+
+        loss = -mean_log_prob_pos.mean()
+
+        return loss
 
 def consistency_loss(
     logits_a: torch.Tensor,
