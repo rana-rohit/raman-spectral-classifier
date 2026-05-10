@@ -134,7 +134,13 @@ def plot_pca(embeddings, labels, save_path, title="PCA Embedding Visualization")
     plt.xlabel("PC-1")
     plt.ylabel("PC-2")
     plt.tight_layout()
-    plt.savefig(save_path)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    print(f"Saving PCA plot to: {save_path}")
+
+    plt.savefig(save_path, bbox_inches="tight")
+
+    print("PCA plot saved.")
     plt.close()
 
 
@@ -173,7 +179,11 @@ def plot_umap(
     plt.xlabel("UMAP-1")
     plt.ylabel("UMAP-2")
     plt.tight_layout()
-    plt.savefig(save_path)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    print(f"Saving UMAP plot to: {save_path}")
+    plt.savefig(save_path, bbox_inches="tight")
+    print("UMAP plot saved.")
     plt.close()
 
 
@@ -187,7 +197,11 @@ def plot_correctness_umap(embeddings, correctness, save_path):
     plt.legend()
     plt.title("Correct vs Incorrect Predictions")
     plt.tight_layout()
-    plt.savefig(save_path)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    print(f"Saving correctness plot to: {save_path}")
+    plt.savefig(save_path, bbox_inches="tight")
+    print("Correctness plot saved.")
     plt.close()
 
 
@@ -286,8 +300,7 @@ def main():
     # --------------------------------------------------------
     # Output directory
     # --------------------------------------------------------
-    experiment_name = Path(args.experiment_dir).name
-    output_dir = os.path.join("outputs", "embedding_analysis", experiment_name, args.split)
+    output_dir = os.path.join(args.experiment_dir, "embedding_analysis", args.split)
     os.makedirs(output_dir, exist_ok=True)
 
     # --------------------------------------------------------
