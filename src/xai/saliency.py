@@ -15,21 +15,26 @@ def compute_saliency(model, x, target_class=None):
 
     x = x.clone().detach().requires_grad_(True)
 
-    logits = model.forward_logits(x)
+    features = model.forward_features(x)
+    logits = model.forward_logits(features)
 
     if target_class is None:
         target_class = logits.argmax(dim=1).item()
 
     score = logits[:, target_class]
 
-    model.zero_grad()
+    model.zero_grad(set_to_none=True)
     score.backward()
 
     saliency = x.grad.abs()
     
     saliency = saliency.max(dim=1)[0]
 
-    return saliency.squeeze().cpu().numpy()
+    saliency = saliency.squeeze()
+
+    saliency = saliency / (saliency.max() + 1e-8)
+
+    return saliency.cpu().numpy()
 
 def compute_smoothgrad(model, x, target_class=None, n_samples=25, noise_std=0.02):
     """
@@ -51,20 +56,25 @@ def compute_smoothgrad(model, x, target_class=None, n_samples=25, noise_std=0.02
     x = x.clone().detach()
 
     smooth_saliency = 0
-
+    
+    # Determine target class ONCE before noise sampling
+    if target_class is None:
+        with torch.no_grad():
+            features = model.forward_features(x)
+            logits = model.forward_logits(features)
+            target_class = logits.argmax(dim=1).item()
     for _ in range(n_samples):
 
         noise = torch.normal(mean=0, std=noise_std, size=x.shape).to(x.device)
         x_noisy = (x + noise).clone().detach().requires_grad_(True)
 
-        logits = model.forward_logits(x_noisy)
+        features = model.forward_features(x_noisy)
 
-        if target_class is None:
-            target_class = logits.argmax(dim=1).item()
+        logits = model.forward_logits(features)
 
         score = logits[:, target_class]
 
-        model.zero_grad()
+        model.zero_grad(set_to_none=True)
         score.backward()
 
         grad = x_noisy.grad.abs()
@@ -74,4 +84,10 @@ def compute_smoothgrad(model, x, target_class=None, n_samples=25, noise_std=0.02
 
     smooth_saliency /= n_samples
 
-    return smooth_saliency.squeeze().cpu().numpy()
+    smooth_saliency = smooth_saliency.squeeze()
+
+    smooth_saliency = smooth_saliency / (
+        smooth_saliency.max() + 1e-8
+    )
+
+    return smooth_saliency.cpu().numpy()
