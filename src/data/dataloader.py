@@ -22,7 +22,7 @@ from src.utils.class_subset import (
     class_maps,
     filter_and_remap_classes,
 )
-from sklearn.model_selection import train_test_split
+
 
 
 def build_all_loaders(
@@ -74,22 +74,16 @@ def build_all_loaders(
     #
     #- pretrain_treatment_8class:
     #   global treatment-space labels
-    #
+    #2
     #- transfer_5class:
     #   compact transfer-space labels
     # --------------------------------------------------------
 
     X_ref, y_ref, ref_ids = _load_shared_split(registry, "reference", clinical_sparse_ids, stage=stage)
 
-    ref_idx = np.arange(len(y_ref))
-    tr_idx, val_idx = train_test_split(
-        ref_idx,
-        test_size=val_fraction,
-        stratify=y_ref if len(np.unique(y_ref)) > 1 else None,
-        random_state=val_seed,
+    X_tr, X_val, y_tr, y_val, tr_ids, val_ids = _contiguous_split(
+        X_ref, y_ref, ref_ids, val_fraction
     )
-    X_tr, y_tr, tr_ids = X_ref[tr_idx], y_ref[tr_idx], ref_ids[tr_idx]
-    X_val, y_val, val_ids = X_ref[val_idx], y_ref[val_idx], ref_ids[val_idx]
 
     loaders["train"] = _make_loader(
         X_tr, y_tr,
@@ -188,13 +182,11 @@ def build_all_loaders(
                 y_eval,
                 ids_pool,
                 ids_eval,
-            ) = train_test_split(
+            ) = _contiguous_split(
                 X_clin,
                 y_clin,
                 clin_ids,
-                test_size=clinical_eval_fraction,
-                stratify=y_clin if len(np.unique(y_clin)) > 1 else None,
-                random_state=seed + 100 + idx,
+                test_fraction=clinical_eval_fraction,
             )
 
             val_relative = clinical_val_fraction / max(1e-8, (1.0 - clinical_eval_fraction))
@@ -206,13 +198,11 @@ def build_all_loaders(
                 y_clin_val,
                 ids_clin_tr,
                 ids_clin_val,
-            ) = train_test_split(
+            ) = _contiguous_split(
                 X_pool,
                 y_pool,
                 ids_pool,
-                test_size=val_relative,
-                stratify=y_pool if len(np.unique(y_pool)) > 1 else None,
-                random_state=seed + 200 + idx,
+                test_fraction=val_relative,
             )
 
             clinical_train_parts.append((X_clin_tr, y_clin_tr))
@@ -305,6 +295,31 @@ def build_all_loaders(
     )
 
     return loaders
+
+
+def _contiguous_split(X, y, sample_ids, test_fraction: float):
+    """
+    Splits data contiguously within each class to prevent biological
+    replicate leakage. This relies on spectra being ordered sequentially
+    by replicate/acquisition during dataset creation.
+    """
+    tr_idx_list = []
+    val_idx_list = []
+    
+    for c in np.unique(y):
+        c_indices = np.where(y == c)[0]
+        n_val = max(1, int(len(c_indices) * test_fraction))
+        
+        if n_val > 0:
+            val_idx_list.extend(c_indices[-n_val:])
+            tr_idx_list.extend(c_indices[:-n_val])
+        else:
+            tr_idx_list.extend(c_indices)
+            
+    tr_idx = np.array(tr_idx_list)
+    val_idx = np.array(val_idx_list)
+    
+    return X[tr_idx], X[val_idx], y[tr_idx], y[val_idx], sample_ids[tr_idx], sample_ids[val_idx]
 
 def _make_loader(
     X,
