@@ -247,19 +247,27 @@ def main():
 
     print("\n[2/4] Building model...")
     model = get_model(args.model, cfg)
-
-    if stage == "transfer_5class":
+    
+    if stage in {
+        "pretrain_treatment_8class",
+        "transfer_5class",
+    }:
+    
         pretrained_dir = task_cfg.get("pretrained_exp_dir")
 
         if pretrained_dir is None:
             raise ValueError(
-            "transfer_5class requires pretrained_exp_dir"
-        )
+                f"{stage} requires pretrained_exp_dir"
+            )
 
         print("\nLoading pretrained backbone...")
         pretrained_ckpt = resolve_best_checkpoint_path(pretrained_dir)
 
-        checkpoint = load_backbone_weights(pretrained_ckpt,model)
+        checkpoint = load_backbone_weights(
+            pretrained_ckpt,
+            model,
+        )
+
         checkpoint_cfg = checkpoint.get("config", {})
 
         checkpoint_stage = (
@@ -268,15 +276,21 @@ def main():
             .get("stage", None)
         )
 
-        assert checkpoint_stage == "pretrain_treatment_8class", (
-            "transfer_5class should load "
-            "a treatment-pretrained checkpoint"
-        )
+        if stage == "pretrain_treatment_8class":
+            assert checkpoint_stage == "pretrain_30class", (
+                "Stage-2 must load a Stage-1 isolate checkpoint"
+            )
+
+        elif stage == "transfer_5class":
+            assert checkpoint_stage == "pretrain_treatment_8class", (
+                "Stage-3 must load a Stage-2 treatment checkpoint"
+            )
 
         print(
             f"  Loaded pretrained checkpoint "
             f"(epoch {checkpoint.get('epoch', '?')})"
         )
+
     model_summary(model) 
     
     print("\n==================================================")

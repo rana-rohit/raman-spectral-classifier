@@ -2,6 +2,7 @@ task:
   name: treatment_pretraining
   stage: pretrain_treatment_8class
   label_space: global_treatment_space
+  pretrained_exp_dir: /content/drive/MyDrive/raman_results/resnet_s1_dann
 
 model:
   n_classes: 8
