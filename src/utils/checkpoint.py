@@ -79,7 +79,7 @@ def save_checkpoint(
         "model_state":     model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "metrics":         metrics,
-        "best_metric_name": config["training"]["monitor_metric"],
+        "best_metric_name": config.get("training", {}).get("monitor_metric", "f1_macro"),
         "config":          config,
         "n_parameters": sum(
             p.numel() for p in model.parameters()
@@ -165,7 +165,25 @@ def load_checkpoint(
                 "Checkpoint semantic space mismatch: "
                 f"{checkpoint_space} vs {model_space}"
             )
-    model.load_state_dict(checkpoint["model_state"])
+            
+    checkpoint_state = checkpoint["model_state"]
+    model_state = model.state_dict()
+    
+    # Assert embedding dimension and n_classes match precisely if strict
+    for key, param in model_state.items():
+        if key in checkpoint_state:
+            assert checkpoint_state[key].shape == param.shape, (
+                f"Shape mismatch for {key}: "
+                f"checkpoint={checkpoint_state[key].shape}, "
+                f"model={param.shape}"
+            )
+    
+    if "n_classes" in checkpoint:
+        assert checkpoint["n_classes"] == model.classifier[-1].out_features, (
+            f"Checkpoint n_classes={checkpoint['n_classes']} "
+            f"!= model n_classes={model.classifier[-1].out_features}"
+        )
+    model.load_state_dict(checkpoint_state)
     if optimizer is not None and "optimizer_state" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
     return checkpoint

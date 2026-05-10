@@ -116,6 +116,12 @@ class HybridCNNTransformer(nn.Module):
         tokens, _ = self._encode(x, return_attn=False)
         return self.norm(tokens[:, 0, :])
 
+    def forward_logits(self, features: torch.Tensor) -> torch.Tensor:
+        """
+        Apply classifier head to latent embeddings.
+        """
+        return self.classifier(features)
+
     def forward(
         self,
         x: torch.Tensor,
@@ -123,11 +129,12 @@ class HybridCNNTransformer(nn.Module):
     ) -> dict[str, torch.Tensor] | tuple[torch.Tensor, list[torch.Tensor]]:
         tokens, attn_maps = self._encode(x, return_attn=return_attn)
         cls_out = self.norm(tokens[:, 0, :])
-        logits = self.classifier(cls_out)
+        logits = self.forward_logits(cls_out)
         if return_attn:
             return logits, attn_maps
         return {
             "main_logits": logits,
+            "aux_logits": None,
             "features": cls_out,
         }
 

@@ -198,6 +198,7 @@ class ResNet1D(nn.Module):
         features = self.forward_features(x)
         return {
             "main_logits": self.classifier(features),
+            "aux_logits": None,
             "features": features,
         }
 
@@ -219,6 +220,15 @@ class ResNet1D(nn.Module):
     def n_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
     
-    def forward_logits(self, x: torch.Tensor) -> torch.Tensor:
-        features = self.forward_features(x)
+    def forward_logits(self, features: torch.Tensor) -> torch.Tensor:
+        """
+        Apply classifier head to latent embeddings.
+
+        Args:
+            features:
+                Tensor of shape (B, embedding_dim)
+
+        Returns:
+            logits tensor of shape (B, n_classes)
+        """
         return self.classifier(features)
