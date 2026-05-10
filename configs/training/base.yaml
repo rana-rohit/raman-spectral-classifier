@@ -26,7 +26,7 @@ training:
   monitor_metric: f1_macro
   gradient_clip: 1.0
 
-  finetune_lr: 1e-5
+  finetune_lr: 0.00001
   finetune_epochs: 25
   finetune_batch_size: 64
   finetune_patience: 5
