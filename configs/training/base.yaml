@@ -13,7 +13,7 @@ training:
   loss: cross_entropy
   loss_kwargs: {}
   class_weights:
-    enabled: false
+    enabled: true
     source: train
 
   scheduler: warmup_cosine
@@ -26,8 +26,8 @@ training:
   monitor_metric: f1_macro
   gradient_clip: 1.0
 
-  finetune_lr: 0.00003
-  finetune_epochs: 15
+  finetune_lr: 1e-5
+  finetune_epochs: 25
   finetune_batch_size: 64
   finetune_patience: 5
 
