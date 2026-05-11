@@ -167,6 +167,8 @@ class ModelEvaluator:
                 k: float(v) if isinstance(v, np.floating) else v
                 for k, v in group_results.items()
             }
+            group_metrics["predictions"] = group_preds.tolist()
+            group_metrics["targets"] = group_targets.tolist()
 
             if split_name == "test":
                 group_name = "isolate"
