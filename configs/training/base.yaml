@@ -19,10 +19,10 @@ training:
   scheduler: warmup_cosine
   scheduler_cfg:
     warmup_epochs: 5
-    total_epochs: 100
+    total_epochs: 20
     eta_min: 0.000001
 
-  early_stopping_patience: 10
+  early_stopping_patience: 2
   monitor_metric: f1_macro
   gradient_clip: 1.0
 
@@ -47,16 +47,16 @@ training:
     temperature: 0.1
   
   target_supervised:
-    enabled: true
+    enabled: false
     weight: 1.0
   
   dann:
     enabled: true
-    weight: 0.1
+    weight: 0.01
   
   coral:
     enabled: true
-    weight: 0.1
+    weight: 0.01
   
   freeze_bn: false
 
