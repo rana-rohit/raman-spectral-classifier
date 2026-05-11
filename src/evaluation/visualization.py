@@ -85,7 +85,7 @@ def save_confusion_matrix_figure(
 
     ax.grid(
         which="minor",
-        color="black",
+        color="gray",
         linestyle="-",
         linewidth=0.5,
     )
@@ -113,6 +113,7 @@ def save_confusion_matrix_figure(
         rotation=90,
         fontsize=12,
     )
+    ax.tick_params(axis="both", length=0)
 
     ax.set_yticklabels(
         class_labels,
@@ -144,11 +145,12 @@ def save_confusion_matrix_figure(
         for j in range(cm.shape[1]):
 
             value = (
-                f"{cm[i, j]:.2f}"
+                f"{cm[i, j]*100:.1f}%"
                 if normalize
                 else str(int(cm[i, j]))
             )
-
+            if cm[i, j] == 0:
+                continue
             ax.text(
                 j,
                 i,

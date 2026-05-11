@@ -103,7 +103,7 @@ class ModelEvaluator:
         )
         
         print("EVALUATOR OUTPUT DIR:", self.output_dir)
-        
+
     @torch.no_grad()
     def evaluate_split(
         self,
@@ -300,8 +300,20 @@ class ModelEvaluator:
 
         # Spectrum-level confusion
 
+        TREATMENT_LABELS = {
+            0: "Vancomycin",
+            1: "Ceftriaxone",
+            2: "Penicillin",
+            3: "Daptomycin",
+            4: "Meropenem",
+            5: "Ciprofloxacin",
+            6: "TZP",
+            7: "Caspofungin",
+        }
+
         class_labels = [
-            str(x) for x in present_classes
+            TREATMENT_LABELS.get(int(x), str(x))
+            for x in present_classes
         ]
 
         save_confusion_matrix_figure(
