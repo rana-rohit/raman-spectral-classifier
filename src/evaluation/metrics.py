@@ -39,7 +39,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from collections import Counter
-from typing import Dict, List, Optional
 
 
 def compute_metrics(
@@ -294,7 +293,7 @@ def majority_vote_predictions(
     preds,
     targets,
     sample_ids,
-    spectra_per_patient,
+    spectra_per_group,
 ):
     """
     Aggregate spectrum-level predictions into
@@ -311,7 +310,7 @@ def majority_vote_predictions(
     sample_ids : list[str]
         Sample identifiers.
 
-    spectra_per_patient : int
+    spectra_per_group : int
         Number of spectra belonging to one isolate/patient.
 
     Returns
@@ -326,11 +325,11 @@ def majority_vote_predictions(
     patient_preds = []
     patient_targets = []
 
-    n_groups = len(preds) // spectra_per_patient
+    n_groups = len(preds) // spectra_per_group
 
     for i in range(n_groups):
-        start = i * spectra_per_patient
-        end = start + spectra_per_patient
+        start = i * spectra_per_group
+        end = start + spectra_per_group
 
         group_preds = preds[start:end]
         group_targets = targets[start:end]
