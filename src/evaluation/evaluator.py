@@ -92,6 +92,16 @@ class ModelEvaluator:
 
         self.results: Dict = {"model": model_name, "splits": {}}
 
+        self.output_dir = Path(
+            self.cfg.get(
+                "experiment",
+                {}
+            ).get(
+                "save_dir",
+                "results"
+            )
+        )
+
     @torch.no_grad()
     def evaluate_split(
         self,
@@ -280,18 +290,8 @@ class ModelEvaluator:
         }
         # Automatic confusion matrix visualization generation
 
-        exp_dir = Path(
-            self.cfg.get(
-                "experiment",
-                {}
-            ).get(
-                "save_dir",
-                "results"
-            )
-        )
-
         figure_dir = (
-            exp_dir
+            self.output_dir
             / "confusion_matrices"
             / split_name
         )
