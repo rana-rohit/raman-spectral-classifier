@@ -25,7 +25,16 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from src.evaluation.metrics import compute_confusion_matrix, compute_metrics, compute_transfer_gap
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import f1_score
+from sklearn.metrics import matthews_corrcoef
+
+from src.evaluation.metrics import (
+    compute_confusion_matrix,
+    compute_metrics,
+    compute_transfer_gap,
+    majority_vote_predictions,
+)
 from metadata.clinical import (
     CLINICAL_LABELS,
     CLINICAL_LABEL_INVERSE_REMAP
@@ -99,6 +108,70 @@ class ModelEvaluator:
         n_classes = self.n_classes
 
         metrics = compute_metrics(eval_logits, eval_targets, n_classes)
+
+        # --------------------------------------------------------
+        # Patient-level majority voting
+        #
+        # Clinical datasets contain multiple spectra per
+        # isolate/patient.
+        #
+        # Aggregate spectrum predictions into clinically
+        # realistic patient-level predictions.
+        # --------------------------------------------------------
+
+        patient_metrics = {}
+
+        if split_name == "2018clinical":
+            spectra_per_patient = 400
+
+        elif split_name == "2019clinical":
+            spectra_per_patient = 100
+
+        else:
+            spectra_per_patient = None
+
+        if spectra_per_patient is not None:
+
+            preds_np = eval_logits.argmax(dim=-1).cpu().numpy()
+            targets_np = eval_targets.cpu().numpy()
+
+            assert len(preds_np) % spectra_per_patient == 0, (
+                f"{split_name} size must be divisible by "
+                f"{spectra_per_patient}"
+            )
+
+            patient_preds, patient_targets = majority_vote_predictions(
+                preds=preds_np,
+                targets=targets_np,
+                sample_ids=None,
+                spectra_per_patient=spectra_per_patient,
+            )
+
+            patient_results = {
+                "accuracy": accuracy_score(patient_targets, patient_preds),
+                "f1_macro": f1_score(
+                    patient_targets,
+                    patient_preds,
+                    average="macro",
+                ),
+                "mcc": matthews_corrcoef(
+                    patient_targets,
+                    patient_preds,
+                ),
+            }
+
+            patient_metrics = {
+                k: float(v) if isinstance(v, np.floating) else v
+                for k, v in patient_results.items()
+            }
+
+            print(
+                f"    patient_acc="
+                f"{patient_results['accuracy']:.4f}  "
+                f"patient_f1="
+                f"{patient_results['f1_macro']:.4f}"
+            )
+
         cm, present_classes = compute_confusion_matrix(eval_logits, eval_targets, n_classes)
         inverse_class_map = getattr(loader.dataset, "inverse_class_map", {})
         
@@ -179,6 +252,7 @@ class ModelEvaluator:
             "n_samples": int(len(eval_targets)),
             "predictions": eval_logits.argmax(dim=-1).numpy().tolist(),
             "targets": eval_targets.numpy().tolist(),
+            "patient_metrics": patient_metrics,
             "compact_to_sparse_label_map": (
                 {
                     str(compact_idx): int(original_idx)

@@ -38,6 +38,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 import torch.nn.functional as F
+from collections import Counter
+from typing import Dict, List, Optional
 
 
 def compute_metrics(
@@ -287,3 +289,56 @@ def _matthews_corrcoef(y_true, y_pred) -> float:
     if denom == 0:
         return 0.0
     return float(cov_ytyp / denom)
+
+def majority_vote_predictions(
+    preds,
+    targets,
+    sample_ids,
+    spectra_per_patient,
+):
+    """
+    Aggregate spectrum-level predictions into
+    patient/isolate-level predictions.
+
+    Parameters
+    ----------
+    preds : np.ndarray
+        Spectrum-level predicted labels.
+
+    targets : np.ndarray
+        Spectrum-level ground-truth labels.
+
+    sample_ids : list[str]
+        Sample identifiers.
+
+    spectra_per_patient : int
+        Number of spectra belonging to one isolate/patient.
+
+    Returns
+    -------
+    patient_preds : np.ndarray
+    patient_targets : np.ndarray
+    """
+
+    preds = np.asarray(preds)
+    targets = np.asarray(targets)
+
+    patient_preds = []
+    patient_targets = []
+
+    n_groups = len(preds) // spectra_per_patient
+
+    for i in range(n_groups):
+        start = i * spectra_per_patient
+        end = start + spectra_per_patient
+
+        group_preds = preds[start:end]
+        group_targets = targets[start:end]
+
+        voted_pred = Counter(group_preds).most_common(1)[0][0]
+        voted_target = Counter(group_targets).most_common(1)[0][0]
+
+        patient_preds.append(voted_pred)
+        patient_targets.append(voted_target)
+
+    return np.asarray(patient_preds), np.asarray(patient_targets)
