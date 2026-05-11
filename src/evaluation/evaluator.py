@@ -119,57 +119,65 @@ class ModelEvaluator:
         # realistic patient-level predictions.
         # --------------------------------------------------------
 
-        patient_metrics = {}
+        group_metrics = {}
 
-        if split_name == "2018clinical":
-            spectra_per_patient = 400
+        if split_name == "test":
+            spectra_per_group = 2000
+
+        elif split_name == "2018clinical":
+            spectra_per_group = 400
 
         elif split_name == "2019clinical":
-            spectra_per_patient = 100
+            spectra_per_group = 100
 
         else:
-            spectra_per_patient = None
+            spectra_per_group = None
 
-        if spectra_per_patient is not None:
+        if spectra_per_group is not None:
 
             preds_np = eval_logits.argmax(dim=-1).cpu().numpy()
             targets_np = eval_targets.cpu().numpy()
 
-            assert len(preds_np) % spectra_per_patient == 0, (
+            assert len(preds_np) % spectra_per_group == 0, (
                 f"{split_name} size must be divisible by "
-                f"{spectra_per_patient}"
+                f"{spectra_per_group}"
             )
 
-            patient_preds, patient_targets = majority_vote_predictions(
+            group_preds, group_targets = majority_vote_predictions(
                 preds=preds_np,
                 targets=targets_np,
                 sample_ids=None,
-                spectra_per_patient=spectra_per_patient,
+                spectra_per_group=spectra_per_group,
             )
 
-            patient_results = {
-                "accuracy": accuracy_score(patient_targets, patient_preds),
+            group_results = {
+                "accuracy": accuracy_score(group_targets, group_preds),
                 "f1_macro": f1_score(
-                    patient_targets,
-                    patient_preds,
+                    group_targets,
+                    group_preds,
                     average="macro",
                 ),
                 "mcc": matthews_corrcoef(
-                    patient_targets,
-                    patient_preds,
+                    group_targets,
+                    group_preds,
                 ),
             }
 
-            patient_metrics = {
+            group_metrics = {
                 k: float(v) if isinstance(v, np.floating) else v
-                for k, v in patient_results.items()
+                for k, v in group_results.items()
             }
 
+            if split_name == "test":
+                group_name = "isolate"
+            else:
+                group_name = "patient"
+
             print(
-                f"    patient_acc="
-                f"{patient_results['accuracy']:.4f}  "
-                f"patient_f1="
-                f"{patient_results['f1_macro']:.4f}"
+                f"    {group_name}_acc="
+                f"{group_results['accuracy']:.4f}  "
+                f"{group_name}_f1="
+                f"{group_results['f1_macro']:.4f}"
             )
 
         cm, present_classes = compute_confusion_matrix(eval_logits, eval_targets, n_classes)
@@ -252,7 +260,7 @@ class ModelEvaluator:
             "n_samples": int(len(eval_targets)),
             "predictions": eval_logits.argmax(dim=-1).numpy().tolist(),
             "targets": eval_targets.numpy().tolist(),
-            "patient_metrics": patient_metrics,
+            "group_metrics": group_metrics,
             "compact_to_sparse_label_map": (
                 {
                     str(compact_idx): int(original_idx)
