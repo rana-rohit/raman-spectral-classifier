@@ -289,55 +289,59 @@ def _matthews_corrcoef(y_true, y_pred) -> float:
         return 0.0
     return float(cov_ytyp / denom)
 
-def majority_vote_predictions(
-    preds,
+def confidence_vote_predictions(
+    logits,
     targets,
     sample_ids,
     spectra_per_group,
 ):
     """
-    Aggregate spectrum-level predictions into
-    patient/isolate-level predictions.
-
     Parameters
     ----------
-    preds : np.ndarray
-        Spectrum-level predicted labels.
+    logits : np.ndarray
+        Spectrum-level logits/probabilities.
 
     targets : np.ndarray
         Spectrum-level ground-truth labels.
 
-    sample_ids : list[str]
-        Sample identifiers.
-
     spectra_per_group : int
-        Number of spectra belonging to one isolate/patient.
+        Number of spectra per isolate/patient.
 
     Returns
     -------
-    patient_preds : np.ndarray
-    patient_targets : np.ndarray
+    group_preds : np.ndarray
+    group_targets : np.ndarray
     """
 
-    preds = np.asarray(preds)
+    logits = np.asarray(logits)
     targets = np.asarray(targets)
 
-    patient_preds = []
-    patient_targets = []
+    group_preds = []
+    group_targets = []
 
-    n_groups = len(preds) // spectra_per_group
+    n_groups = len(logits) // spectra_per_group
 
     for i in range(n_groups):
+
         start = i * spectra_per_group
         end = start + spectra_per_group
 
-        group_preds = preds[start:end]
-        group_targets = targets[start:end]
+        group_logits = logits[start:end]
+        group_targets_local = targets[start:end]
 
-        voted_pred = Counter(group_preds).most_common(1)[0][0]
-        voted_target = Counter(group_targets).most_common(1)[0][0]
+        mean_probs = group_logits.mean(axis=0)
 
-        patient_preds.append(voted_pred)
-        patient_targets.append(voted_target)
+        voted_pred = np.argmax(mean_probs)
 
-    return np.asarray(patient_preds), np.asarray(patient_targets)
+        assert len(np.unique(group_targets_local)) == 1, (
+            "Group contains mixed labels"
+        )
+        voted_target = group_targets_local[0]
+        
+        group_preds.append(voted_pred)
+        group_targets.append(voted_target)
+
+    return (
+        np.asarray(group_preds),
+        np.asarray(group_targets),
+    )

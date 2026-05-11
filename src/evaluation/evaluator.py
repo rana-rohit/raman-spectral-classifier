@@ -33,7 +33,7 @@ from src.evaluation.metrics import (
     compute_confusion_matrix,
     compute_metrics,
     compute_transfer_gap,
-    majority_vote_predictions,
+    confidence_vote_predictions,
 )
 from metadata.clinical import (
     CLINICAL_LABELS,
@@ -143,8 +143,8 @@ class ModelEvaluator:
                 f"{spectra_per_group}"
             )
 
-            group_preds, group_targets = majority_vote_predictions(
-                preds=preds_np,
+            group_preds, group_targets = confidence_vote_predictions(
+                logits=torch.softmax(eval_logits, dim=-1).cpu().numpy(),
                 targets=targets_np,
                 sample_ids=None,
                 spectra_per_group=spectra_per_group,
