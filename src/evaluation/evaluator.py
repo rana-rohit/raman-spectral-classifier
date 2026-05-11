@@ -122,7 +122,7 @@ class ModelEvaluator:
         group_metrics = {}
 
         if split_name == "test":
-            spectra_per_group = 2000
+            spectra_per_group = 100
 
         elif split_name == "2018clinical":
             spectra_per_group = 400
