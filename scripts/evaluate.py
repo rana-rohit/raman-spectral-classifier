@@ -194,12 +194,17 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
     
     print(f"  Checkpoint epoch: {checkpoint.get('epoch', '?')}")
 
+    cfg = dict(cfg)
+    cfg["experiment"] = {
+        "save_dir": exp_dir
+    }
+
     evaluator = ModelEvaluator(
         model=model,
         model_name=model_name,
         n_classes=n_classes,
         device=str(next(model.parameters()).device),
-        cfg=dict(cfg),
+        cfg=cfg,
     )
     results = evaluator.evaluate_all(loaders)
     results["task"] = task_cfg["name"]
