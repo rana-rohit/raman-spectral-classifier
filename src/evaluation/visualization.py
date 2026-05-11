@@ -62,21 +62,81 @@ def save_confusion_matrix_figure(
         row_sums[row_sums == 0] = 1
         cm = cm / row_sums
 
-    fig, ax = plt.subplots(figsize=(8, 7))
+    fig, ax = plt.subplots(
+        figsize=(10, 9)
+    )
+    fig.patch.set_facecolor("white")
 
-    im = ax.imshow(cm, interpolation="nearest")
+    im = ax.imshow(
+        cm,
+        interpolation="nearest",
+        cmap="YlGnBu",
+    )
+    
+    ax.set_xticks(
+        np.arange(-0.5, len(class_labels), 1),
+        minor=True,
+    )
 
-    plt.colorbar(im, ax=ax)
+    ax.set_yticks(
+        np.arange(-0.5, len(class_labels), 1),
+        minor=True,
+    )
+
+    ax.grid(
+        which="minor",
+        color="black",
+        linestyle="-",
+        linewidth=0.5,
+    )
+
+    ax.tick_params(
+        which="minor",
+        bottom=False,
+        left=False,
+    )
+
+    cbar = plt.colorbar(
+        im,
+        ax=ax,
+        fraction=0.046,
+        pad=0.04,
+    )
+
+    cbar.ax.tick_params(labelsize=11)
 
     ax.set_xticks(np.arange(len(class_labels)))
     ax.set_yticks(np.arange(len(class_labels)))
 
-    ax.set_xticklabels(class_labels, rotation=45, ha="right")
-    ax.set_yticklabels(class_labels)
+    ax.set_xticklabels(
+        class_labels,
+        rotation=90,
+        fontsize=12,
+    )
 
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("True")
-    ax.set_title(title)
+    ax.set_yticklabels(
+        class_labels,
+        fontsize=12,
+    )
+
+    ax.set_xlabel(
+        "Predicted Class",
+        fontsize=16,
+        weight="bold",
+    )
+
+    ax.set_ylabel(
+        "True Class",
+        fontsize=16,
+        weight="bold",
+    )
+
+    ax.set_title(
+        title,
+        fontsize=18,
+        weight="bold",
+        pad=20,
+    )
 
     threshold = cm.max() / 2
 
@@ -95,6 +155,8 @@ def save_confusion_matrix_figure(
                 value,
                 ha="center",
                 va="center",
+                fontsize=11,
+                fontweight="bold",
                 color="white" if cm[i, j] > threshold else "black",
             )
 
@@ -103,6 +165,11 @@ def save_confusion_matrix_figure(
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    fig.savefig(
+        save_path,
+        dpi=500,
+        bbox_inches="tight",
+        facecolor="white",
+    )
     print(f"Saved figure: {save_path}")
     plt.close(fig)
