@@ -664,13 +664,28 @@ class Trainer:
         # instead of treatments, causing semantic corruption!
         # --------------------------------------------------------
         if stage == "pretrain_30class":
+
             from metadata.ontology import ISOLATE_TO_TREATMENT
+
             mapped_targets = torch.tensor(
                 [ISOLATE_TO_TREATMENT[int(t.item())] for t in targets],
                 device=targets.device
             )
-        else:
+
+        elif stage == "pretrain_treatment_8class":
+
+            # Stage-2 already operates in global treatment space.
+            # No isolate remapping or clinical sparse filtering.
             mapped_targets = targets
+
+            return self._zero_loss()
+
+        elif stage == "transfer_5class":
+
+            mapped_targets = targets
+
+        else:
+            raise ValueError(f"Unknown stage: {stage}")
 
         mask = subset_mask(mapped_targets, self.clinical_sparse_ids)
         if not mask.any():
@@ -732,9 +747,18 @@ class Trainer:
                     device=targets.device,
                 )
 
-            else:
+            elif stage == "pretrain_treatment_8class":
+
+                # Stage-2 should remain semantically isolated
+                # from compact clinical transfer-space.
+                return total
+
+            elif stage == "transfer_5class":
 
                 mapped_targets = targets
+
+            else:
+                raise ValueError(f"Unknown stage: {stage}")
 
             mask = subset_mask(mapped_targets, self.clinical_sparse_ids)
             if mask.any():
