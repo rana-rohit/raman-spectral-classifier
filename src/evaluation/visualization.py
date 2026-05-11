@@ -70,7 +70,7 @@ def save_confusion_matrix_figure(
     im = ax.imshow(
         cm,
         interpolation="nearest",
-        cmap="YlGnBu",
+        cmap="Blues",
     )
     
     ax.set_xticks(
