@@ -51,12 +51,12 @@ training:
     weight: 1.0
   
   dann:
-    enabled: true
-    weight: 0.01
+    enabled: false
+    weight: 0.0
   
   coral:
-    enabled: true
-    weight: 0.01
+    enabled: false
+    weight: 0.0
   
   freeze_bn: false
 
