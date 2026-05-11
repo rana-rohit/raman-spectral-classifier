@@ -12,6 +12,9 @@ task:
 
   pretrained_exp_dir: /content/drive/MyDrive/raman_results/resnet_s2_treatment
 
+experiment:
+  save_dir: /content/drive/MyDrive/raman_results/resnet_s3_transfer
+
 model:
   n_classes: 5
   semantic_space: compact_transfer_space

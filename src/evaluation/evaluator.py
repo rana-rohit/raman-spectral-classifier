@@ -101,7 +101,9 @@ class ModelEvaluator:
                 "results"
             )
         )
-
+        
+        print("EVALUATOR OUTPUT DIR:", self.output_dir)
+        
     @torch.no_grad()
     def evaluate_split(
         self,

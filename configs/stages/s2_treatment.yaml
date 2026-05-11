@@ -4,6 +4,9 @@ task:
   label_space: global_treatment_space
   pretrained_exp_dir: /content/drive/MyDrive/raman_results/resnet_s1_isolate
 
+experiment:
+  save_dir: /content/drive/MyDrive/raman_results/resnet_s2_treatment
+  
 model:
   n_classes: 8
   semantic_space: global_treatment_space
