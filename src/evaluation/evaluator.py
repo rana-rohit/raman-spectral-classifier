@@ -280,8 +280,19 @@ class ModelEvaluator:
         }
         # Automatic confusion matrix visualization generation
 
+        exp_dir = Path(
+            self.cfg.get(
+                "experiment",
+                {}
+            ).get(
+                "save_dir",
+                "results"
+            )
+        )
+
         figure_dir = (
-            Path("results/confusion_matrices")
+            exp_dir
+            / "confusion_matrices"
             / split_name
         )
 
