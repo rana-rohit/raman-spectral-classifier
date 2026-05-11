@@ -158,7 +158,17 @@ class Trainer:
             )
             self.target_supervised_enabled = False
 
-        self.clinical_loader = self.loaders.get("clinical_train", None)
+        # --------------------------------------------------------
+        # Clinical data must ONLY participate during
+        # supervised clinical transfer (Stage-3).
+        #
+        # Stages 1/2 must remain clinically isolated to
+        # prevent implicit domain exposure and semantic leakage.
+        # --------------------------------------------------------
+        if stage == "transfer_5class":
+            self.clinical_loader = self.loaders.get("clinical_train", None)
+        else:
+            self.clinical_loader = None
 
         if self.clinical_loader is not None:
             self.clinical_iter = cycle(self.clinical_loader)
