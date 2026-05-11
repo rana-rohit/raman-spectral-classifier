@@ -48,7 +48,9 @@ def save_confusion_matrix_figure(
     cm = confusion_matrix(
         targets,
         predictions,
-        labels=np.arange(len(class_labels)),
+        labels=np.unique(
+            np.concatenate([targets, predictions])
+        )
     )
 
     if normalize:
