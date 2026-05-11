@@ -357,6 +357,8 @@ class Trainer:
                         feat_clin = feat_clin[:min_bs]
 
                         coral_term = coral_loss(feat_ref, feat_clin)
+                        if epoch == 1 and total == 0:
+                            print(f"[DEBUG] CORAL LOSS: {coral_term.item():.6f}")
                             
             source_loss = self.loss_fn(outputs1["main_logits"], y)
             if (
@@ -484,7 +486,10 @@ class Trainer:
         avg_domain_loss = total_domain_loss / max(total_domain_samples, 1)
 
         print(f"[Epoch {epoch}] Avg Domain Loss: {avg_domain_loss:.4f}")
-
+        
+        avg_coral = total_coral_loss / max(total, 1)
+        print(f"[Epoch {epoch}] Avg CORAL Loss: {avg_coral:.6f}")
+        
         metrics = compute_metrics(
             torch.cat(source_logits, dim=0),
             torch.cat(source_targets, dim=0),
