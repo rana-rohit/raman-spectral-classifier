@@ -300,36 +300,63 @@ class ModelEvaluator:
 
         # Spectrum-level confusion
 
+        # --------------------------------------------------------
+        # Stage-aware class label restoration
+        # --------------------------------------------------------
+
+        ISOLATE_LABELS = {
+            0: "C. albicans",
+            1: "C. glabrata",
+            2: "K. aerogenes",
+            3: "E. coli 1",
+            4: "E. coli 2",
+            5: "E. faecium",
+            6: "E. faecalis 1",
+            7: "E. faecalis 2",
+            8: "E. cloacae",
+            9: "K. pneumoniae 1",
+            10: "K. pneumoniae 2",
+            11: "P. mirabilis",
+            12: "P. aeruginosa 1",
+            13: "P. aeruginosa 2",
+            14: "MSSA 1",
+            15: "MSSA 3",
+            16: "MRSA 1",
+            17: "MRSA 2",
+            18: "MSSA 2",
+            19: "S. enterica",
+            20: "S. epidermidis",
+            21: "S. lugdunensis",
+            22: "S. marcescens",
+            23: "S. pneumoniae 2",
+            24: "S. pneumoniae 1",
+            25: "S. sanguinis",
+            26: "Group A Strep.",
+            27: "Group B Strep.",
+            28: "Group C Strep.",
+            29: "Group G Strep.",
+        }
+
         TREATMENT_LABELS = {
-            0: "Vancomycin",
-            1: "Ceftriaxone",
-            2: "Penicillin",
-            3: "Daptomycin",
-            4: "Meropenem",
-            5: "Ciprofloxacin",
-            6: "TZP",
+            0: "Meropenem",
+            1: "Ciprofloxacin",
+            2: "TZP",
+            3: "Vancomycin",
+            4: "Ceftriaxone",
+            5: "Penicillin",
+            6: "Daptomycin",
             7: "Caspofungin",
         }
 
+        if self.n_classes == 30:
+            label_map = ISOLATE_LABELS
+        else:
+            label_map = TREATMENT_LABELS
+
         class_labels = [
-            TREATMENT_LABELS.get(int(x), str(x))
+            label_map.get(int(x), str(x))
             for x in present_classes
         ]
-
-        save_confusion_matrix_figure(
-            targets=eval_targets.numpy(),
-            predictions=eval_logits.argmax(dim=-1).numpy(),
-            class_labels=class_labels,
-            save_path=(
-                figure_dir
-                / "spectrum_confusion.png"
-            ),
-            title=(
-                f"{split_name} "
-                "Spectrum-Level Confusion"
-            ),
-            normalize=False,
-        )
 
         save_confusion_matrix_figure(
             targets=eval_targets.numpy(),
@@ -350,21 +377,6 @@ class ModelEvaluator:
         # Group-level confusion
 
         if group_metrics:
-
-            save_confusion_matrix_figure(
-                targets=group_metrics["targets"],
-                predictions=group_metrics["predictions"],
-                class_labels=class_labels,
-                save_path=(
-                    figure_dir
-                    / "group_confusion.png"
-                ),
-                title=(
-                    f"{split_name} "
-                    "Group-Level Confusion"
-                ),
-                normalize=False,
-            )
 
             save_confusion_matrix_figure(
                 targets=group_metrics["targets"],

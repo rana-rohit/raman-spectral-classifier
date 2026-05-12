@@ -145,7 +145,7 @@ def save_confusion_matrix_figure(
         for j in range(cm.shape[1]):
 
             value = (
-                f"{cm[i, j]*100:.1f}%"
+                f"{cm[i, j]*100:.0f}%"
                 if normalize
                 else str(int(cm[i, j]))
             )
