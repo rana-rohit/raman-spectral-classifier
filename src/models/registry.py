@@ -16,7 +16,7 @@ from typing import Any, Dict
 import torch.nn as nn
 
 from src.models.cnn import CNN1D
-from src.models.hybrid import HybridCNNTransformer
+from src.models.hybrid_transformer import HybridCNNTransformer
 from src.models.multitask import MultiHeadSpectralModel
 from src.models.resnet1d import ResNet1D
 from src.models.transformer import SpectralTransformer

@@ -1,22 +1,17 @@
 model:
   name: hybrid
+
   signal_length: 1000
   n_classes: 5
-  handoff_blocks: 2
-  d_model: 256
-  n_heads: 8
-  n_layers: 4
-  d_ff: 512
-  dropout: 0.1
-  attn_dropout: 0.1
+  in_channels: 2
 
-training:
-  lr: 0.0005
-  loss: label_smoothing
-  loss_kwargs:
-    smoothing: 0.1
-  scheduler: warmup_cosine
-  scheduler_cfg:
-    warmup_epochs: 10
-    total_epochs: 100
-    eta_min: 0.000001
+  cnn_channels: [32, 64, 128]
+  cnn_kernel_sizes: [7, 5, 3]
+
+  transformer_dim: 128
+  transformer_heads: 4
+  transformer_layers: 2
+  transformer_dropout: 0.1
+
+  embedding_dim: 128
+  dropout: 0.3
