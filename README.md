@@ -4,17 +4,22 @@ This repository implements a modular, research-grade deep learning pipeline for 
 
 ## Current Architecture
 
-The core pipeline is heavily optimized for both speed and generalization:
+The core pipeline is heavily optimized for both speed and generalization across clinical domains. It features a robust multi-stage transfer learning setup:
 
+- **Multi-Stage Training Pipeline**:
+  - **Stage 1**: Isolate-space pretraining on large reference datasets.
+  - **Stage 2**: Treatment-space semantic alignment and compact transfer-space finetuning.
+  - **Stage 3**: Clinical domain transfer utilizing Domain-Adversarial Neural Networks (DANN) and CORAL loss.
+- **Advanced Deep Architectures**:
+  - `resnet1d`: Deep residual network with depthwise separable convolutions, scaling kernel sizes, and **optional Squeeze-and-Excitation (SE) attention** (configurable via `use_se: true` switch).
+  - `cnn`: Baseline 1D convolutional network.
+  - `hybrid`: Convolutional stem with a transformer encoder.
+  - `transformer`: Attention-based sequence model.
+- **Dynamic Model Registry**: Automatic injection of `signal_length`, `n_classes`, `in_channels` (with derivative-aware channel logic), and `semantic_space` handling.
+- **Multitask Capabilities**: Ontology-aware auxiliary heads mapping sparse clinical IDs for multi-objective transfer learning.
 - **Fast Data Loading**: Direct `.npy` array loading eliminates the I/O bottleneck of per-file CSV reading.
 - **Robust Preprocessing**: Configurable SNV, baseline correction (ALS), Savitzky-Golay smoothing, and standard scaling.
-- **On-the-fly Augmentation**: Gaussian noise, intensity scaling, wavenumber shifting, and baseline drift injection to improve generalization.
-- **Advanced Deep Architectures**:
-  - `resnet1d`: Deep residual network with Squeeze-and-Excitation (SE) attention (typically top-performing).
-  - `cnn`: Enhanced baseline convolutional network with SE-attention.
-  - `hybrid`: Convolutional stem with SE + transformer encoder.
-  - `transformer`: Attention-based sequence model.
-- **Domain Adaptation & Finetuning**: A dedicated finetuning pipeline incorporating Domain-Adversarial Neural Networks (DANN), CORAL loss, and consistency regularization to close the generalization gap between reference and clinical distributions.
+- **On-the-fly Augmentation**: Gaussian noise, intensity scaling, wavenumber shifting, and baseline drift injection.
 - **YAML-driven Configuration**: Complete control over data splits, preprocessing, augmentations, and model architectures via modular YAML files.
 - **FastAPI Inference**: Built-in production-ready REST API for model serving.
 
