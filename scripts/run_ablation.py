@@ -33,7 +33,6 @@ def parse_args():
         "--ablation",
         required=True,
         choices=[
-            "hybrid_handoff",
             "patch_size",
             "augmentation",
             "few_shot",
@@ -211,46 +210,7 @@ def run_single_experiment(
     return results
 
 
-def ablation_hybrid_handoff(
-    base_cfg,
-    exp_root,
-    n_classes,
-    seed,
-):
 
-    print("\n" + "=" * 60)
-    print("  ABLATION: Hybrid handoff_blocks in {1, 2, 3}")
-    print("=" * 60)
-
-    all_results = []
-
-    for n_blocks in [1, 2, 3]:
-
-        import copy
-
-        cfg = copy.deepcopy(base_cfg)
-
-        cfg["model"]["name"] = "hybrid"
-        cfg["model"]["handoff_blocks"] = n_blocks
-
-        exp_dir = os.path.join(exp_root, f"hybrid_handoff_{n_blocks}")
-
-        print(f"\n  Running: handoff_blocks={n_blocks}")
-
-        results = run_single_experiment(
-            cfg,
-            exp_dir,
-            n_classes,
-            seed,
-        )
-
-        results["model"] = f"hybrid_handoff={n_blocks}"
-
-        all_results.append(results)
-
-    _print_ablation_summary(all_results, exp_root, "hybrid_handoff")
-
-    return all_results
 
 
 def ablation_patch_size(
@@ -482,7 +442,7 @@ def main():
         "configs/data/preprocessing.yaml",
         "configs/data/augmentation.yaml",
         "configs/training/base.yaml",
-        "configs/model/hybrid.yaml",
+        "configs/model/resnet1d.yaml",
     )
 
     task_cfg = cfg["task"]
@@ -518,13 +478,7 @@ def main():
 
     os.makedirs(exp_root, exist_ok=True)
 
-    if args.ablation in {"hybrid_handoff", "all"}:
-        ablation_hybrid_handoff(
-            dict(cfg),
-            exp_root,
-            n_classes,
-            args.seed,
-        )
+
 
     if args.ablation in {"patch_size", "all"}:
         ablation_patch_size(
