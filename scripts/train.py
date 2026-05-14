@@ -42,7 +42,7 @@ from pathlib import Path
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train a spectral classifier")
-    p.add_argument("--model", required=True, choices=["cnn", "resnet1d", "transformer", "hybrid"])
+    p.add_argument("--model", required=True, choices=["cnn", "resnet1d", "transformer"])
     p.add_argument("--stage", required=True, choices=["s1_isolate","s2_treatment","s3_transfer"])
     p.add_argument("--exp-name", default=None)
     p.add_argument("--exp-dir", default="experiments")
