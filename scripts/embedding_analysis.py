@@ -36,6 +36,7 @@ from src.data.dataloader import build_all_loaders
 from src.utils.config import load_config
 from src.utils.checkpoint import load_best_model
 from sklearn.preprocessing import StandardScaler
+from metadata.ontology import ISOLATE_TO_TREATMENT
 
 # ============================================================
 # ARGUMENT PARSER
@@ -335,14 +336,39 @@ def main():
         title=f"UMAP - Predicted Labels ({args.split})"
     )
     
-    # TODO:
-    # Add treatment-space visualization:
+    # --------------------------------------------------------
+    # SEMANTIC TREATMENT-SPACE VISUALIZATION
+    # --------------------------------------------------------
+    # Isolate-space (30 classes) vs Treatment-space (8 classes/5 classes)
     #
-    # isolate labels -> treatment labels
+    # Why this visualization is important:
+    # By coloring the exact same embedding geometry with higher-order
+    # treatment semantics, we can visually verify whether treatment 
+    # abstractions emerge naturally during isolate pretraining (Stage 1),
+    # or confirm their structure during transfer learning (Stage 2/3).
     #
-    # This will help determine whether
-    # treatment semantics emerge naturally
-    # in embedding space.
+    # Note: The embeddings themselves are completely unchanged.
+    # Only the semantic interpretation layer (the coloring) differs.
+    
+    print("\nGenerating treatment-label UMAP plot...")
+    if n_classes == 30:
+        treatment_labels = np.array([
+            ISOLATE_TO_TREATMENT[int(lbl)]
+            for lbl in labels
+        ])
+    else:
+        # For Stage 2 (8 classes) or Stage 3 (5 classes), labels are already
+        # treatment-space semantic groups.
+        treatment_labels = labels
+
+    plot_umap(
+        embeddings,
+        treatment_labels,
+        os.path.join(output_dir, "umap_treatment_labels.png"),
+        output_dir,
+        metadata,
+        title=f"UMAP - Treatment Labels ({args.split})"
+    )
     
     print("\nGenerating true-label UMAP plot...")
     plot_umap(
