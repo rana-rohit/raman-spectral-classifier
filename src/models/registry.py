@@ -25,6 +25,7 @@ from src.models.transformer import SpectralTransformer
 MODEL_REGISTRY = {
     "cnn": CNN1D,
     "resnet1d": ResNet1D,
+    "seresnet1d": ResNet1D,
     "transformer": SpectralTransformer,
     "hybrid": HybridCNNTransformer,
 }

@@ -46,6 +46,23 @@ class DepthwiseSeparableConv1D(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.block(x)
 
+class SEBlock1D(nn.Module):
+    def __init__(self, channels: int, reduction: int = 16) -> None:
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channels // reduction, channels, bias=False),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch_size, channels, _ = x.shape
+        y = self.pool(x).view(batch_size, channels)
+        y = self.fc(y).view(batch_size, channels, 1)
+        return x * y
+
 class ResidualBlock1D(nn.Module):
     def __init__(
         self,
@@ -54,8 +71,12 @@ class ResidualBlock1D(nn.Module):
         stride: int = 1,
         kernel_size: int = 3,
         use_depthwise: bool = True,
+        use_se: bool = False,
+        se_reduction: int = 16,
     ) -> None:
         super().__init__()
+        
+        self.use_se = use_se
 
         if use_depthwise:
             self.conv1 = DepthwiseSeparableConv1D(
@@ -99,10 +120,15 @@ class ResidualBlock1D(nn.Module):
             )
         else:
             self.shortcut = nn.Identity()
+            
+        if self.use_se:
+            self.se = SEBlock1D(out_channels, reduction=se_reduction)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
+        if self.use_se:
+            out = self.se(out)
         out = out + self.shortcut(x)
         return self.relu(out)
 
@@ -116,6 +142,8 @@ class ResNet1D(nn.Module):
         stem_kernel: int = 7,
         dropout: float = 0.3,
         in_channels: int = 2,
+        use_se: bool = False,
+        se_reduction: int = 16,
     ) -> None:
         del signal_length
         super().__init__()
@@ -136,6 +164,8 @@ class ResNet1D(nn.Module):
             stride=1,
             kernel_size=7,
             use_depthwise=True,
+            use_se=use_se,
+            se_reduction=se_reduction,
         )
 
         self.stage2 = self._make_stage(
@@ -144,6 +174,8 @@ class ResNet1D(nn.Module):
             stride=2,
             kernel_size=9,
             use_depthwise=True,
+            use_se=use_se,
+            se_reduction=se_reduction,
         )
 
         self.stage3 = self._make_stage(
@@ -152,6 +184,8 @@ class ResNet1D(nn.Module):
             stride=2,
             kernel_size=13,
             use_depthwise=False,
+            use_se=use_se,
+            se_reduction=se_reduction,
         )
 
         self.stage4 = self._make_stage(
@@ -160,6 +194,8 @@ class ResNet1D(nn.Module):
             stride=2,
             kernel_size=17,
             use_depthwise=False,
+            use_se=use_se,
+            se_reduction=se_reduction,
         )
 
         self.gap = nn.AdaptiveAvgPool1d(1)
@@ -185,10 +221,12 @@ class ResNet1D(nn.Module):
         stride: int,
         kernel_size: int,
         use_depthwise: bool,
+        use_se: bool = False,
+        se_reduction: int = 16,
     ) -> nn.Sequential:
-        layers = [ResidualBlock1D(in_ch, out_ch, stride=stride, kernel_size=kernel_size, use_depthwise=use_depthwise)]
+        layers = [ResidualBlock1D(in_ch, out_ch, stride=stride, kernel_size=kernel_size, use_depthwise=use_depthwise, use_se=use_se, se_reduction=se_reduction)]
         for _ in range(n_blocks - 1):
-            layers.append(ResidualBlock1D(out_ch, out_ch, stride=1, kernel_size=kernel_size, use_depthwise=use_depthwise))
+            layers.append(ResidualBlock1D(out_ch, out_ch, stride=1, kernel_size=kernel_size, use_depthwise=use_depthwise, use_se=use_se, se_reduction=se_reduction))
         return nn.Sequential(*layers)
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
@@ -221,7 +259,8 @@ class ResNet1D(nn.Module):
                 nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
-                nn.init.zeros_(module.bias)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def n_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

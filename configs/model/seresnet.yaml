@@ -1,12 +1,12 @@
 model:
-  name: resnet1d
+  name: seresnet1d
   signal_length: 1000
-  n_classes: 5
+  n_classes: 30
   channels: [32, 64, 128, 256]
   n_blocks: [2, 2, 2, 2]
   stem_kernel: 7
   dropout: 0.3
   
-  # Optional Squeeze-and-Excitation (SE) attention
-  use_se: false
+  use_se: true
   se_reduction: 16
+  semantic_space: isolate_space
