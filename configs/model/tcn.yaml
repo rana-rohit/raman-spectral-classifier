@@ -1,0 +1,11 @@
+model:
+  name: tcn
+  signal_length: 1000
+  n_classes: 30
+  channels: [32, 64, 128, 256]
+  kernel_size: 5
+  dilations: [1, 2, 4, 8]
+  dropout: 0.2
+
+  # Semantic space (overridden by stage configs)
+  semantic_space: isolate_space

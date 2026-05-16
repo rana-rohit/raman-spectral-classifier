@@ -18,6 +18,7 @@ import torch.nn as nn
 from src.models.cnn import CNN1D
 from src.models.multitask import MultiHeadSpectralModel
 from src.models.resnet1d import ResNet1D
+from src.models.tcn import TCN1D
 from src.models.transformer import SpectralTransformer
 
 
@@ -25,6 +26,7 @@ MODEL_REGISTRY = {
     "cnn": CNN1D,
     "resnet1d": ResNet1D,
     "seresnet1d": ResNet1D,
+    "tcn": TCN1D,
     "transformer": SpectralTransformer,
 }
 
