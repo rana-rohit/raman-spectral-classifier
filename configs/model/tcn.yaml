@@ -6,6 +6,3 @@ model:
   kernel_size: 5
   dilations: [1, 2, 4]
   dropout: 0.3
-
-  # Semantic space (overridden by stage configs)
-  semantic_space: isolate_space
