@@ -216,6 +216,9 @@ class AugmentationPipeline:
 
     @classmethod
     def from_config(cls, cfg: dict) -> "AugmentationPipeline":
+        if not cfg.get("enabled", True):
+            return cls(steps=[], p=0.0)
+
         steps = []
         for name, step_cfg in cfg.get("steps", {}).items():
             if not step_cfg.get("enabled", True):
