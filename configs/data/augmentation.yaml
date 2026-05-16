@@ -2,7 +2,7 @@
 # Applied only during training. Never at validation or evaluation.
 
 augmentation:
-  enabled: false
+  enabled: true
   apply_probability: 0.25
   seed: 999
   clip_min: -3.0
