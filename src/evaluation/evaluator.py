@@ -134,19 +134,9 @@ class ModelEvaluator:
         # realistic patient-level predictions.
         # --------------------------------------------------------
 
+        from src.utils.logging import SPECTRA_PER_GROUP
         group_metrics = {}
-
-        if split_name == "test":
-            spectra_per_group = 100
-
-        elif split_name == "2018clinical":
-            spectra_per_group = 400
-
-        elif split_name == "2019clinical":
-            spectra_per_group = 100
-
-        else:
-            spectra_per_group = None
+        spectra_per_group = SPECTRA_PER_GROUP.get(split_name)
 
         if spectra_per_group is not None:
 

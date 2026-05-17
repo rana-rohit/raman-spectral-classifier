@@ -12,6 +12,195 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+import numpy as np
+
+
+# ============================================================
+# GROUPED EVALUATION CONFIG
+# ============================================================
+# Spectra-per-group is a property of the dataset acquisition
+# structure. Shared between the evaluator and the provenance
+# reporter so both always agree on grouping boundaries.
+
+SPECTRA_PER_GROUP = {
+    "test": 100,
+    "2018clinical": 400,
+    "2019clinical": 100,
+}
+
+
+def _introspect_loader(loader, split_name: str) -> Dict[str, Any]:
+    """
+    Extract runtime statistics from a DataLoader's underlying dataset.
+
+    Returns a dict with:
+      n_samples, n_classes, class_distribution,
+      spectra_per_group, n_groups.
+    """
+    dataset = loader.dataset
+    info: Dict[str, Any] = {}
+
+    try:
+        info["n_samples"] = len(dataset)
+    except Exception:
+        info["n_samples"] = None
+
+    y = getattr(dataset, "y", None)
+    if y is not None:
+        y_arr = np.asarray(y)
+        unique, counts = np.unique(y_arr, return_counts=True)
+        info["n_classes"] = int(len(unique))
+        info["class_distribution"] = dict(
+            zip(unique.astype(int).tolist(), counts.tolist())
+        )
+    else:
+        info["n_classes"] = None
+        info["class_distribution"] = {}
+
+    spg = SPECTRA_PER_GROUP.get(split_name)
+    info["spectra_per_group"] = spg
+    if spg and info["n_samples"]:
+        info["n_groups"] = info["n_samples"] // spg
+    else:
+        info["n_groups"] = None
+
+    return info
+
+
+def print_split_provenance(
+    loaders: Dict,
+    cfg: Dict[str, Any],
+    context: str = "training",
+) -> None:
+    """
+    Print a dynamic, stage-aware provenance report of all active
+    data splits currently loaded in memory.
+
+    Introspects ACTUAL runtime loader objects — no hardcoded
+    statistics.  Every number shown is derived from live arrays.
+
+    Args:
+        loaders:  The loaders dict returned by build_all_loaders.
+        cfg:      The merged experiment config dict.
+        context:  One of "training", "evaluation", "finetuning".
+    """
+    stage = cfg.get("task", {}).get("stage", "unknown")
+    label_space = cfg.get("task", {}).get("label_space", "unknown")
+
+    stage_map = {
+        "pretrain_30class": ("Stage 1", "Isolate-Space Pretraining"),
+        "pretrain_treatment_8class": ("Stage 2", "Semantic Treatment Transfer"),
+        "transfer_5class": ("Stage 3", "Clinical Transfer / Domain Adaptation"),
+    }
+    stage_num, stage_desc = stage_map.get(stage, ("?", stage))
+
+    space_map = {
+        "isolate_space": "isolate_space (30 reference isolates)",
+        "global_treatment_space": "global_treatment_space (8 empiric treatments)",
+        "sparse_global_treatment_space": "compact_transfer_space (5 clinical treatments)",
+    }
+    space_display = space_map.get(label_space, label_space)
+
+    border = "=" * 60
+
+    print(f"\n{border}")
+    print("ACTIVE DATA SPLITS")
+    print("=" * 18)
+    print()
+
+    # Ordered list of top-level loader keys to report
+    report_order = [
+        "train", "source_val", "finetune",
+        "clinical_train", "clinical_val", "test",
+    ]
+
+    split_cfg = cfg.get("splits", {})
+    role_labels = {
+        "train": "SOURCE (train)",
+        "source_val": "SOURCE (val)",
+        "clinical_train": "OOD (adapt-train)",
+        "clinical_val": "OOD (adapt-val)",
+    }
+
+    # Table header
+    hdr = (
+        f"  {'Split':<18} {'Role':<20} "
+        f"{'Samples':>8} {'Classes':>8} {'Groups':>8} {'Spec/Grp':>9}"
+    )
+    sep = (
+        f"  {'-'*18} {'-'*20} "
+        f"{'-'*8} {'-'*8} {'-'*8} {'-'*9}"
+    )
+    print(hdr)
+    print(sep)
+
+    def _row(name: str, loader) -> None:
+        info = _introspect_loader(loader, name)
+        ns = f"{info['n_samples']:,}" if info["n_samples"] is not None else "?"
+        nc = str(info["n_classes"]) if info["n_classes"] is not None else "?"
+        ng = str(info["n_groups"]) if info["n_groups"] is not None else "--"
+        sg = str(info["spectra_per_group"]) if info["spectra_per_group"] else "--"
+
+        if name in role_labels:
+            role = role_labels[name]
+        elif name in split_cfg:
+            role = split_cfg[name].get("role", "unknown").upper()
+        else:
+            role = "OOD_EVAL"
+
+        print(f"  {name:<18} {role:<20} {ns:>8} {nc:>8} {ng:>8} {sg:>9}")
+
+    for name in report_order:
+        if name in loaders and name != "val":
+            _row(name, loaders[name])
+
+    ood = loaders.get("ood", {})
+    if isinstance(ood, dict):
+        for ood_name, ood_loader in ood.items():
+            _row(ood_name, ood_loader)
+
+    # -- Label space --
+    print()
+    print(f"  {stage_num}: {stage_desc}")
+    print(f"  Semantic Space: {space_display}")
+
+    # -- Clinical mapping (Stage 3) --
+    clinical_ids = cfg.get("task", {}).get("clinical_sparse_global_ids", [])
+    if clinical_ids:
+        try:
+            from metadata.ontology import GLOBAL_TREATMENTS, COMPACT_LABEL_MAP
+            print()
+            print("  Compact Label Mapping:")
+            for gid in sorted(int(g) for g in clinical_ids):
+                compact = COMPACT_LABEL_MAP.get(gid, "?")
+                treatment = GLOBAL_TREATMENTS.get(gid, "?")
+                print(f"    Global {gid} ({treatment}) -> Compact {compact}")
+        except ImportError:
+            pass
+
+    # -- Grouping details --
+    grouped = []
+    all_names = [n for n in report_order if n in loaders] + list(
+        ood.keys() if isinstance(ood, dict) else []
+    )
+    for name in all_names:
+        spg = SPECTRA_PER_GROUP.get(name)
+        if spg is None:
+            continue
+        ldr = ood.get(name) if name in (ood if isinstance(ood, dict) else {}) else loaders.get(name)
+        if ldr is not None:
+            ns = len(ldr.dataset)
+            grouped.append((name, spg, ns // spg))
+
+    if grouped:
+        print()
+        print("  Grouped Evaluation:")
+        for name, spg, ng in grouped:
+            entity = "patient" if "clinical" in name else "isolate/replicate"
+            print(f"    {name}: {spg} spectra per {entity} -> {ng} groups")
+
+    print(f"\n{border}\n")
+
 
 def print_stage_header(stage: str, task_name: str = "") -> None:
     """
