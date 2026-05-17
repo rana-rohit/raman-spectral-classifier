@@ -2,7 +2,7 @@ model:
   name: tcn
   signal_length: 1000
   n_classes: 30
-  channels: [32, 64, 128, 256]
+  channels: [32, 64, 128, 128]
   kernel_size: 5
   dilations: [1, 2, 4]
   dropout: 0.3
