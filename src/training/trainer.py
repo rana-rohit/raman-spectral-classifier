@@ -118,7 +118,7 @@ class Trainer:
         # derived from sparse clinical IDs:
         # [0,2,3,5,6]
         # --------------------------------------------------------
-        if stage == "transfer_5class":
+        if stage == "transfer_5class" and len(clinical_sparse_ids) > 0:
             assert self.n_classes == len(clinical_sparse_ids), (
 
                 "transfer_5class requires "

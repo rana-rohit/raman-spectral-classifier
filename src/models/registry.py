@@ -63,7 +63,7 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
     # derived from sparse clinical IDs:
     # [0,2,3,5,6]
     # --------------------------------------------------------
-    if stage == "transfer_5class":
+    if stage == "transfer_5class" and len(clinical_sparse_ids) > 0:
         assert n_classes == len(clinical_sparse_ids), (
             "transfer_5class requires "
             "n_classes == number of "
@@ -117,6 +117,8 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
     # supervise auxiliary transfer objectives.
     # --------------------------------------------------------
     aux_cfg = cfg.get("multitask", {}).get("auxiliary_clinical_head", {})
+    if not aux_cfg or not aux_cfg.get("enabled", False):
+        aux_cfg = cfg.get("multitask", {}).get("auxiliary_shared_head", {})
     if aux_cfg.get("enabled", False):
         clinical_sparse_ids_aux = aux_cfg.get(
             "classes",
