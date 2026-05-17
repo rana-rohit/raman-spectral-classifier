@@ -105,7 +105,7 @@ class SupConLoss(nn.Module):
     Supervised Contrastive Loss
 
     Expected input:
-        features: (B, V, D)
+        features: (B, V, D) or (B, D)
             B = batch size
             V = number of views
             D = embedding dimension
@@ -128,6 +128,10 @@ class SupConLoss(nn.Module):
 
         device = features.device
 
+        # If features is (B, D), treat V as 1
+        if len(features.shape) == 2:
+            features = features.unsqueeze(1)
+
         B, V, D = features.shape
 
         features = F.normalize(features, dim=-1)
@@ -148,11 +152,14 @@ class SupConLoss(nn.Module):
         log_prob = sim_matrix - torch.log(
             exp_logits.sum(dim=1, keepdim=True) + 1e-8
         )
-        mean_log_prob_pos = (
-            (mask * log_prob).sum(dim=1)
-            / mask.sum(dim=1).clamp_min(1e-8)
-        )
-
+        
+        # Only compute average over samples that have at least one positive pair in the batch
+        mask_pos_count = mask.sum(dim=1)
+        pos_mask = mask_pos_count > 0
+        if pos_mask.sum() == 0:
+            return features.new_tensor(0.0, requires_grad=True)
+            
+        mean_log_prob_pos = (mask * log_prob).sum(dim=1)[pos_mask] / mask_pos_count[pos_mask]
         loss = -mean_log_prob_pos.mean()
 
         return loss

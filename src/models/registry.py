@@ -99,6 +99,8 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
 
     non_constructor_keys = {
         "semantic_space",
+        "contrastive",
+        "projection_dim",
     }
 
     for key in non_constructor_keys:
@@ -132,6 +134,29 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
             shared_class_ids=clinical_sparse_ids_aux,
             aux_dropout=aux_cfg.get("dropout", 0.0),
         )
+
+    # --------------------------------------------------------
+    # Optional contrastive projection head
+    # --------------------------------------------------------
+    if model_cfg.get("contrastive", False):
+        projection_dim = int(model_cfg.get("projection_dim", 128))
+        model.projection_head = nn.Sequential(
+            nn.Linear(model.embedding_dim, model.embedding_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(model.embedding_dim, projection_dim),
+        )
+        model.contrastive = True
+        
+        orig_forward = model.forward
+        def contrastive_forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+            out = orig_forward(x)
+            features = out["features"]
+            proj = self.projection_head(features)
+            out["projection_features"] = nn.functional.normalize(proj, p=2, dim=-1)
+            return out
+            
+        import types
+        model.forward = types.MethodType(contrastive_forward, model)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Model: {name} | Parameters: {n_params:,}")

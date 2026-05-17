@@ -499,10 +499,16 @@ class ExperimentLogger:
         if split == "train":
             coral_loss = metrics.get("coral_loss", 0.0)
             domain_loss = metrics.get("domain_loss", 0.0)
+            contrastive_loss = metrics.get("contrastive_loss", 0.0)
+            classification_loss = metrics.get("classification_loss", 0.0)
             if coral_loss > 0:
                 extra += f"  coral_loss={coral_loss:.4f}"
             if domain_loss > 0:
                 extra += f"  domain_loss={domain_loss:.4f}"
+            if contrastive_loss > 0:
+                extra += f"  contrastive_loss={contrastive_loss:.4f}"
+            if classification_loss > 0:
+                extra += f"  classification_loss={classification_loss:.4f}"
 
         print(f"  Ep {epoch:>3d} | {split:<12} | "
               f"loss={loss:.4f}  {acc_name}={acc:.4f}  {f1_name}={f1:.4f}{extra}")

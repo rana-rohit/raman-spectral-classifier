@@ -227,3 +227,80 @@ def test_registry_wraps_model_with_auxiliary_shared_head():
     assert isinstance(model, MultiHeadSpectralModel)
     assert outputs["main_logits"].shape == (2, 5)
     assert outputs["aux_logits"].shape == (2, 5)
+
+
+def test_contrastive_projection_head_and_hybrid_trainer():
+    # 1. Test model registration with contrastive enabled
+    cfg = {
+        "model": {
+            "name": "cnn",
+            "signal_length": 32,
+            "n_classes": 3,
+            "channels": [8, 16, 32, 64],
+            "kernel_sizes": [3, 3, 3, 3],
+            "dropout": 0.1,
+            "contrastive": True,
+            "projection_dim": 128,
+        },
+        "task": {
+            "stage": "pretrain_30class",
+            "name": "isolate_pretraining",
+            "label_space": "isolate_space",
+        },
+        "training": {
+            "max_epochs": 1,
+            "lr": 1e-3,
+            "weight_decay": 0.0,
+            "loss": "cross_entropy",
+            "loss_kwargs": {},
+            "scheduler": "cosine",
+            "scheduler_cfg": {"T_max": 1, "eta_min": 1e-6},
+            "early_stopping_patience": 2,
+            "monitor_metric": "accuracy",
+            "contrastive_weight": 0.7,
+            "classification_weight": 0.3,
+            "temperature": 0.07,
+        },
+    }
+
+    model = get_model("cnn", cfg)
+    assert model.contrastive is True
+    assert hasattr(model, "projection_head")
+    
+    # Check tensor shapes
+    x = torch.randn(4, 1, 32)
+    outputs = model(x)
+    assert "main_logits" in outputs
+    assert "features" in outputs
+    assert "projection_features" in outputs
+    
+    assert outputs["main_logits"].shape == (4, 3)
+    assert outputs["features"].shape == (4, 64)  # last channel size
+    assert outputs["projection_features"].shape == (4, 128)
+    
+    # Test L2 Normalization in projection head
+    norm = torch.linalg.norm(outputs["projection_features"], dim=-1)
+    assert torch.allclose(norm, torch.ones_like(norm), atol=1e-5)
+
+    # 2. Test hybrid trainer functionality
+    tmp_path = _workspace_tmp_dir()
+    trainer = build_trainer(
+        model=model,
+        loaders=_tiny_loaders(),
+        cfg=cfg,
+        exp_dir=str(tmp_path),
+        n_classes=3,
+    )
+    assert trainer.contrastive_learning_enabled is True
+    assert trainer.contrastive_weight == 0.7
+    assert trainer.classification_weight == 0.3
+    assert trainer.supcon_temp == 0.07
+    
+    metrics = trainer.fit()
+    assert "train_metrics" in metrics
+    train_metrics = metrics["train_metrics"]
+    assert "loss" in train_metrics
+    assert "contrastive_loss" in train_metrics
+    assert "classification_loss" in train_metrics
+    assert train_metrics["contrastive_loss"] >= 0
+    assert train_metrics["classification_loss"] >= 0

@@ -197,6 +197,18 @@ class Trainer:
         )
         self.supervised_on_both_views = self.consistency_cfg.get("supervised_on_both_views", True)
 
+        # Supervised Contrastive hybrid training configuration
+        self.contrastive_learning_enabled = cfg.get("model", {}).get("contrastive", False)
+        if self.contrastive_learning_enabled:
+            self.contrastive_weight = self.train_cfg.get("contrastive_weight", 0.7)
+            self.classification_weight = self.train_cfg.get("classification_weight", 0.3)
+            self.supcon_temp = self.train_cfg.get("temperature", 0.07)
+            self.supcon_loss_fn = SupConLoss(temperature=self.supcon_temp)
+            print(f"[SupCon] Enabled contrastive hybrid training. "
+                  f"alpha (contrastive)={self.contrastive_weight}, "
+                  f"beta (classification)={self.classification_weight}, "
+                  f"temp={self.supcon_temp}")
+
         self.l2sp = None
         l2sp_cfg = self.train_cfg.get("l2sp", {})
         if l2sp_cfg.get("enabled", False) and reference_state is not None:
@@ -325,6 +337,8 @@ class Trainer:
         total_coral_loss = 0.0
         total_domain_loss = 0.0
         total_domain_samples = 0
+        total_contrastive_loss = 0.0
+        total_classification_loss = 0.0
         total = 0
         t0 = time.time()
         source_logits, source_targets = [], []
@@ -383,6 +397,18 @@ class Trainer:
                 ) / (1.0 + self.target_supervised_weight)
             else:
                 main_loss = source_loss
+
+            # Contrastive hybrid training objective
+            contrastive_loss_term = self._zero_loss()
+            classification_loss_term = main_loss
+            if self.contrastive_learning_enabled:
+                proj_feats = outputs1.get("projection_features")
+                if proj_feats is not None:
+                    contrastive_loss_term = self.supcon_loss_fn(proj_feats, y)
+                main_loss = (
+                    self.contrastive_weight * contrastive_loss_term
+                    + self.classification_weight * classification_loss_term
+                )
             
             if outputs_clin is not None and self.target_supervised_enabled:
                 aux_loss = self._compute_aux_loss(outputs_clin, y_clin)
@@ -483,6 +509,9 @@ class Trainer:
             total_consistency_loss += consistency_term.item() * batch_size
             total_supcon_loss += supcon_term.item() * batch_size
             total_l2sp_loss += l2sp_term.item() * batch_size
+            if self.contrastive_learning_enabled:
+                total_contrastive_loss += contrastive_loss_term.item() * batch_size
+                total_classification_loss += classification_loss_term.item() * batch_size
             total_coral_loss += coral_term.item() * batch_size
             total += batch_size
             source_logits.append(outputs1["main_logits"].detach().cpu())
@@ -527,6 +556,11 @@ class Trainer:
                 "epoch_time": time.time() - t0,
             }
         )
+        if self.contrastive_learning_enabled:
+            metrics.update({
+                "contrastive_loss": total_contrastive_loss / total,
+                "classification_loss": total_classification_loss / total,
+            })
         return metrics
 
     @torch.no_grad()
@@ -568,11 +602,14 @@ class Trainer:
                 "features": None,
             }
         if isinstance(outputs, dict):
-            return {
+            res = {
                 "main_logits": outputs["main_logits"],
                 "aux_logits": outputs.get("aux_logits"),
                 "features": outputs.get("features"),
             }
+            if "projection_features" in outputs:
+                res["projection_features"] = outputs["projection_features"]
+            return res
         raise TypeError(f"Unsupported model output type: {type(outputs)!r}")
 
     def _parse_batch(self, batch, augment=True):
