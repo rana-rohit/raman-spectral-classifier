@@ -90,18 +90,9 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
             "5 sparse clinical treatment IDs"
         )
 
-    print("\n==================================================")
-    print(" EVALUATION TASK")
-    print("==================================================")
-    print(f"Task Name    : {task_cfg['name']}")
-    print(f"Stage        : {stage}")
-    print(f"Label Space  : {label_space}")
-    print(f"Num Classes  : {n_classes}")
-
-    if len(clinical_sparse_ids) > 0:
-        print(f"Clinical IDs : {clinical_sparse_ids}")
-
-    print("==================================================")
+    from src.utils.logging import print_stage_header, print_label_space_info
+    print_stage_header(stage, task_cfg['name'])
+    print_label_space_info(label_space, clinical_sparse_ids)
     
     # Fit preprocessor on FULL reference set (matches pretrained backbone)
     X_ref, _ = registry.get_arrays("reference")
@@ -149,7 +140,6 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
     model_name = cfg.get("model", {}).get("name", "unknown")
     model = get_model(model_name, dict(cfg))
 
-    print(f"\nLoading best checkpoint from {exp_dir}...")
     checkpoint = load_best_model(exp_dir, model)
     checkpoint_cfg = checkpoint.get("config", {})
 
@@ -191,8 +181,6 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
         f"{cfg['model']['semantic_space']}\n"
         f"Found: {checkpoint_model_space}"
     )
-    
-    print(f"  Checkpoint epoch: {checkpoint.get('epoch', '?')}")
 
     cfg = dict(cfg)
     cfg["experiment"] = {
@@ -211,7 +199,8 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
     eval_path = os.path.join(exp_dir, f"{stage}_eval_results.json")
     evaluator.save(eval_path)
 
-    print(f"\nSaved evaluation results to:\n  {eval_path}")
+    from src.utils.logging import print_output_paths
+    print_output_paths({"Evaluation Results JSON": eval_path})
     return results
 
 

@@ -101,8 +101,6 @@ class ModelEvaluator:
                 "results"
             )
         )
-        
-        print("EVALUATOR OUTPUT DIR:", self.output_dir)
 
     @torch.no_grad()
     def evaluate_split(
@@ -191,13 +189,6 @@ class ModelEvaluator:
                 group_name = "isolate"
             else:
                 group_name = "patient"
-
-            print(
-                f"    {group_name}_acc="
-                f"{group_results['accuracy']:.4f}  "
-                f"{group_name}_f1="
-                f"{group_results['f1_macro']:.4f}"
-            )
 
         cm, present_classes = compute_confusion_matrix(eval_logits, eval_targets, n_classes)
         inverse_class_map = getattr(loader.dataset, "inverse_class_map", {})
@@ -416,21 +407,49 @@ class ModelEvaluator:
         loaders: Dict,
         source_test_key: str = "test",
     ) -> Dict:
-        print(f"\n  [{self.model_name}] Evaluating {source_test_key}...")
+        print(f"  [{self.model_name}] Evaluating split: {source_test_key}...")
         test_metrics = self.evaluate_split(loaders[source_test_key], source_test_key)
-        print(f"    acc={test_metrics['accuracy']:.4f}  f1={test_metrics['f1_macro']:.4f}")
 
         for ood_name, ood_loader in loaders.get("ood", {}).items():
-            print(f"  [{self.model_name}] Evaluating {ood_name}...")
+            print(f"  [{self.model_name}] Evaluating split: {ood_name}...")
             ood_metrics = self.evaluate_split(ood_loader, ood_name)
             gap = compute_transfer_gap(test_metrics, ood_metrics)
             self.results["splits"][ood_name]["transfer_gap"] = gap
-            print(
-                f"    acc={ood_metrics['accuracy']:.4f}  "
-                f"f1={ood_metrics['f1_macro']:.4f}  gap={gap:+.4f}"
-            )
 
         self.results["summary"] = self._build_summary(source_test_key)
+
+        # Call the centralized print_evaluation_summary for highly structured reporting
+        from src.utils.logging import print_evaluation_summary
+        stage = self.cfg.get("task", {}).get("stage", "transfer_5class")
+        label_space = self.cfg.get("task", {}).get("label_space", "")
+        clinical_sparse_ids = self.cfg.get("task", {}).get("clinical_sparse_global_ids", [])
+        
+        output_files = {}
+        for sname, sdata in self.results["splits"].items():
+            cf_dir = self.output_dir / "confusion_matrices" / sname
+            output_files[f"Confusion Matrix ({sname})"] = str(cf_dir / "spectrum_confusion_normalized.png")
+            if sdata.get("group_metrics"):
+                output_files[f"Group Confusion Matrix ({sname})"] = str(cf_dir / "group_confusion_normalized.png")
+                
+        checkpoint_path = None
+        save_dir = self.cfg.get("experiment", {}).get("save_dir") or str(self.output_dir)
+        try:
+            from src.utils.checkpoint import resolve_best_checkpoint_path
+            checkpoint_path = resolve_best_checkpoint_path(save_dir)
+        except Exception:
+            pass
+            
+        print_evaluation_summary(
+            stage=stage,
+            model_name=self.model_name,
+            model_cfg=self.cfg.get("model", {}),
+            label_space=label_space,
+            clinical_sparse_ids=clinical_sparse_ids,
+            checkpoint_path=checkpoint_path,
+            split_metrics=self.results["splits"],
+            output_files=output_files
+        )
+
         return self.results
 
     @staticmethod

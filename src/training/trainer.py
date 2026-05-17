@@ -462,8 +462,6 @@ class Trainer:
 
                     domain_loss = nn.CrossEntropyLoss()(domain_logits, domain_labels)
                     
-                    if epoch == 1 and len(source_logits) == 0:
-                        print(f"DOMAIN LOSS SAMPLE: {domain_loss.item():.4f}")
 
                     domain_batch_size = domain_labels.size(0)
 
@@ -494,11 +492,7 @@ class Trainer:
                 target_targets.append(y_clin.detach().cpu())
         
         avg_domain_loss = total_domain_loss / max(total_domain_samples, 1)
-
-        print(f"[Epoch {epoch}] Avg Domain Loss: {avg_domain_loss:.4f}")
-        
         avg_coral = total_coral_loss / max(total, 1)
-        print(f"[Epoch {epoch}] Avg CORAL Loss: {avg_coral:.6f}")
         
         metrics = compute_metrics(
             torch.cat(source_logits, dim=0),

@@ -161,24 +161,9 @@ def main():
             "in compact_transfer_space"
         )
 
-    print("\n==================================================")
-    print(f" Active Task   : {task_name}")
-    print(f" Label Space   : {label_space}")
-    
-    if len(clinical_sparse_ids) > 0:
-        print(
-            f" Clinical IDs  : "
-            f"{clinical_sparse_ids}"
-        )
-
-    else:
-
-        print(
-            f" Semantic Space: "
-            f"{label_space}"
-        )
-
-    print("==================================================")
+    from src.utils.logging import print_stage_header, print_label_space_info
+    print_stage_header(stage, task_name)
+    print_label_space_info(label_space, clinical_sparse_ids)
 
     exp_name = args.exp_name or f"{args.model}_{time.strftime('%Y%m%d_%H%M%S')}"
     exp_dir = os.path.join(args.exp_dir, exp_name)
@@ -286,21 +271,15 @@ def main():
                 "Stage-3 must load a Stage-2 treatment checkpoint"
             )
 
-        print(
-            f"  Loaded pretrained checkpoint "
-            f"(epoch {checkpoint.get('epoch', '?')})"
+        from src.utils.logging import print_checkpoint_info
+        print_checkpoint_info(
+            pretrained_ckpt,
+            loaded=True,
+            details={"epoch": checkpoint.get("epoch", "?")}
         )
 
-    model_summary(model) 
-    
-    print("\n==================================================")
-    print(" TRAINING TASK SUMMARY")
-    print("==================================================")
-
-    print(f"Ontology Ver. : {ONTOLOGY_VERSION}")
-    print(f"Task Name      : {task_name}")
-    print(f"Num Classes    : {n_classes}")
-    print(f"Label Space    : {label_space}")
+    from src.utils.logging import print_model_summary
+    print_model_summary(args.model, cfg["model"])
 
     print("\n[3/4] Training...")
     trainer = build_trainer(

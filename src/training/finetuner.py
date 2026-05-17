@@ -43,7 +43,6 @@ def finetune(
     freeze_epochs: int = 0,
     n_classes: int = None,
 ) -> Dict:
-    print(f"\n  Loading pretrained weights from {pretrained_exp_dir}")
     stage = cfg.get(
         "task",
         {},
@@ -66,16 +65,25 @@ def finetune(
     checkpoint = load_best_model(pretrained_exp_dir, model)
     monitor_metric = checkpoint["metrics"].get("monitor_metric", "metric")
     monitor_value = checkpoint["metrics"].get("monitor_value", float("nan"))
-    print(f"  Pretrained {monitor_metric}: {monitor_value:.4f}")
+
+    from src.utils.logging import print_checkpoint_info
+    print_checkpoint_info(
+        pretrained_exp_dir,
+        loaded=True,
+        details={
+            "monitor_metric": monitor_metric,
+            "monitor_value": f"{monitor_value:.4f}"
+        }
+    )
 
     reference_state = {
         name: param.detach().cpu().clone()
         for name, param in model.named_parameters()
     }
     
-    print("Finetune using clinical domain:")
-    print("Train samples:", len(loaders["clinical_train"].dataset))
-    print("Val samples:", len(loaders["clinical_val"].dataset))
+    print("[Finetune Phase] Adapting model to clinical domain...")
+    print(f"  Train samples: {len(loaders['clinical_train'].dataset):,}")
+    print(f"  Val samples:   {len(loaders['clinical_val'].dataset):,}")
     
     # Only reset the classifier head if the number of classes has changed;
     # preserves the pretrained class-feature mapping when possible.
@@ -87,7 +95,7 @@ def finetune(
             "n_classes",
             5,
         )
-        print(f"  Detected {n_classes} clinical classes")
+        print(f"  * Detected {n_classes} clinical classes")
         if n_classes != 5:
             raise AssertionError(
                 "Clinical transfer finetuning must "
@@ -114,9 +122,9 @@ def finetune(
     # --------------------------------------------------------
     if n_classes != current_out:
         model.classifier[-1] = nn.Linear(in_features, n_classes)
-        print(f"  Classifier head reset to {n_classes} classes (clinical)")
+        print(f"  * Classifier head reset to {n_classes} classes (clinical)")
     else:
-        print(f"  Keeping pretrained classifier head ({n_classes} classes)")
+        print(f"  * Keeping pretrained classifier head ({n_classes} classes)")
 
     # --------------------------------------------------------
     # Fine-tuning validation protocol
@@ -139,7 +147,7 @@ def finetune(
     total_epochs = ft_cfg["training"]["max_epochs"]
 
     if freeze_epochs > 0:
-        print(f"  Stem frozen for first {freeze_epochs} epochs")
+        print(f"  * Stem frozen for first {freeze_epochs} epochs")
         _freeze_stem(model)
         frozen_cfg = _phase_cfg(ft_cfg, max_epochs=freeze_epochs)
         frozen_dir = os.path.join(exp_dir, "phase1_frozen")
@@ -161,7 +169,7 @@ def finetune(
     best_metrics = {}
     if remaining_epochs > 0:
         _unfreeze_all(model)
-        print("  Stem unfrozen - continuing full fine-tuning")
+        print("  * Stem unfrozen - continuing full fine-tuning")
         full_lr = ft_cfg["training"]["lr"] * (0.1 if freeze_epochs > 0 else 1.0)
         full_cfg = _phase_cfg(ft_cfg, max_epochs=remaining_epochs, lr=full_lr)
         full_dir = os.path.join(exp_dir, "phase2_full")
