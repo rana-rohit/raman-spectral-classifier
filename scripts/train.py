@@ -212,23 +212,8 @@ def main():
         n_classes=n_classes,
     )
 
-    print(f"  Train:        {len(loaders['train'].dataset):,} samples")
-    print(f"  Source val:   {len(loaders['source_val'].dataset):,} samples")
-    
-    if len(clinical_sparse_ids) > 0:
-        print("\n  Sparse Global Treatment IDs")
-
-        for label_id in clinical_sparse_ids:
-
-            clinical_info = CLINICAL_LABELS[int(label_id)]
-
-            print(
-                f"    {label_id} "
-                f"-> {clinical_info['global_treatment']}"
-            )
-
-    if "clinical_val" in loaders:
-        print(f"  Clinical val: {len(loaders['clinical_val'].dataset):,} samples")
+    from src.utils.logging import print_split_provenance
+    print_split_provenance(loaders, cfg, context="training")
 
     print("\n[2/4] Building model...")
     model = get_model(args.model, cfg)

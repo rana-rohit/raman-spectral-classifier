@@ -81,9 +81,8 @@ def finetune(
         for name, param in model.named_parameters()
     }
     
-    print("[Finetune Phase] Adapting model to clinical domain...")
-    print(f"  Train samples: {len(loaders['clinical_train'].dataset):,}")
-    print(f"  Val samples:   {len(loaders['clinical_val'].dataset):,}")
+    from src.utils.logging import print_split_provenance
+    print_split_provenance(loaders, cfg, context="finetuning")
     
     # Only reset the classifier head if the number of classes has changed;
     # preserves the pretrained class-feature mapping when possible.

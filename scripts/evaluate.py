@@ -118,14 +118,8 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
         .get("consistency", {})
     )
 
-    loaders = build_all_loaders(
-        registry,
-        preprocessor,
-        augmentation,
-        cfg,
-        clinical_sparse_ids=clinical_sparse_ids,
-        n_classes=n_classes,
-    )
+    from src.utils.logging import print_split_provenance
+    print_split_provenance(loaders, cfg, context="evaluation")
     return loaders, n_classes
 
 
