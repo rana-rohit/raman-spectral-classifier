@@ -494,32 +494,52 @@ class ExperimentLogger:
             acc_name = "acc"
             f1_name = "f1"
             
-        extra = ""
-        # Incorporate domain adaptation metrics directly into row to avoid fragmented prints
-        if split == "train":
+        # Determine logging configurations
+        verbose_losses = self.config.get("logging", {}).get("verbose_losses", False)
+        contrastive_enabled = self.config.get("model", {}).get("contrastive", False)
+
+        # 1. Print Metric Row: Primary Performance Metrics Visually Dominate
+        print(f"  Ep {epoch:>3d} | {split:<12} | {acc_name}={acc:.4f}  {f1_name}={f1:.4f}")
+
+        # 2. Print Loss Row: Secondary, Compact, and Visually Grouped
+        if verbose_losses:
+            # Verbose Mode: print decomposition of losses
+            parts = [f"total={loss:.4f}"]
+            if contrastive_enabled:
+                contrastive_loss = metrics.get("contrastive_loss", 0.0)
+                classification_loss = metrics.get("classification_loss", 0.0)
+                if classification_loss > 0:
+                    parts.append(f"ce={classification_loss:.4f}")
+                if contrastive_loss > 0:
+                    parts.append(f"supcon={contrastive_loss:.4f}")
+            else:
+                main_loss = metrics.get("main_loss", 0.0)
+                source_loss = metrics.get("source_loss", 0.0)
+                if main_loss > 0 and abs(main_loss - loss) > 1e-4:
+                    parts.append(f"main={main_loss:.4f}")
+                if source_loss > 0 and abs(source_loss - loss) > 1e-4:
+                    parts.append(f"source={source_loss:.4f}")
+
+            # Include any domain adaptation or aux losses if active
             coral_loss = metrics.get("coral_loss", 0.0)
             domain_loss = metrics.get("domain_loss", 0.0)
-            contrastive_loss = metrics.get("contrastive_loss", 0.0)
-            classification_loss = metrics.get("classification_loss", 0.0)
-            if coral_loss > 0:
-                extra += f"  coral_loss={coral_loss:.4f}"
-            if domain_loss > 0:
-                extra += f"  domain_loss={domain_loss:.4f}"
-            if contrastive_loss > 0:
-                extra += f"  contrastive_loss={contrastive_loss:.4f}"
-            if classification_loss > 0:
-                extra += f"  classification_loss={classification_loss:.4f}"
+            aux_loss = metrics.get("aux_loss", 0.0)
+            consistency_loss = metrics.get("consistency_loss", 0.0)
 
-        contrastive_enabled = self.config.get("model", {}).get("contrastive", False)
-        if contrastive_enabled and split == "train":
-            contrastive_loss = metrics.get("contrastive_loss", 0.0)
-            classification_loss = metrics.get("classification_loss", 0.0)
-            print(f"  Ep {epoch:>3d} | {split:<12} | "
-                  f"total_loss={loss:.4f}  contrastive_loss={contrastive_loss:.4f}  "
-                  f"classification_loss={classification_loss:.4f}  {acc_name}={acc:.4f}  {f1_name}={f1:.4f}")
+            if coral_loss > 0:
+                parts.append(f"coral={coral_loss:.4f}")
+            if domain_loss > 0:
+                parts.append(f"domain={domain_loss:.4f}")
+            if aux_loss > 0:
+                parts.append(f"aux={aux_loss:.4f}")
+            if consistency_loss > 0:
+                parts.append(f"consistency={consistency_loss:.4f}")
+
+            loss_str = " | ".join(parts)
+            print(f"           [loss: {loss_str}]")
         else:
-            print(f"  Ep {epoch:>3d} | {split:<12} | "
-                  f"loss={loss:.4f}  {acc_name}={acc:.4f}  {f1_name}={f1:.4f}{extra}")
+            # Compact Mode: Only total loss is shown
+            print(f"           [loss: total={loss:.4f}]")
 
     def _flush(self) -> None:
         with open(self.exp_dir / "metrics.json", "w") as f:

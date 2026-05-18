@@ -88,3 +88,6 @@ pretraining:
     enabled: true
     semantic_space: compact_transfer_space
     n_classes: 5
+
+logging:
+  verbose_losses: false
