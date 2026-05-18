@@ -242,6 +242,16 @@ def test_contrastive_projection_head_and_hybrid_trainer():
             "contrastive": True,
             "projection_dim": 128,
         },
+        "augmentation": {
+            "enabled": True,
+            "apply_probability": 1.0,
+            "steps": {
+                "gaussian_noise": {
+                    "enabled": True,
+                    "max_std": 0.5,
+                }
+            }
+        },
         "task": {
             "stage": "pretrain_30class",
             "name": "isolate_pretraining",
@@ -295,6 +305,17 @@ def test_contrastive_projection_head_and_hybrid_trainer():
     assert trainer.contrastive_weight == 0.7
     assert trainer.classification_weight == 0.3
     assert trainer.supcon_temp == 0.07
+    
+    # Verify x1 and x2 views are generated and are different
+    loader = trainer.loaders["train"]
+    batch = next(iter(loader))
+    x1, x2, y_batch = trainer._parse_batch(batch)
+    assert x1 is not None
+    assert x2 is not None
+    assert x1.shape == (4, 1, 16)
+    assert x2.shape == (4, 1, 16)
+    # Since augmentations add random noise, x1 and x2 must not be identical
+    assert not torch.allclose(x1, x2)
     
     metrics = trainer.fit()
     assert "train_metrics" in metrics
