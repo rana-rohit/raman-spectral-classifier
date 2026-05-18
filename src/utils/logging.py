@@ -510,8 +510,16 @@ class ExperimentLogger:
             if classification_loss > 0:
                 extra += f"  classification_loss={classification_loss:.4f}"
 
-        print(f"  Ep {epoch:>3d} | {split:<12} | "
-              f"loss={loss:.4f}  {acc_name}={acc:.4f}  {f1_name}={f1:.4f}{extra}")
+        contrastive_enabled = self.config.get("model", {}).get("contrastive", False)
+        if contrastive_enabled and split == "train":
+            contrastive_loss = metrics.get("contrastive_loss", 0.0)
+            classification_loss = metrics.get("classification_loss", 0.0)
+            print(f"  Ep {epoch:>3d} | {split:<12} | "
+                  f"total_loss={loss:.4f}  contrastive_loss={contrastive_loss:.4f}  "
+                  f"classification_loss={classification_loss:.4f}  {acc_name}={acc:.4f}  {f1_name}={f1:.4f}")
+        else:
+            print(f"  Ep {epoch:>3d} | {split:<12} | "
+                  f"loss={loss:.4f}  {acc_name}={acc:.4f}  {f1_name}={f1:.4f}{extra}")
 
     def _flush(self) -> None:
         with open(self.exp_dir / "metrics.json", "w") as f:

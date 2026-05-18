@@ -204,10 +204,23 @@ class Trainer:
             self.classification_weight = self.train_cfg.get("classification_weight", 0.3)
             self.supcon_temp = self.train_cfg.get("temperature", 0.07)
             self.supcon_loss_fn = SupConLoss(temperature=self.supcon_temp)
-            print(f"[SupCon] Enabled contrastive hybrid training. "
-                  f"alpha (contrastive)={self.contrastive_weight}, "
-                  f"beta (classification)={self.classification_weight}, "
-                  f"temp={self.supcon_temp}")
+            
+            p_dim = cfg.get("model", {}).get("projection_dim", 128)
+            print("\n============================================================")
+            print("CONTRASTIVE TRAINING STATUS")
+            print("===========================")
+            print(f"SupCon Enabled:        True")
+            print(f"Multi-View Mode:       True")
+            print(f"Number of Views:       2")
+            print(f"Projection Dim:        {p_dim}")
+            print(f"Temperature:           {self.supcon_temp}")
+            print(f"Contrastive Weight:    {self.contrastive_weight}")
+            print(f"Classification Weight: {self.classification_weight}")
+            print("============================================================")
+            
+            # Print dynamic projection tensor shape info once at startup
+            batch_sz = self.train_cfg.get("batch_size", 128)
+            print(f"\n[SupCon] Projection Tensor Shape: ({batch_sz}, 2, {p_dim})\n")
 
         self.l2sp = None
         l2sp_cfg = self.train_cfg.get("l2sp", {})
