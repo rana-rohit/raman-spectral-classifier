@@ -360,6 +360,11 @@ class Trainer:
 
             outputs1 = self._normalize_outputs(self.model(x1))
             self._assert_logits_and_targets(outputs1["main_logits"], y, "source")
+            
+            outputs2 = None
+            if x2 is not None:
+                outputs2 = self._normalize_outputs(self.model(x2))
+                
             coral_term = self._zero_loss()
 
             outputs_clin = None
@@ -402,8 +407,13 @@ class Trainer:
             contrastive_loss_term = self._zero_loss()
             classification_loss_term = main_loss
             if self.contrastive_learning_enabled:
-                proj_feats = outputs1.get("projection_features")
-                if proj_feats is not None:
+                proj1 = outputs1.get("projection_features")
+                proj2 = outputs2.get("projection_features") if outputs2 is not None else None
+                if proj1 is not None:
+                    if proj2 is not None:
+                        proj_feats = torch.stack([proj1, proj2], dim=1)
+                    else:
+                        proj_feats = proj1
                     contrastive_loss_term = self.supcon_loss_fn(proj_feats, y)
                 main_loss = (
                     self.contrastive_weight * contrastive_loss_term
@@ -415,9 +425,7 @@ class Trainer:
             else:
                 aux_loss = self._compute_aux_loss(outputs1, y)
 
-            outputs2 = None
-            if x2 is not None:
-                outputs2 = self._normalize_outputs(self.model(x2))
+
 
             consistency_term = self._compute_consistency_loss(outputs1, outputs2, y)
             supcon_term = self._zero_loss()
@@ -620,7 +628,7 @@ class Trainer:
             if self.model.training and augment:
                 x_np = x.cpu().numpy()
 
-                if self.consistency_enabled:
+                if self.consistency_enabled or self.contrastive_learning_enabled:
                     x1_aug = []
                     x2_aug = []
 
@@ -649,20 +657,30 @@ class Trainer:
             x, y = batch
 
             if isinstance(x, (tuple, list)) and len(x) == 2:
-                x1, _ = x 
+                x1, x2 = x 
+                return x1.to(self.device), x2.to(self.device), y.to(self.device)
 
-                if self.model.training and augment:
-                    x1 = x1.cpu().numpy()
+            if self.model.training and augment:
+                if self.consistency_enabled or self.contrastive_learning_enabled:
+                    x_np = x.cpu().numpy()
                     x1_aug = []
+                    x2_aug = []
 
-                    for sample in x1:
-                        augmented = self.augment(sample)
+                    for sample in x_np:
+                        aug1 = self.augment(sample)
+                        aug2 = self.augment(sample)
 
-                        x1_aug.append(augmented)
+                        x1_aug.append(aug1)
+                        x2_aug.append(aug2)
 
-                    x1 = torch.from_numpy(np.array(x1_aug)).float().contiguous()
-
-                return x1.to(self.device), None, y.to(self.device)
+                    x1 = torch.from_numpy(np.array(x1_aug)).float().to(self.device)
+                    x2 = torch.from_numpy(np.array(x2_aug)).float().to(self.device)
+                else:
+                    x_np = x.cpu().numpy()
+                    x1_aug = [self.augment(sample) for sample in x_np]
+                    x1 = torch.from_numpy(np.array(x1_aug)).float().to(self.device)
+                    x2 = None
+                return x1, x2, y.to(self.device)
 
             return x.to(self.device), None, y.to(self.device)
 
