@@ -47,8 +47,8 @@ training:
     temperature: 0.07
   
   # Supervised Contrastive hybrid training (Stage 1 extension)
-  contrastive_weight: 0.4
-  classification_weight: 0.6
+  contrastive_weight: 1.0
+  classification_weight: 0.0
   temperature: 0.07
   
   target_supervised:
