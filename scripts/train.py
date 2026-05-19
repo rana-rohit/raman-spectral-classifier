@@ -50,6 +50,7 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--override", nargs="*", default=[])
     p.add_argument("--run-xai", action="store_true", help="Run saliency analysis after training")
+    p.add_argument("--two-stage", action="store_true", help="Enable decoupled two-stage representation and linear classifier training")
     return p.parse_args()
 
 
@@ -299,7 +300,8 @@ def main():
     print("\n[3/4] Training...")
     contrastive_enabled = cfg.get("model", {}).get("contrastive", False)
     
-    if contrastive_enabled:
+    two_stage_enabled = getattr(args, "two_stage", False)
+    if contrastive_enabled and two_stage_enabled:
         import copy
         import shutil
         

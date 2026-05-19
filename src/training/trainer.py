@@ -218,9 +218,32 @@ class Trainer:
             self.supcon_loss_fn = SupConLoss(temperature=self.supcon_temp)
             
             p_dim = cfg.get("model", {}).get("projection_dim", 128)
+            
+            # Determine trainable/frozen modules
+            trainable_mods = []
+            frozen_mods = []
+            for name, param in self.model.named_parameters():
+                mod_name = name.split(".")[0]
+                if mod_name == "backbone" and len(name.split(".")) > 1 and name.split(".")[1] == "classifier":
+                    mod_name = "classifier"
+                if param.requires_grad:
+                    if mod_name not in trainable_mods:
+                        trainable_mods.append(mod_name)
+                else:
+                    if mod_name not in frozen_mods:
+                        frozen_mods.append(mod_name)
+            
+            trainable_mods = sorted(list(set(trainable_mods)))
+            frozen_mods = sorted(list(set(frozen_mods)))
+            
+            is_joint = self.classification_weight > 0.0 and self.contrastive_weight > 0.0
+            
             print("\n============================================================")
-            print("CONTRASTIVE TRAINING STATUS")
-            print("===========================")
+            if is_joint:
+                print("JOINT SUPERVISED CONTRASTIVE TRAINING")
+            else:
+                print("PURE SUPERVISED CONTRASTIVE PRETRAINING (PHASE 1)")
+            print("============================================================")
             print(f"SupCon Enabled:        True")
             print(f"Multi-View Mode:       True")
             print(f"Number of Views:       2")
@@ -228,7 +251,16 @@ class Trainer:
             print(f"Temperature:           {self.supcon_temp}")
             print(f"Contrastive Weight:    {self.contrastive_weight}")
             print(f"Classification Weight: {self.classification_weight}")
-            print("============================================================")
+            
+            losses = []
+            if self.contrastive_weight > 0.0:
+                losses.append("Supervised Contrastive (SupCon)")
+            if self.classification_weight > 0.0:
+                losses.append("Cross Entropy (Classification)")
+            print(f"Active Losses:         {', '.join(losses)}")
+            print(f"Trainable Modules:     {', '.join(trainable_mods) if trainable_mods else 'None'}")
+            print(f"Frozen Modules:        {', '.join(frozen_mods) if frozen_mods else 'None'}")
+            print("============================================================\n")
             
             # Print dynamic projection tensor shape info once at startup
             batch_sz = self.train_cfg.get("batch_size", 128)
