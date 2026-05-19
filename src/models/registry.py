@@ -150,6 +150,8 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
         orig_forward = model.forward
         def contrastive_forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
             out = orig_forward(x)
+            if getattr(self, "bypass_projection", False):
+                return out
             features = out["features"]
             proj = self.projection_head(features)
             out["projection_features"] = nn.functional.normalize(proj, p=2, dim=-1)

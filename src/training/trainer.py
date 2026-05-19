@@ -38,15 +38,21 @@ from src.data.augmentation import AugmentationPipeline
 from itertools import cycle
 
 class EarlyStopping:
-    def __init__(self, patience: int = 10, min_delta: float = 1e-4) -> None: 
+    def __init__(self, patience: int = 10, min_delta: float = 1e-4, mode: str = "max") -> None: 
         self.patience = patience
         self.min_delta = min_delta
-        self._best = -float("inf")
+        self.mode = mode
+        self._best = -float("inf") if mode == "max" else float("inf")
         self._counter = 0
         self.should_stop = False
 
     def step(self, metric: float) -> bool:
-        if metric > self._best + self.min_delta:
+        if self.mode == "max":
+            improved = metric > self._best + self.min_delta
+        else:
+            improved = metric < self._best - self.min_delta
+
+        if improved:
             self._best = metric
             self._counter = 0
         else:
@@ -199,9 +205,15 @@ class Trainer:
 
         # Supervised Contrastive hybrid training configuration
         self.contrastive_learning_enabled = cfg.get("model", {}).get("contrastive", False)
+        self.contrastive_weight = self.train_cfg.get("contrastive_weight", 0.7)
+        self.classification_weight = self.train_cfg.get("classification_weight", 0.3)
+        
+        # If contrastive weight is 0.0, we disable contrastive learning behavior
+        if self.contrastive_weight == 0.0:
+            self.contrastive_learning_enabled = False
+            
+        self.is_pure_supcon = False
         if self.contrastive_learning_enabled:
-            self.contrastive_weight = self.train_cfg.get("contrastive_weight", 0.7)
-            self.classification_weight = self.train_cfg.get("classification_weight", 0.3)
             self.supcon_temp = self.train_cfg.get("temperature", 0.07)
             self.supcon_loss_fn = SupConLoss(temperature=self.supcon_temp)
             
@@ -251,8 +263,11 @@ class Trainer:
                     m.requires_grad_(True)   # still allow gamma/beta to learn
 
         print(f"  Device: {self.device}")
+        monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
+        mode = "min" if "loss" in monitor_metric else "max"
         self.early_stopping = EarlyStopping(
-            patience=self.train_cfg.get("early_stopping_patience", 10)
+            patience=self.train_cfg.get("early_stopping_patience", 10),
+            mode=mode
         )
 
     def fit(self) -> Dict:
@@ -287,7 +302,10 @@ class Trainer:
             else:
                 self.scheduler.step()
 
-            is_best = monitor_value >= self.early_stopping.best
+            if self.early_stopping.mode == "max":
+                is_best = monitor_value >= self.early_stopping.best
+            else:
+                is_best = monitor_value <= self.early_stopping.best
             save_checkpoint(
                 path=str(self.exp_dir / "checkpoints" / f"epoch_{epoch:03d}.pt"),
                 model=self.model,
@@ -402,24 +420,13 @@ class Trainer:
                         if epoch == 1 and total == 0:
                             print(f"[DEBUG] CORAL LOSS: {coral_term.item():.6f}")
                             
-            source_loss = self.loss_fn(outputs1["main_logits"], y)
-            if (
-                outputs_clin is not None
-                and self.target_supervised_enabled
-                and self.target_supervised_weight > 0.0
-            ):
-                target_loss = self.loss_fn(outputs_clin["main_logits"], y_clin)
-                main_loss = (
-                    source_loss
-                    + self.target_supervised_weight * target_loss
-                ) / (1.0 + self.target_supervised_weight)
-            else:
-                main_loss = source_loss
-
-            # Contrastive hybrid training objective
-            contrastive_loss_term = self._zero_loss()
-            classification_loss_term = main_loss
-            if self.contrastive_learning_enabled:
+            if self.contrastive_learning_enabled and self.classification_weight == 0.0:
+                source_loss = self._zero_loss()
+                main_loss = self._zero_loss()
+                classification_loss_term = self._zero_loss()
+                
+                # Pure contrastive loss term
+                contrastive_loss_term = self._zero_loss()
                 proj1 = outputs1.get("projection_features")
                 proj2 = outputs2.get("projection_features") if outputs2 is not None else None
                 if proj1 is not None:
@@ -428,10 +435,39 @@ class Trainer:
                     else:
                         proj_feats = proj1
                     contrastive_loss_term = self.supcon_loss_fn(proj_feats, y)
-                main_loss = (
-                    self.contrastive_weight * contrastive_loss_term
-                    + self.classification_weight * classification_loss_term
-                )
+                
+                main_loss = contrastive_loss_term
+            else:
+                source_loss = self.loss_fn(outputs1["main_logits"], y)
+                if (
+                    outputs_clin is not None
+                    and self.target_supervised_enabled
+                    and self.target_supervised_weight > 0.0
+                ):
+                    target_loss = self.loss_fn(outputs_clin["main_logits"], y_clin)
+                    main_loss = (
+                        source_loss
+                        + self.target_supervised_weight * target_loss
+                    ) / (1.0 + self.target_supervised_weight)
+                else:
+                    main_loss = source_loss
+
+                # Contrastive hybrid training objective
+                contrastive_loss_term = self._zero_loss()
+                classification_loss_term = main_loss
+                if self.contrastive_learning_enabled:
+                    proj1 = outputs1.get("projection_features")
+                    proj2 = outputs2.get("projection_features") if outputs2 is not None else None
+                    if proj1 is not None:
+                        if proj2 is not None:
+                            proj_feats = torch.stack([proj1, proj2], dim=1)
+                        else:
+                            proj_feats = proj1
+                        contrastive_loss_term = self.supcon_loss_fn(proj_feats, y)
+                    main_loss = (
+                        self.contrastive_weight * contrastive_loss_term
+                        + self.classification_weight * classification_loss_term
+                    )
             
             if outputs_clin is not None and self.target_supervised_enabled:
                 aux_loss = self._compute_aux_loss(outputs_clin, y_clin)
@@ -591,29 +627,69 @@ class Trainer:
         total_loss = 0.0
         total_samples = 0
 
-        for batch in loader:
-            x, _, y = self._parse_batch(batch)
+        is_pure_supcon = getattr(self, "is_pure_supcon", False) or (
+            self.contrastive_learning_enabled and self.classification_weight == 0.0
+        )
 
-            outputs = self._normalize_outputs(self.model(x))
-            logits = outputs["main_logits"]
+        if is_pure_supcon:
+            for batch in loader:
+                x, _, y = self._parse_batch(batch)
+                x_np = x.cpu().numpy()
+                x1_aug = [self.augment(sample) for sample in x_np]
+                x2_aug = [self.augment(sample) for sample in x_np]
+                x1 = torch.from_numpy(np.array(x1_aug)).float().to(self.device)
+                x2 = torch.from_numpy(np.array(x2_aug)).float().to(self.device)
 
-            self._assert_logits_and_targets(logits, y, "eval")
-            loss = self.loss_fn(logits, y)
+                outputs1 = self._normalize_outputs(self.model(x1))
+                outputs2 = self._normalize_outputs(self.model(x2))
 
-            batch_size = y.size(0)
-            total_loss += loss.item() * batch_size
-            total_samples += batch_size
+                proj1 = outputs1.get("projection_features")
+                proj2 = outputs2.get("projection_features")
+                if proj1 is not None and proj2 is not None:
+                    proj_feats = torch.stack([proj1, proj2], dim=1)
+                    loss = self.supcon_loss_fn(proj_feats, y)
+                else:
+                    loss = self._zero_loss()
 
-            all_logits.append(logits.detach().cpu())
-            all_targets.append(y.detach().cpu())
+                batch_size = y.size(0)
+                total_loss += loss.item() * batch_size
+                total_samples += batch_size
 
-        logits = torch.cat(all_logits, dim=0)
-        targets = torch.cat(all_targets, dim=0)
+                dummy_logits = torch.zeros(batch_size, self.n_classes, device=self.device)
+                all_logits.append(dummy_logits.cpu())
+                all_targets.append(y.cpu())
 
-        epoch_loss = total_loss / total_samples
-        metrics = compute_metrics(logits, targets, self.n_classes)
-        metrics["loss"] = epoch_loss
-        return metrics
+            logits = torch.cat(all_logits, dim=0)
+            targets = torch.cat(all_targets, dim=0)
+            epoch_loss = total_loss / max(total_samples, 1)
+            metrics = compute_metrics(logits, targets, self.n_classes)
+            metrics["loss"] = epoch_loss
+            metrics["contrastive_loss"] = epoch_loss
+            return metrics
+        else:
+            for batch in loader:
+                x, _, y = self._parse_batch(batch)
+
+                outputs = self._normalize_outputs(self.model(x))
+                logits = outputs["main_logits"]
+
+                self._assert_logits_and_targets(logits, y, "eval")
+                loss = self.loss_fn(logits, y)
+
+                batch_size = y.size(0)
+                total_loss += loss.item() * batch_size
+                total_samples += batch_size
+
+                all_logits.append(logits.detach().cpu())
+                all_targets.append(y.detach().cpu())
+
+            logits = torch.cat(all_logits, dim=0)
+            targets = torch.cat(all_targets, dim=0)
+
+            epoch_loss = total_loss / total_samples
+            metrics = compute_metrics(logits, targets, self.n_classes)
+            metrics["loss"] = epoch_loss
+            return metrics
 
     def _normalize_outputs(self, outputs) -> dict[str, torch.Tensor | None]:
         if torch.is_tensor(outputs):

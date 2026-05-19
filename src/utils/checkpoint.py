@@ -197,3 +197,54 @@ def load_best_model(
     """Convenience: load the best checkpoint from an experiment directory."""
     best_path = resolve_best_checkpoint_path(experiment_dir)
     return load_checkpoint(best_path, model, device=device)
+
+
+def load_encoder_only(
+    path: str,
+    model: torch.nn.Module,
+    device: str = "cpu",
+) -> dict:
+    """
+    Load pretrained representation learning weights except classifier head.
+    Ensures classifier initializes independently.
+    """
+    path_obj = Path(path)
+    checkpoint_path = str(path_obj) if path_obj.is_file() else resolve_best_checkpoint_path(path)
+    
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    pretrained_state = checkpoint["model_state"]
+    current_state = model.state_dict()
+    
+    loaded_keys = []
+    skipped_keys = []
+    shape_mismatch_keys = []
+    
+    filtered_state = {}
+    for key, value in pretrained_state.items():
+        # Skip classifier layers to ensure independent initialization
+        if key.startswith("classifier") or "classifier" in key:
+            skipped_keys.append(key)
+            continue
+            
+        if key not in current_state:
+            skipped_keys.append(key)
+            continue
+            
+        if current_state[key].shape != value.shape:
+            shape_mismatch_keys.append((key, value.shape, current_state[key].shape))
+            continue
+            
+        filtered_state[key] = value
+        loaded_keys.append(key)
+        
+    current_state.update(filtered_state)
+    model.load_state_dict(current_state)
+    
+    print(f"\n[Checkpoint] Loaded encoder weights from: {checkpoint_path}")
+    print(f"[Checkpoint] Loaded keys count:   {len(loaded_keys)}")
+    print(f"[Checkpoint] Skipped keys count:  {len(skipped_keys)} (including classifier head)")
+    if shape_mismatch_keys:
+        print(f"[Checkpoint] Shape mismatch keys: {shape_mismatch_keys}")
+    print()
+    
+    return checkpoint

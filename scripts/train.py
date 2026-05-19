@@ -28,6 +28,7 @@ from src.utils.checkpoint import (
     load_best_model,
     load_backbone_weights,
     resolve_best_checkpoint_path,
+    load_encoder_only,
 )
 from src.utils.config import load_config, save_config
 from src.utils.seed import set_seed
@@ -65,6 +66,35 @@ def apply_overrides(cfg: dict, overrides: list) -> dict:
             pass
         cursor[keys[-1]] = val
     return cfg
+
+
+def print_phase_status(
+    phase: int,
+    losses_enabled: list[str],
+    frozen_modules: list[str],
+    trainable_modules: list[str],
+    loaded_checkpoint: str | None,
+    frozen_params: int,
+    trainable_params: int,
+) -> None:
+    border = "=" * 60
+    print(f"\n{border}")
+    if phase == 1:
+        print("PHASE 1: Pure SupCon Representation Learning")
+    else:
+        print("PHASE 2: Linear Evaluation / Frozen Encoder Classification")
+    print("=" * 60)
+    print(f"Active Phase:      Phase {phase}")
+    print(f"Losses Enabled:    {', '.join(losses_enabled)}")
+    if loaded_checkpoint:
+        print(f"Loaded Checkpoint: {loaded_checkpoint}")
+    else:
+        print(f"Loaded Checkpoint: None (Initial)")
+    print(f"Frozen Modules:    {', '.join(frozen_modules) if frozen_modules else 'None'}")
+    print(f"Trainable Modules: {', '.join(trainable_modules) if trainable_modules else 'None'}")
+    print(f"Frozen Params:     {frozen_params:,}")
+    print(f"Trainable Params:  {trainable_params:,}")
+    print(f"{border}\n")
 
 
 def main():
@@ -267,15 +297,160 @@ def main():
     print_model_summary(args.model, cfg["model"])
 
     print("\n[3/4] Training...")
-    trainer = build_trainer(
-        model=model,
-        loaders=loaders,
-        cfg=cfg,
-        exp_dir=exp_dir,
-        n_classes=n_classes,
-    )
-    trainer.fit()
-    load_best_model(exp_dir, model)
+    contrastive_enabled = cfg.get("model", {}).get("contrastive", False)
+    
+    if contrastive_enabled:
+        import copy
+        import shutil
+        
+        # ----------------------------------------------------
+        # PHASE 1: Pure Supervised Contrastive Pretraining
+        # ----------------------------------------------------
+        # Disable classifier head influence
+        classifier_module = None
+        if hasattr(model, "classifier"):
+            classifier_module = model.classifier
+        elif hasattr(model, "backbone") and hasattr(model.backbone, "classifier"):
+            classifier_module = model.backbone.classifier
+            
+        for p in model.parameters():
+            p.requires_grad = True
+            
+        frozen_modules = []
+        if classifier_module is not None:
+            for p in classifier_module.parameters():
+                p.requires_grad = False
+            frozen_modules.append("classifier")
+            
+        if hasattr(model, "domain_classifier") and model.domain_classifier is not None:
+            for p in model.domain_classifier.parameters():
+                p.requires_grad = False
+            frozen_modules.append("domain_classifier")
+            
+        frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        
+        trainable_modules = ["backbone", "projection_head"]
+        
+        # Prepare Phase 1 config: pure supervised contrastive loss, classification loss disabled
+        p1_cfg = copy.deepcopy(cfg)
+        p1_cfg["training"]["contrastive_weight"] = 1.0
+        p1_cfg["training"]["classification_weight"] = 0.0
+        p1_cfg["training"]["monitor_metric"] = "loss"
+        
+        print_phase_status(
+            phase=1,
+            losses_enabled=["Supervised Contrastive Loss (SupCon)"],
+            frozen_modules=frozen_modules,
+            trainable_modules=trainable_modules,
+            loaded_checkpoint=None,
+            frozen_params=frozen_params,
+            trainable_params=trainable_params
+        )
+        
+        # Separate Phase 1 experiment directory so checkpoints don't collide
+        p1_exp_dir = os.path.join(exp_dir, "phase1")
+        trainer_p1 = build_trainer(
+            model=model,
+            loaders=loaders,
+            cfg=p1_cfg,
+            exp_dir=p1_exp_dir,
+            n_classes=n_classes,
+        )
+        trainer_p1.is_pure_supcon = True
+        trainer_p1.fit()
+        
+        # At the end of Phase 1, copy the best representation checkpoint to distinct names
+        best_p1_ckpt_path = resolve_best_checkpoint_path(p1_exp_dir)
+        os.makedirs(os.path.join(exp_dir, "checkpoints"), exist_ok=True)
+        best_rep_path = os.path.join(exp_dir, "checkpoints", "best_representation_model.pt")
+        best_supcon_path = os.path.join(exp_dir, "checkpoints", "best_supcon_encoder.pt")
+        
+        shutil.copy2(best_p1_ckpt_path, best_rep_path)
+        shutil.copy2(best_p1_ckpt_path, best_supcon_path)
+        
+        # Also copy to root exp_dir
+        shutil.copy2(best_p1_ckpt_path, os.path.join(exp_dir, "best_representation_model.pt"))
+        shutil.copy2(best_p1_ckpt_path, os.path.join(exp_dir, "best_supcon_encoder.pt"))
+        
+        print(f"\nSaved representation checkpoints:")
+        print(f"  - {best_rep_path}")
+        print(f"  - {best_supcon_path}")
+        
+        # ----------------------------------------------------
+        # PHASE 2: Linear Evaluation / Classifier Training
+        # ----------------------------------------------------
+        # Re-initialize model to ensure independent classifier initialization
+        model = get_model(args.model, cfg)
+        
+        # Load the pretrained representation weights (encoder + projection head)
+        load_encoder_only(best_rep_path, model)
+        
+        # Freeze encoder weights explicitly: requires_grad = False
+        classifier_module = None
+        if hasattr(model, "classifier"):
+            classifier_module = model.classifier
+        elif hasattr(model, "backbone") and hasattr(model.backbone, "classifier"):
+            classifier_module = model.backbone.classifier
+            
+        for p in model.parameters():
+            p.requires_grad = False
+            
+        trainable_modules = []
+        if classifier_module is not None:
+            for p in classifier_module.parameters():
+                p.requires_grad = True
+            trainable_modules.append("classifier")
+            
+        # Bypass or disable the projection head
+        model.bypass_projection = True
+        
+        frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        
+        frozen_modules = ["backbone", "projection_head"]
+        if hasattr(model, "domain_classifier") and model.domain_classifier is not None:
+            frozen_modules.append("domain_classifier")
+            
+        # Prepare Phase 2 config: classification only, contrastive bypassed
+        p2_cfg = copy.deepcopy(cfg)
+        p2_cfg["training"]["contrastive_weight"] = 0.0
+        p2_cfg["training"]["classification_weight"] = 1.0
+        
+        print_phase_status(
+            phase=2,
+            losses_enabled=["Cross Entropy Loss (Classification)"],
+            frozen_modules=frozen_modules,
+            trainable_modules=trainable_modules,
+            loaded_checkpoint=best_rep_path,
+            frozen_params=frozen_params,
+            trainable_params=trainable_params
+        )
+        
+        # Build Phase 2 trainer and train ONLY the classifier
+        trainer_p2 = build_trainer(
+            model=model,
+            loaders=loaders,
+            cfg=p2_cfg,
+            exp_dir=exp_dir,
+            n_classes=n_classes,
+        )
+        trainer_p2.fit()
+        
+        # Load the best classifier checkpoint from Phase 2 for downstream evaluation
+        load_best_model(exp_dir, model)
+        
+    else:
+        # Standard joint or non-contrastive training pipeline
+        trainer = build_trainer(
+            model=model,
+            loaders=loaders,
+            cfg=cfg,
+            exp_dir=exp_dir,
+            n_classes=n_classes,
+        )
+        trainer.fit()
+        load_best_model(exp_dir, model)
     
     # --------------------------------------------------------
     # Stage 1:
