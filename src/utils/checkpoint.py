@@ -6,10 +6,80 @@ Every checkpoint stores: model weights, optimizer state, epoch,
 best metric, config snapshot, and training history.
 """
 
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import torch
+
+def resolve_pretrained_checkpoint(cfg: Dict, task_cfg: Dict, stage: str) -> tuple:
+    """
+    Centralized logic to resolve the pretrained checkpoint based on priority:
+    1. pretrained_checkpoint
+    2. pretrained_experiment
+    3. legacy fallback (pretrained_exp_dir)
+    
+    Returns:
+        tuple containing (checkpoint_path, source_type, experiment_name)
+    """
+    train_cfg = cfg.get("training", {})
+    explicit_ckpt = train_cfg.get("pretrained_checkpoint")
+    explicit_exp = train_cfg.get("pretrained_experiment")
+    legacy_dir = task_cfg.get("pretrained_exp_dir")
+    
+    source_type = ""
+    exp_name = "N/A"
+    ckpt_path = ""
+    
+    if explicit_ckpt:
+        source_type = "explicit_checkpoint"
+        ckpt_path = str(explicit_ckpt)
+        if not os.path.isfile(ckpt_path):
+            raise FileNotFoundError(
+                f"Requested pretrained_checkpoint='{ckpt_path}' but file does not exist or is not a file."
+            )
+    elif explicit_exp:
+        source_type = "experiment_name"
+        exp_name = str(explicit_exp)
+        # resolve the experiment directory, usually under experiments/ unless it's an absolute path
+        exp_dir = exp_name if os.path.isabs(exp_name) else os.path.join("experiments", exp_name)
+        if not os.path.isdir(exp_dir):
+            raise FileNotFoundError(
+                f"Requested pretrained_experiment='{exp_name}' but directory '{exp_dir}' was not found."
+            )
+        try:
+            ckpt_path = resolve_best_checkpoint_path(exp_dir)
+        except Exception as e:
+            raise FileNotFoundError(
+                f"Requested pretrained_experiment='{exp_name}' but no valid checkpoint was found in '{exp_dir}'. Error: {e}"
+            )
+    elif legacy_dir:
+        source_type = "legacy_default"
+        exp_name = str(legacy_dir)
+        try:
+            ckpt_path = resolve_best_checkpoint_path(legacy_dir)
+        except Exception as e:
+            raise FileNotFoundError(
+                f"Legacy pretrained_exp_dir='{legacy_dir}' provided but no valid checkpoint was found. Error: {e}"
+            )
+        print(f"\nWARNING: Implicit checkpoint resolution via task.pretrained_exp_dir is deprecated.")
+        print(f"Auto-selected experiment: {legacy_dir}")
+    else:
+        raise ValueError(
+            f"{stage} requires a pretrained checkpoint. Please specify "
+            f"'training.pretrained_checkpoint' or 'training.pretrained_experiment' in config."
+        )
+
+    print("\n============================================================")
+    print("PRETRAINED CHECKPOINT SOURCE")
+    print("============================")
+    print(f"Source Type:   {source_type}")
+    print(f"Experiment:    {exp_name}")
+    print(f"Checkpoint:    {ckpt_path}")
+    print(f"Stage Source:  {stage}")
+    print("======================")
+
+    return ckpt_path, source_type, exp_name
 
 def load_backbone_weights(
     path: str,

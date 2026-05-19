@@ -29,6 +29,7 @@ from src.utils.checkpoint import (
     load_backbone_weights,
     resolve_best_checkpoint_path,
     load_encoder_only,
+    resolve_pretrained_checkpoint,
 )
 from src.utils.config import load_config, save_config
 from src.utils.seed import set_seed
@@ -253,24 +254,18 @@ def main():
         "pretrain_treatment_8class",
         "transfer_5class",
     }:
-    
-        pretrained_dir = task_cfg.get("pretrained_exp_dir")
-
-        if pretrained_dir is None:
-            raise ValueError(
-                f"{stage} requires pretrained_exp_dir"
-            )
+        ckpt_path, source_type, exp_name = resolve_pretrained_checkpoint(cfg, task_cfg, stage)
 
         print("\nLoading pretrained backbone...")
-        pretrained_ckpt = resolve_best_checkpoint_path(pretrained_dir)
-
-        checkpoint = load_backbone_weights(
-            pretrained_ckpt,
-            model,
-        )
+        try:
+            checkpoint = load_backbone_weights(
+                ckpt_path,
+                model,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to load checkpoint from {ckpt_path}. Error: {e}")
 
         checkpoint_cfg = checkpoint.get("config", {})
-
         checkpoint_stage = (
             checkpoint_cfg
             .get("task", {})
@@ -279,17 +274,17 @@ def main():
 
         if stage == "pretrain_treatment_8class":
             assert checkpoint_stage == "pretrain_30class", (
-                "Stage-2 must load a Stage-1 isolate checkpoint"
+                f"Stage-2 must load a Stage-1 isolate checkpoint. Got: {checkpoint_stage}"
             )
 
         elif stage == "transfer_5class":
             assert checkpoint_stage == "pretrain_treatment_8class", (
-                "Stage-3 must load a Stage-2 treatment checkpoint"
+                f"Stage-3 must load a Stage-2 treatment checkpoint. Got: {checkpoint_stage}"
             )
 
         from src.utils.logging import print_checkpoint_info
         print_checkpoint_info(
-            pretrained_ckpt,
+            ckpt_path,
             loaded=True,
             details={"epoch": checkpoint.get("epoch", "?")}
         )
