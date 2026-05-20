@@ -29,7 +29,11 @@ SPECTRA_PER_GROUP = {
 }
 
 
-def _introspect_loader(loader, split_name: str) -> Dict[str, Any]:
+def _introspect_loader(
+    loader,
+    split_name: str,
+    spectra_per_group_map: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
     """
     Extract runtime statistics from a DataLoader's underlying dataset.
 
@@ -57,7 +61,9 @@ def _introspect_loader(loader, split_name: str) -> Dict[str, Any]:
         info["n_classes"] = None
         info["class_distribution"] = {}
 
-    spg = SPECTRA_PER_GROUP.get(split_name)
+    if spectra_per_group_map is None:
+        spectra_per_group_map = SPECTRA_PER_GROUP
+    spg = spectra_per_group_map.get(split_name)
     info["spectra_per_group"] = spg
     if spg and info["n_samples"]:
         info["n_groups"] = info["n_samples"] // spg
@@ -86,6 +92,14 @@ def print_split_provenance(
     """
     stage = cfg.get("task", {}).get("stage", "unknown")
     label_space = cfg.get("task", {}).get("label_space", "unknown")
+    grouped_cfg = cfg.get("evaluation", {}).get("grouped", {})
+    grouped_enabled = grouped_cfg.get("enabled", True)
+    spectra_per_group_map = grouped_cfg.get(
+        "spectra_per_group",
+        SPECTRA_PER_GROUP,
+    )
+    if not grouped_enabled:
+        spectra_per_group_map = {}
 
     stage_map = {
         "pretrain_30class": ("Stage 1", "Isolate-Space Pretraining"),
@@ -135,7 +149,7 @@ def print_split_provenance(
     print(sep)
 
     def _row(name: str, loader) -> None:
-        info = _introspect_loader(loader, name)
+        info = _introspect_loader(loader, name, spectra_per_group_map)
         ns = f"{info['n_samples']:,}" if info["n_samples"] is not None else "?"
         nc = str(info["n_classes"]) if info["n_classes"] is not None else "?"
         ng = str(info["n_groups"]) if info["n_groups"] is not None else "--"
@@ -184,7 +198,7 @@ def print_split_provenance(
         ood.keys() if isinstance(ood, dict) else []
     )
     for name in all_names:
-        spg = SPECTRA_PER_GROUP.get(name)
+        spg = spectra_per_group_map.get(name)
         if spg is None:
             continue
         ldr = ood.get(name) if name in (ood if isinstance(ood, dict) else {}) else loaders.get(name)
@@ -255,6 +269,8 @@ def print_model_summary(model_name: str, model_cfg: Optional[Dict[str, Any]] = N
         details.append(f"kernel_size={model_cfg['kernel_size']}")
     if "use_se" in model_cfg:
         details.append(f"use_se={model_cfg['use_se']}")
+    if "use_cbam" in model_cfg:
+        details.append(f"use_cbam={model_cfg['use_cbam']}")
     if "n_blocks" in model_cfg:
         details.append(f"n_blocks={model_cfg['n_blocks']}")
     if "n_heads" in model_cfg:
@@ -271,6 +287,46 @@ def print_model_summary(model_name: str, model_cfg: Optional[Dict[str, Any]] = N
         print(f"{name_display} ({', '.join(detail_strs)})")
     else:
         print(name_display)
+    print()
+
+
+def print_feature_summary(cfg: Dict[str, Any]) -> None:
+    """Print the active optional research systems for reproducibility."""
+    model_cfg = cfg.get("model", {})
+    train_cfg = cfg.get("training", {})
+    supcon_cfg = train_cfg.get("supcon", {})
+    eval_cfg = cfg.get("evaluation", {})
+    grouped_cfg = eval_cfg.get("grouped", {})
+    finetune_cfg = train_cfg.get("finetune", {})
+
+    supcon_enabled = bool(supcon_cfg.get("enabled", False))
+    two_stage_enabled = bool(train_cfg.get("two_stage", False))
+    finetune_enabled = bool(finetune_cfg.get("enabled", False))
+    dann_enabled = bool(train_cfg.get("use_dann", False) or train_cfg.get("dann", {}).get("enabled", False))
+    coral_enabled = bool(train_cfg.get("use_coral", False) or train_cfg.get("coral", {}).get("enabled", False))
+
+    if two_stage_enabled:
+        paradigm = "two_stage_supcon"
+    elif supcon_enabled:
+        contrastive_weight = float(supcon_cfg.get("weight", 0.0))
+        classification_weight = float(supcon_cfg.get("classification_weight", 1.0))
+        paradigm = "pure_supcon" if classification_weight == 0.0 else "joint_supcon"
+        if contrastive_weight == 0.0:
+            paradigm = "supervised"
+    else:
+        paradigm = "supervised"
+
+    print("ACTIVE FEATURES:")
+    print(f"Training Paradigm: {paradigm}")
+    print(f"SupCon:            {supcon_enabled}")
+    print(f"Two-stage:         {two_stage_enabled}")
+    print(f"SE:                {bool(model_cfg.get('use_se', False))}")
+    print(f"CBAM:              {bool(model_cfg.get('use_cbam', False))}")
+    print(f"DANN:              {dann_enabled}")
+    print(f"CORAL:             {coral_enabled}")
+    print(f"Freeze Backbone:   {bool(train_cfg.get('freeze_backbone', False))}")
+    print(f"Finetune:          {finetune_enabled}")
+    print(f"Grouped Eval:      {bool(grouped_cfg.get('enabled', True))}")
     print()
 
 
@@ -437,6 +493,7 @@ class ExperimentLogger:
         # Centralized Stage Header and Model Summary
         print_stage_header(stage, task_name)
         print_model_summary(model_name, config.get("model", {}))
+        print_feature_summary(config)
         print(f"  Directory:  {exp_dir}")
         print(f"{'='*60}\n")
 

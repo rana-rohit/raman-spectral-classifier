@@ -103,19 +103,13 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     if len(augmentation.steps) == 0 or augmentation.p == 0:
         augmentation = None
     
-    cfg["batch_size"] = (
-        cfg.get("training", {})
-        .get("batch_size", 512)
-    )
-
-    cfg["num_workers"] = (
-        cfg.get("training", {})
-        .get("num_workers", 4)
-    )
-
-    cfg["consistency"] = (
-        cfg.get("training", {})
-        .get("consistency", {})
+    loaders = build_all_loaders(
+        registry,
+        preprocessor,
+        augmentation,
+        cfg,
+        clinical_sparse_ids=clinical_sparse_ids,
+        n_classes=n_classes,
     )
 
     from src.utils.logging import print_split_provenance
