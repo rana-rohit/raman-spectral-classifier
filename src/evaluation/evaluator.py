@@ -136,7 +136,13 @@ class ModelEvaluator:
 
         from src.utils.logging import SPECTRA_PER_GROUP
         group_metrics = {}
-        spectra_per_group = SPECTRA_PER_GROUP.get(split_name)
+        grouped_cfg = self.cfg.get("evaluation", {}).get("grouped", {})
+        grouped_enabled = grouped_cfg.get("enabled", True)
+        spectra_per_group_map = grouped_cfg.get(
+            "spectra_per_group",
+            SPECTRA_PER_GROUP,
+        )
+        spectra_per_group = spectra_per_group_map.get(split_name) if grouped_enabled else None
 
         if spectra_per_group is not None:
 
@@ -339,41 +345,42 @@ class ModelEvaluator:
             for x in present_classes
         ]
 
-        save_confusion_matrix_figure(
-            targets=eval_targets.numpy(),
-            predictions=eval_logits.argmax(dim=-1).numpy(),
-            class_labels=class_labels,
-            save_path=(
-                figure_dir
-                / "spectrum_confusion_normalized.png"
-            ),
-            title=(
-                f"{split_name} "
-                "Spectrum-Level Confusion "
-                "(Normalized)"
-            ),
-            normalize=True,
-        )
-
-        # Group-level confusion
-
-        if group_metrics:
-
+        if self.cfg.get("evaluation", {}).get("save_confusion_matrices", True):
             save_confusion_matrix_figure(
-                targets=group_metrics["targets"],
-                predictions=group_metrics["predictions"],
+                targets=eval_targets.numpy(),
+                predictions=eval_logits.argmax(dim=-1).numpy(),
                 class_labels=class_labels,
                 save_path=(
                     figure_dir
-                    / "group_confusion_normalized.png"
+                    / "spectrum_confusion_normalized.png"
                 ),
                 title=(
                     f"{split_name} "
-                    "Group-Level Confusion "
+                    "Spectrum-Level Confusion "
                     "(Normalized)"
                 ),
                 normalize=True,
             )
+
+            # Group-level confusion
+
+            if group_metrics:
+
+                save_confusion_matrix_figure(
+                    targets=group_metrics["targets"],
+                    predictions=group_metrics["predictions"],
+                    class_labels=class_labels,
+                    save_path=(
+                        figure_dir
+                        / "group_confusion_normalized.png"
+                    ),
+                    title=(
+                        f"{split_name} "
+                        "Group-Level Confusion "
+                        "(Normalized)"
+                    ),
+                    normalize=True,
+                )
         return metrics
     
     # --------------------------------------------------------
