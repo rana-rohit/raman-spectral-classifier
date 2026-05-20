@@ -14,4 +14,4 @@ model:
   # Optional Convolutional Block Attention Module (CBAM)
   use_cbam: false
   cbam_reduction: 16
-  cbam_kernel_size: 7
+  cbam_kernel_size: 3
