@@ -138,6 +138,13 @@ def finetune(
         **loaders,
         "val": loaders["clinical_val"],   # only validation changes
     }
+    if n_shots_per_class is not None:
+        local_loaders["clinical_train"] = _subsample_loader(
+            loaders["clinical_train"],
+            n_shots=n_shots_per_class,
+            n_classes=n_classes,
+        )
+        print(f"  * Few-shot clinical adaptation: {n_shots_per_class} shots/class")
     
     ft_cfg = _make_finetune_cfg(cfg, freeze_epochs)
     Path(exp_dir).mkdir(parents=True, exist_ok=True)
@@ -290,35 +297,27 @@ def _unfreeze_all(model: nn.Module) -> None:
 # --------------------------------------------------------
 # Domain adaptation finetuning policy
 #
-# Keeps:
-# - DANN
-# - CORAL
-#
-# active during finetuning to preserve
-# cross-domain feature alignment.
-#
-# Earlier pipeline versions disabled
-# domain adaptation during finetuning,
-# which weakened transfer robustness.
+# Preserves explicitly configured optional features.
+# DANN/CORAL are never activated implicitly during finetuning.
 # --------------------------------------------------------
 def _make_finetune_cfg(base_cfg: dict, freeze_epochs: int) -> dict:
     del freeze_epochs
     cfg = copy.deepcopy(base_cfg)
     ft = cfg.setdefault("training", {})
 
-    # Keep DANN active during finetuning with reduced weight for
-    # continued domain alignment (was previously force-disabled).
+    # Preserve explicit domain-adaptation settings. Finetuning no longer
+    # enables DANN or CORAL implicitly.
     ft["dann"] = {
-        "enabled": ft.get("dann", {}).get("enabled", True),
-        "weight": ft.get("dann", {}).get("weight", 0.3),
+        "enabled": ft.get("dann", {}).get("enabled", False),
+        "weight": ft.get("dann", {}).get("weight", 0.0),
     }
     ft["coral"] = {
-        "enabled": ft.get("coral", {}).get("enabled", True),
-        "weight": ft.get("coral", {}).get("weight", 0.1),
+        "enabled": ft.get("coral", {}).get("enabled", False),
+        "weight": ft.get("coral", {}).get("weight", 0.0),
     }
-
-    # Allow BatchNorm to adapt to the finetune domain distribution
-    ft["freeze_bn"] = False
+    ft["use_dann"] = bool(ft.get("use_dann", False) or ft["dann"]["enabled"])
+    ft["use_coral"] = bool(ft.get("use_coral", False) or ft["coral"]["enabled"])
+    ft["freeze_bn"] = ft.get("freeze_bn", False)
 
     ft["lr"] = ft.get("finetune_lr", 1e-4)
     ft["max_epochs"] = ft.get("finetune_epochs", 50)
