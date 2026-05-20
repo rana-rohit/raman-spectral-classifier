@@ -42,28 +42,34 @@ training:
     views: 2
   
   supcon:
-    enabled: true
-    weight: 0.7
+    enabled: false
+    weight: 0.4
+    classification_weight: 0.6
     temperature: 0.07
+    projection_dim: 128
   
-  # Supervised Contrastive hybrid training (Stage 1 extension)
-  contrastive_weight: 0.4
-  classification_weight: 0.6
-  temperature: 0.1
+  two_stage: false
+  freeze_backbone: false
   
   target_supervised:
-    enabled: true
+    enabled: false
     weight: 1.0
   
+  use_dann: false
   dann:
     enabled: false
     weight: 0.0
   
+  use_coral: false
   coral:
     enabled: false
     weight: 0.0
   
   freeze_bn: false
+
+  finetune:
+    enabled: false
+    freeze_epochs: 0
 
 multitask:
   auxiliary_clinical_head:
@@ -75,19 +81,28 @@ multitask:
 
 pretraining:
   isolate_stage:
-    enabled: true
+    enabled: false
     semantic_space: isolate_space
     n_classes: 30
 
   treatment_stage:
-    enabled: true
+    enabled: false
     semantic_space: global_treatment_space
     n_classes: 8
 
   clinical_transfer_stage:
-    enabled: true
+    enabled: false
     semantic_space: compact_transfer_space
     n_classes: 5
+
+evaluation:
+  grouped:
+    enabled: true
+    spectra_per_group:
+      test: 100
+      2018clinical: 400
+      2019clinical: 100
+  save_confusion_matrices: true
 
 logging:
   verbose_losses: false

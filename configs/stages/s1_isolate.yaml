@@ -6,8 +6,6 @@ task:
 model:
   n_classes: 30
   semantic_space: isolate_space
-  contrastive: true
-  projection_dim: 128
 
 xai:
   split: test
