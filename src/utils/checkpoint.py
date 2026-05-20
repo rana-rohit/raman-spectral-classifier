@@ -12,6 +12,27 @@ from typing import Any, Dict, Optional
 
 import torch
 
+
+def _is_cbam_key(key: str) -> bool:
+    """Return True for parameters introduced by optional CBAM blocks."""
+    return ".cbam." in key
+
+
+def _warn_cbam_partial_load(missing_keys: list[str], unexpected_keys: list[str]) -> None:
+    print("\n[Checkpoint] WARNING: Partial CBAM checkpoint load.")
+    if missing_keys:
+        print(
+            "[Checkpoint] Missing CBAM weights will remain randomly initialized: "
+            f"{len(missing_keys)} keys"
+        )
+    if unexpected_keys:
+        print(
+            "[Checkpoint] Checkpoint contains CBAM weights not present in model: "
+            f"{len(unexpected_keys)} keys"
+        )
+    print()
+
+
 def resolve_pretrained_checkpoint(cfg: Dict, task_cfg: Dict, stage: str) -> tuple:
     """
     Centralized logic to resolve the pretrained checkpoint based on priority:
@@ -54,16 +75,11 @@ def resolve_pretrained_checkpoint(cfg: Dict, task_cfg: Dict, stage: str) -> tupl
                 f"Requested pretrained_experiment='{exp_name}' but no valid checkpoint was found in '{exp_dir}'. Error: {e}"
             )
     elif legacy_dir:
-        source_type = "legacy_default"
-        exp_name = str(legacy_dir)
-        try:
-            ckpt_path = resolve_best_checkpoint_path(legacy_dir)
-        except Exception as e:
-            raise FileNotFoundError(
-                f"Legacy pretrained_exp_dir='{legacy_dir}' provided but no valid checkpoint was found. Error: {e}"
-            )
-        print(f"\nWARNING: Implicit checkpoint resolution via task.pretrained_exp_dir is deprecated.")
-        print(f"Auto-selected experiment: {legacy_dir}")
+        raise ValueError(
+            "Implicit checkpoint loading via task.pretrained_exp_dir is disabled. "
+            "Move this value to training.pretrained_experiment or provide "
+            "training.pretrained_checkpoint explicitly."
+        )
     else:
         raise ValueError(
             f"{stage} requires a pretrained checkpoint. Please specify "
@@ -126,6 +142,13 @@ def load_backbone_weights(
     current_state.update(filtered_state)
 
     model.load_state_dict(current_state)
+
+    missing_cbam_keys = [
+        key for key in current_state
+        if _is_cbam_key(key) and key not in filtered_state
+    ]
+    if missing_cbam_keys:
+        _warn_cbam_partial_load(missing_cbam_keys, [])
 
     return checkpoint
 
@@ -253,9 +276,30 @@ def load_checkpoint(
             f"Checkpoint n_classes={checkpoint['n_classes']} "
             f"!= model n_classes={model.classifier[-1].out_features}"
         )
-    model.load_state_dict(checkpoint_state)
-    if optimizer is not None and "optimizer_state" in checkpoint:
-        optimizer.load_state_dict(checkpoint["optimizer_state"])
+    missing_keys = [
+        key for key in model_state
+        if key not in checkpoint_state
+    ]
+    unexpected_keys = [
+        key for key in checkpoint_state
+        if key not in model_state
+    ]
+    has_key_mismatch = bool(missing_keys or unexpected_keys)
+
+    if has_key_mismatch and all(
+        _is_cbam_key(key) for key in missing_keys + unexpected_keys
+    ):
+        _warn_cbam_partial_load(missing_keys, unexpected_keys)
+        model.load_state_dict(checkpoint_state, strict=False)
+        if optimizer is not None and "optimizer_state" in checkpoint:
+            print(
+                "[Checkpoint] WARNING: Skipping optimizer state because "
+                "model parameters changed for optional CBAM."
+            )
+    else:
+        model.load_state_dict(checkpoint_state)
+        if optimizer is not None and "optimizer_state" in checkpoint:
+            optimizer.load_state_dict(checkpoint["optimizer_state"])
     return checkpoint
 
 
@@ -309,6 +353,13 @@ def load_encoder_only(
         
     current_state.update(filtered_state)
     model.load_state_dict(current_state)
+
+    missing_cbam_keys = [
+        key for key in current_state
+        if _is_cbam_key(key) and key not in filtered_state
+    ]
+    if missing_cbam_keys:
+        _warn_cbam_partial_load(missing_cbam_keys, [])
     
     print(f"\n[Checkpoint] Loaded encoder weights from: {checkpoint_path}")
     print(f"[Checkpoint] Loaded keys count:   {len(loaded_keys)}")
