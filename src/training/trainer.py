@@ -75,6 +75,15 @@ class GradReverse(Function):
     def backward(ctx, grad_output):
         return -ctx.lambda_ * grad_output, None
 
+
+def _training_feature_enabled(train_cfg: dict, section: str, alias: str | None = None) -> bool:
+    """Resolve explicit optional training feature flags without implicit defaults."""
+    enabled = bool(train_cfg.get(section, {}).get("enabled", False))
+    if alias is not None:
+        enabled = bool(train_cfg.get(alias, False) or enabled)
+    return enabled
+
+
 class Trainer:
     def __init__(
         self,
@@ -137,15 +146,23 @@ class Trainer:
             )
 
         self.dann_cfg = self.train_cfg.get("dann", {})
-        self.dann_enabled = self.dann_cfg.get("enabled", False)
+        self.dann_enabled = _training_feature_enabled(
+            self.train_cfg,
+            "dann",
+            alias="use_dann",
+        )
         self.dann_weight = self.dann_cfg.get("weight", 0.5)
         self.coral_cfg = self.train_cfg.get("coral", {})
-        self.coral_enabled = self.coral_cfg.get("enabled", False)
+        self.coral_enabled = _training_feature_enabled(
+            self.train_cfg,
+            "coral",
+            alias="use_coral",
+        )
         self.coral_weight = self.coral_cfg.get("weight", 0.5)
         self.monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
         self.gradient_clip = self.train_cfg.get("gradient_clip", 1.0)
         target_cfg = self.train_cfg.get("target_supervised", {})
-        self.target_supervised_enabled = target_cfg.get("enabled", True)
+        self.target_supervised_enabled = target_cfg.get("enabled", False)
         self.target_supervised_weight = float(target_cfg.get("weight", 1.0))
 
         # --------------------------------------------------------
@@ -157,12 +174,11 @@ class Trainer:
         # (e.g. treating Meropenem as C. albicans).
         # --------------------------------------------------------
         if self.target_supervised_enabled and stage == "pretrain_30class":
-            print(
-                "[Audit Fix] WARNING: Disabling target_supervised because "
-                "clinical labels (treatments) cannot be supervised in "
-                "isolate-space. This prevents catastrophic semantic corruption."
+            raise ValueError(
+                "training.target_supervised.enabled=True is invalid for "
+                "pretrain_30class because clinical treatment labels cannot "
+                "supervise isolate-space logits."
             )
-            self.target_supervised_enabled = False
 
         # --------------------------------------------------------
         # Clinical data must ONLY participate during
@@ -196,28 +212,50 @@ class Trainer:
         self.consistency_enabled = self.consistency_cfg.get("enabled", False)
         self.consistency_weight = self.consistency_cfg.get("loss_weight", 0.0)
         self.supcon_cfg = self.train_cfg.get("supcon", {})
-        self.supcon_enabled = self.supcon_cfg.get("enabled", False)
-        self.supcon_weight = self.supcon_cfg.get("weight", 0.0)
-        self.supcon_loss = SupConLoss(
-            temperature=self.supcon_cfg.get("temperature", 0.1)
-        )
+        self.supcon_enabled = False
+        self.supcon_weight = 0.0
+        self.supcon_loss = None
         self.supervised_on_both_views = self.consistency_cfg.get("supervised_on_both_views", True)
 
-        # Supervised Contrastive hybrid training configuration
-        self.contrastive_learning_enabled = cfg.get("model", {}).get("contrastive", False)
-        self.contrastive_weight = self.train_cfg.get("contrastive_weight", 0.7)
-        self.classification_weight = self.train_cfg.get("classification_weight", 0.3)
-        
-        # If contrastive weight is 0.0, we disable contrastive learning behavior
+        # Canonical supervised contrastive training configuration.
+        # training.supcon.enabled is the source of truth after config
+        # resolution. model.contrastive remains a compatibility alias
+        # for older direct get_model/build_trainer tests and configs.
+        legacy_contrastive = bool(cfg.get("model", {}).get("contrastive", False))
+        if legacy_contrastive and not self.supcon_cfg.get("enabled", False):
+            self.supcon_cfg = {
+                **self.supcon_cfg,
+                "enabled": True,
+                "weight": self.train_cfg.get("contrastive_weight", 0.7),
+                "classification_weight": self.train_cfg.get("classification_weight", 0.3),
+                "temperature": self.train_cfg.get("temperature", 0.07),
+                "projection_dim": cfg.get("model", {}).get("projection_dim", 128),
+            }
+        self.contrastive_learning_enabled = bool(self.supcon_cfg.get("enabled", False))
+        self.contrastive_weight = float(self.supcon_cfg.get("weight", 0.0))
+        self.classification_weight = float(
+            self.supcon_cfg.get("classification_weight", 1.0)
+        )
+
         if self.contrastive_weight == 0.0:
             self.contrastive_learning_enabled = False
+
+        if self.contrastive_learning_enabled and not hasattr(self.model, "projection_head"):
+            raise ValueError(
+                "training.supcon.enabled=True requires a model projection_head. "
+                "Build the model through src.models.registry.get_model() with "
+                "the resolved training.supcon config."
+            )
             
         self.is_pure_supcon = False
         if self.contrastive_learning_enabled:
-            self.supcon_temp = self.train_cfg.get("temperature", 0.07)
+            self.supcon_temp = self.supcon_cfg.get("temperature", 0.07)
             self.supcon_loss_fn = SupConLoss(temperature=self.supcon_temp)
             
-            p_dim = cfg.get("model", {}).get("projection_dim", 128)
+            p_dim = self.supcon_cfg.get(
+                "projection_dim",
+                cfg.get("model", {}).get("projection_dim", 128),
+            )
             
             # Determine trainable/frozen modules
             trainable_mods = []
@@ -449,8 +487,6 @@ class Trainer:
                         feat_clin = feat_clin[:min_bs]
 
                         coral_term = coral_loss(feat_ref, feat_clin)
-                        if epoch == 1 and total == 0:
-                            print(f"[DEBUG] CORAL LOSS: {coral_term.item():.6f}")
                             
             if self.contrastive_learning_enabled and self.classification_weight == 0.0:
                 source_loss = self._zero_loss()

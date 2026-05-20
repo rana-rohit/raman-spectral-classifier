@@ -136,10 +136,27 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
         )
 
     # --------------------------------------------------------
-    # Optional contrastive projection head
+    # Optional SupCon projection head.
+    #
+    # Canonical activation lives in training.supcon.enabled.
+    # model.contrastive is accepted only as a legacy compatibility
+    # alias for older experiment configs.
     # --------------------------------------------------------
-    if model_cfg.get("contrastive", False):
-        projection_dim = int(model_cfg.get("projection_dim", 128))
+    supcon_cfg = cfg.get("training", {}).get("supcon", {})
+    legacy_contrastive = bool(model_cfg.get("contrastive", False))
+    supcon_enabled = bool(supcon_cfg.get("enabled", False) or legacy_contrastive)
+    if legacy_contrastive and not supcon_cfg.get("enabled", False):
+        print(
+            "  [Config] Legacy model.contrastive=True detected; "
+            "using canonical training.supcon.enabled behavior."
+        )
+    if supcon_enabled:
+        projection_dim = int(
+            supcon_cfg.get(
+                "projection_dim",
+                model_cfg.get("projection_dim", 128),
+            )
+        )
         model.projection_head = nn.Sequential(
             nn.Linear(model.embedding_dim, model.embedding_dim),
             nn.ReLU(inplace=True),
