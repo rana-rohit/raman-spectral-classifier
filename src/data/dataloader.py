@@ -33,14 +33,15 @@ def build_all_loaders(
     clinical_sparse_ids,
     n_classes,
 ) -> Dict:
-    batch_size = cfg.get("batch_size", 256)
-    num_workers = cfg.get("num_workers", 4)
+    train_cfg = cfg.get("training", {})
+    batch_size = cfg.get("batch_size", train_cfg.get("batch_size", 256))
+    num_workers = cfg.get("num_workers", train_cfg.get("num_workers", 4))
     seed = cfg.get("seed", 42)
     val_fraction = cfg["validation"]["val_fraction"]
     val_seed = cfg["validation"]["random_seed"]
     clinical_val_fraction = cfg["validation"].get("clinical_val_fraction", val_fraction)
     clinical_eval_fraction = cfg["validation"].get("clinical_eval_fraction", val_fraction)
-    consistency_cfg = cfg.get("consistency") or {}
+    consistency_cfg = cfg.get("consistency") or train_cfg.get("consistency", {})
     stage = cfg.get("task", {}).get(
         "stage",
         None,
@@ -273,8 +274,10 @@ def build_all_loaders(
         )
         loaders["val"] = loaders["clinical_val"]
 
-    except Exception as e:
-        print("WARNING: Clinical data not found:", e)
+    except FileNotFoundError as e:
+        if stage == "transfer_5class":
+            raise
+        print("WARNING: Clinical data not found; skipping optional OOD loaders:", e)
 
     X_ft, y_ft, ft_ids = _load_shared_split(registry, "finetune", clinical_sparse_ids, stage=stage)
     loaders["finetune"] = _make_loader(
