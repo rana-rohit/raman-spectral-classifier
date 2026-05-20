@@ -29,6 +29,8 @@ class SpectralDataset(Dataset):
         class_map: Mapping[int, int] | None = None,
         inverse_class_map: Mapping[int, int] | None = None,
         sample_ids=None,
+        label_validation: str = "contiguous",
+        valid_label_ids: list[int] | None = None,
     ) -> None:
         self.X = X.astype(np.float32)
         self.y = y.astype(np.int64)
@@ -44,6 +46,12 @@ class SpectralDataset(Dataset):
         self.class_filter = list(class_filter) if class_filter is not None else None
         self.class_map = dict(class_map or {})
         self.inverse_class_map = dict(inverse_class_map or {})
+        self.label_validation = label_validation
+        self.valid_label_ids = (
+            [int(label) for label in valid_label_ids]
+            if valid_label_ids is not None
+            else None
+        )
         if sample_ids is None:
             self.sample_ids = np.arange(len(self.y))
         else:
@@ -130,11 +138,30 @@ class SpectralDataset(Dataset):
             raise ValueError("Dataset cannot be empty")
 
         unique = np.unique(self.y)
-        expected_unique = np.arange(len(unique))
-        if not np.array_equal(unique, expected_unique):
+        if self.label_validation == "none":
+            return
+
+        if self.label_validation == "membership":
+            if self.valid_label_ids is None:
+                raise ValueError("valid_label_ids is required for membership validation")
+            unexpected = sorted(set(unique.tolist()) - set(self.valid_label_ids))
+            if unexpected:
+                raise ValueError(
+                    f"Labels must be in {self.valid_label_ids}, got unexpected {unexpected}"
+                )
+            return
+
+        if self.label_validation not in {"contiguous", "range"}:
             raise ValueError(
-                f"Labels must be contiguous [0..N-1], got {unique}"
+                "label_validation must be one of: contiguous, range, membership, none"
             )
+
+        if self.label_validation == "contiguous":
+            expected_unique = np.arange(len(unique))
+            if not np.array_equal(unique, expected_unique):
+                raise ValueError(
+                    f"Labels must be contiguous [0..N-1], got {unique}"
+                )
 
         if self.expected_n_classes is not None:
             if self.y.min() < 0 or self.y.max() >= self.expected_n_classes:
