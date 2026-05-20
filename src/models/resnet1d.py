@@ -11,6 +11,8 @@ from typing import List
 import torch
 import torch.nn as nn
 
+from src.models.modules.cbam1d import CBAM1D
+
 class DepthwiseSeparableConv1D(nn.Module):
     def __init__(
         self,
@@ -73,10 +75,14 @@ class ResidualBlock1D(nn.Module):
         use_depthwise: bool = True,
         use_se: bool = False,
         se_reduction: int = 16,
+        use_cbam: bool = False,
+        cbam_reduction: int = 16,
+        cbam_kernel_size: int = 7,
     ) -> None:
         super().__init__()
         
         self.use_se = use_se
+        self.use_cbam = use_cbam
 
         if use_depthwise:
             self.conv1 = DepthwiseSeparableConv1D(
@@ -123,12 +129,20 @@ class ResidualBlock1D(nn.Module):
             
         if self.use_se:
             self.se = SEBlock1D(out_channels, reduction=se_reduction)
+        if self.use_cbam:
+            self.cbam = CBAM1D(
+                out_channels,
+                reduction=cbam_reduction,
+                kernel_size=cbam_kernel_size,
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         if self.use_se:
             out = self.se(out)
+        if self.use_cbam:
+            out = self.cbam(out)
         out = out + self.shortcut(x)
         return self.relu(out)
 
@@ -144,12 +158,21 @@ class ResNet1D(nn.Module):
         in_channels: int = 2,
         use_se: bool = False,
         se_reduction: int = 16,
+        use_cbam: bool = False,
+        cbam_reduction: int = 16,
+        cbam_kernel_size: int = 7,
     ) -> None:
         del signal_length
         super().__init__()
         channels = channels or [32, 64, 128, 256]
         n_blocks = n_blocks or [2, 2, 2, 2]
         assert len(channels) == 4 and len(n_blocks) == 4
+        if se_reduction < 1:
+            raise ValueError("se_reduction must be >= 1")
+        if cbam_reduction < 1:
+            raise ValueError("cbam_reduction must be >= 1")
+        if cbam_kernel_size < 1 or cbam_kernel_size % 2 == 0:
+            raise ValueError("cbam_kernel_size must be a positive odd integer")
 
         c1, c2, c3, c4 = channels
 
@@ -166,6 +189,9 @@ class ResNet1D(nn.Module):
             use_depthwise=True,
             use_se=use_se,
             se_reduction=se_reduction,
+            use_cbam=use_cbam,
+            cbam_reduction=cbam_reduction,
+            cbam_kernel_size=cbam_kernel_size,
         )
 
         self.stage2 = self._make_stage(
@@ -176,6 +202,9 @@ class ResNet1D(nn.Module):
             use_depthwise=True,
             use_se=use_se,
             se_reduction=se_reduction,
+            use_cbam=use_cbam,
+            cbam_reduction=cbam_reduction,
+            cbam_kernel_size=cbam_kernel_size,
         )
 
         self.stage3 = self._make_stage(
@@ -186,6 +215,9 @@ class ResNet1D(nn.Module):
             use_depthwise=False,
             use_se=use_se,
             se_reduction=se_reduction,
+            use_cbam=use_cbam,
+            cbam_reduction=cbam_reduction,
+            cbam_kernel_size=cbam_kernel_size,
         )
 
         self.stage4 = self._make_stage(
@@ -196,6 +228,9 @@ class ResNet1D(nn.Module):
             use_depthwise=False,
             use_se=use_se,
             se_reduction=se_reduction,
+            use_cbam=use_cbam,
+            cbam_reduction=cbam_reduction,
+            cbam_kernel_size=cbam_kernel_size,
         )
 
         self.gap = nn.AdaptiveAvgPool1d(1)
@@ -223,10 +258,39 @@ class ResNet1D(nn.Module):
         use_depthwise: bool,
         use_se: bool = False,
         se_reduction: int = 16,
+        use_cbam: bool = False,
+        cbam_reduction: int = 16,
+        cbam_kernel_size: int = 7,
     ) -> nn.Sequential:
-        layers = [ResidualBlock1D(in_ch, out_ch, stride=stride, kernel_size=kernel_size, use_depthwise=use_depthwise, use_se=use_se, se_reduction=se_reduction)]
+        layers = [
+            ResidualBlock1D(
+                in_ch,
+                out_ch,
+                stride=stride,
+                kernel_size=kernel_size,
+                use_depthwise=use_depthwise,
+                use_se=use_se,
+                se_reduction=se_reduction,
+                use_cbam=use_cbam,
+                cbam_reduction=cbam_reduction,
+                cbam_kernel_size=cbam_kernel_size,
+            )
+        ]
         for _ in range(n_blocks - 1):
-            layers.append(ResidualBlock1D(out_ch, out_ch, stride=1, kernel_size=kernel_size, use_depthwise=use_depthwise, use_se=use_se, se_reduction=se_reduction))
+            layers.append(
+                ResidualBlock1D(
+                    out_ch,
+                    out_ch,
+                    stride=1,
+                    kernel_size=kernel_size,
+                    use_depthwise=use_depthwise,
+                    use_se=use_se,
+                    se_reduction=se_reduction,
+                    use_cbam=use_cbam,
+                    cbam_reduction=cbam_reduction,
+                    cbam_kernel_size=cbam_kernel_size,
+                )
+            )
         return nn.Sequential(*layers)
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
