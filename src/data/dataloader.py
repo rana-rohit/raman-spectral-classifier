@@ -66,6 +66,7 @@ def build_all_loaders(
         raise ValueError("train_views must be 1 or 2")
 
     loaders = {}
+    clinical_enabled = _clinical_splits_enabled(stage, cfg)
     
     # --------------------------------------------------------
     # Stage-dependent reference-domain behavior:
@@ -101,6 +102,7 @@ def build_all_loaders(
         class_map=class_map,
         inverse_class_map=inverse_class_map,
         sample_ids=tr_ids,
+        label_validation="contiguous",
     )
     loaders["source_val"] = _make_loader(
         X_val, y_val,
@@ -114,6 +116,7 @@ def build_all_loaders(
         class_map=class_map,
         inverse_class_map=inverse_class_map,
         sample_ids=val_ids,
+        label_validation="contiguous",
     )
     loaders["val"] = loaders["source_val"]
     
@@ -146,6 +149,7 @@ def build_all_loaders(
         class_map=class_map,
         inverse_class_map=inverse_class_map,
         sample_ids=test_ids,
+        label_validation="contiguous",
     )
     
     # --------------------------------------------------------
@@ -163,7 +167,7 @@ def build_all_loaders(
     # CLINICAL LOADER (for domain adaptation / DANN)
     # -----------------------------
     loaders["ood"] = {}
-    try:
+    if clinical_enabled:
         clinical_train_parts = []
         clinical_val_parts = []
         clinical_train_ids = []
@@ -224,6 +228,8 @@ def build_all_loaders(
                 class_map=class_map,
                 inverse_class_map=inverse_class_map,
                 sample_ids=ids_eval,
+                label_validation=_clinical_label_validation(stage),
+                valid_label_ids=_valid_label_ids(stage, clinical_sparse_ids),
             )
 
         X_clin_tr = np.concatenate([part[0] for part in clinical_train_parts], axis=0)
@@ -255,6 +261,8 @@ def build_all_loaders(
             class_map=class_map,
             inverse_class_map=inverse_class_map,
             sample_ids=np.asarray(clinical_train_ids),
+            label_validation=_clinical_label_validation(stage),
+            valid_label_ids=_valid_label_ids(stage, clinical_sparse_ids),
         )
 
         # Validation loader
@@ -271,31 +279,30 @@ def build_all_loaders(
             class_map=class_map,
             inverse_class_map=inverse_class_map,
             sample_ids=np.asarray(clinical_val_ids),
+            label_validation=_clinical_label_validation(stage),
+            valid_label_ids=_valid_label_ids(stage, clinical_sparse_ids),
         )
         loaders["val"] = loaders["clinical_val"]
 
-    except FileNotFoundError as e:
-        if stage == "transfer_5class":
-            raise
-        print("WARNING: Clinical data not found; skipping optional OOD loaders:", e)
-
-    X_ft, y_ft, ft_ids = _load_shared_split(registry, "finetune", clinical_sparse_ids, stage=stage)
-    loaders["finetune"] = _make_loader(
-        X_ft, y_ft,
-        augmentation=_clone_augmentation(augmentation),
-        training=True,
-        batch_size=min(batch_size, 64),
-        num_workers=num_workers,
-        shuffle=True,
-        seed=seed + 3,
-        n_views=train_views,
-        preprocessor=preprocessor,
-        expected_n_classes=n_classes,
-        class_filter=clinical_sparse_ids,
-        class_map=class_map,
-        inverse_class_map=inverse_class_map,
-        sample_ids=ft_ids,
-    )
+    if _finetune_split_enabled(stage, cfg):
+        X_ft, y_ft, ft_ids = _load_shared_split(registry, "finetune", clinical_sparse_ids, stage=stage)
+        loaders["finetune"] = _make_loader(
+            X_ft, y_ft,
+            augmentation=_clone_augmentation(augmentation),
+            training=True,
+            batch_size=min(batch_size, 64),
+            num_workers=num_workers,
+            shuffle=True,
+            seed=seed + 3,
+            n_views=train_views,
+            preprocessor=preprocessor,
+            expected_n_classes=n_classes,
+            class_filter=clinical_sparse_ids,
+            class_map=class_map,
+            inverse_class_map=inverse_class_map,
+            sample_ids=ft_ids,
+            label_validation="contiguous",
+        )
 
     return loaders
 
@@ -340,6 +347,8 @@ def _make_loader(
     class_map: dict[int, int] | None = None,
     inverse_class_map: dict[int, int] | None = None,
     sample_ids=None,
+    label_validation: str = "contiguous",
+    valid_label_ids: list[int] | None = None,
 ) -> DataLoader:
     dataset = SpectralDataset(
         X,
@@ -353,6 +362,8 @@ def _make_loader(
         class_map=class_map,
         inverse_class_map=inverse_class_map,
         sample_ids=sample_ids,
+        label_validation=label_validation,
+        valid_label_ids=valid_label_ids,
     )
     generator = torch.Generator()
     generator.manual_seed(seed)
@@ -373,6 +384,37 @@ def _clone_augmentation(augmentation):
     if augmentation is None:
         return None
     return copy.deepcopy(augmentation)
+
+
+def _clinical_splits_enabled(stage: str, cfg: dict) -> bool:
+    """Clinical OOD loaders are stage-aware and opt-in outside transfer."""
+    if stage == "transfer_5class":
+        return True
+    clinical_cfg = cfg.get("evaluation", {}).get("clinical_ood", {})
+    return bool(clinical_cfg.get("enabled", False)) and stage == "pretrain_treatment_8class"
+
+
+def _finetune_split_enabled(stage: str, cfg: dict) -> bool:
+    """The adaptation split is only built when explicitly requested."""
+    if cfg.get("training", {}).get("finetune", {}).get("enabled", False):
+        return True
+    return bool(cfg.get("data", {}).get("include_finetune_split", False))
+
+
+def _clinical_label_validation(stage: str) -> str:
+    if stage == "pretrain_treatment_8class":
+        return "range"
+    if stage == "transfer_5class":
+        return "range"
+    return "membership"
+
+
+def _valid_label_ids(stage: str, clinical_sparse_ids: list[int] | None) -> list[int] | None:
+    if stage == "pretrain_treatment_8class":
+        return list(range(8))
+    if stage == "transfer_5class" and clinical_sparse_ids is not None:
+        return list(range(len(clinical_sparse_ids)))
+    return clinical_sparse_ids
 
 
 def _seed_worker(worker_id: int) -> None:
