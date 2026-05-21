@@ -54,7 +54,7 @@ training:
   target_supervised:
     enabled: false
     weight: 1.0
-  
+
   use_dann: false
   dann:
     enabled: false

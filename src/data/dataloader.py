@@ -65,6 +65,10 @@ def build_all_loaders(
     if train_views not in (1, 2):
         raise ValueError("train_views must be 1 or 2")
 
+    source_batch_size = batch_size
+    # Clinical train loader uses the same batch size as source by default.
+    clinical_train_batch_size = batch_size
+
     loaders = {}
     clinical_enabled = _clinical_splits_enabled(stage, cfg)
     
@@ -250,7 +254,7 @@ def build_all_loaders(
             y_clin_tr,
             augmentation=_clone_augmentation(augmentation),
             training=True,
-            batch_size=batch_size,
+            batch_size=clinical_train_batch_size,
             num_workers=num_workers,
             shuffle=True,
             seed=seed + 5,

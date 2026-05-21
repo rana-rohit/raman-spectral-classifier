@@ -362,8 +362,10 @@ def main():
 
     from src.utils.logging import print_model_summary
     from src.utils.logging import print_feature_summary
+    from src.utils.logging import print_clinical_adaptation_config
     print_model_summary(args.model, cfg["model"])
     print_feature_summary(cfg)
+    print_clinical_adaptation_config(cfg)
 
     print("\n[3/4] Training...")
     contrastive_enabled = cfg.get("training", {}).get("supcon", {}).get("enabled", False)

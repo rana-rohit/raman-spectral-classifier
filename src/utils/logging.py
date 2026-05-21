@@ -330,6 +330,32 @@ def print_feature_summary(cfg: Dict[str, Any]) -> None:
     print()
 
 
+def print_clinical_adaptation_config(cfg: Dict[str, Any]) -> None:
+    """Print the resolved Stage 3 clinical adaptation configuration."""
+    train_cfg = cfg.get("training", {})
+    target_cfg = train_cfg.get("target_supervised", {})
+    coral_start = float(train_cfg.get("coral", {}).get("weight", 0.0))
+    dann_start = float(train_cfg.get("dann", {}).get("weight", 0.0))
+    target_mult = float(target_cfg.get("weight", 1.0))
+
+    border = "=" * 60
+    print(border)
+    print("CLINICAL ADAPTATION CONFIGURATION")
+    print("=" * 34)
+    print("Source Domain: reference")
+    print("Target Domain: clinical")
+    print("Source:Target Batch Ratio: 1:1 (default)")
+    print(f"Reference CE Weight (baseline): 1.000")
+    print(f"Clinical CE Multiplier (target_supervised.weight): {target_mult:.3f}")
+    print(f"CORAL Weight: {coral_start:.3f}")
+    print(f"DANN Weight: {dann_start:.3f}")
+
+    print("Adaptation Curriculum: none (static weights only)")
+    print("Goal: Validate corrected transfer-learning baseline with explicit provenance and grouped evaluation.")
+    print(border)
+    print()
+
+
 def print_label_space_info(label_space: str, clinical_sparse_ids: Optional[list] = None) -> None:
     """Print detailed, stage-aware explanation of the target label space."""
     print("LABEL SPACE:")

@@ -73,6 +73,10 @@ class SpectralDataset(Dataset):
     def __getitem__(self, idx: int):
         x = self.X[idx].copy()
         y_tensor = torch.as_tensor(self.y[idx], dtype=torch.long)
+        # Per-sample provenance string (e.g. "split:123").
+        # Keep as a Python str so DataLoader's default collate
+        # produces a list of strings which we can group on later.
+        sample_id = str(self.sample_ids[idx])
 
         if self.n_views == 2 and self.training:
             x1 = self._transform_sample(x.copy())
@@ -88,11 +92,6 @@ class SpectralDataset(Dataset):
         x = self._transform_sample(x)
         x_tensor = self._to_multichannel(x, idx)
         return x_tensor, y_tensor
-    """
-    Returns:
-    - Dict with x1, x2, y if n_views == 2
-    - Tuple (x, y) otherwise
-    """
 
     def _to_multichannel(self, x: np.ndarray, idx: int) -> torch.Tensor:
         """

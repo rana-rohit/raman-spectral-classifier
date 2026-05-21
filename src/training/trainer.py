@@ -164,6 +164,18 @@ class Trainer:
         target_cfg = self.train_cfg.get("target_supervised", {})
         self.target_supervised_enabled = target_cfg.get("enabled", False)
         self.target_supervised_weight = float(target_cfg.get("weight", 1.0))
+        # Note: experimental adaptation/balancing configs were removed
+        # to preserve the original Stage-3 optimization philosophy.
+        # Use static coral/dann weights and `target_supervised_weight` for
+        # target supervision scaling.
+        self.alpha_schedule = {}
+        self.coral_schedule = {}
+        self.dann_schedule = {}
+
+        # RNG for deterministic intra-batch subsampling when needed
+        seed = int(cfg.get("seed", 42))
+        self._batch_rng = torch.Generator()
+        self._batch_rng.manual_seed(seed)
 
         # --------------------------------------------------------
         # MULTITASK SEMANTIC INTEGRITY
@@ -425,6 +437,9 @@ class Trainer:
         return results
 
     def _train_one_epoch(self, epoch: int) -> Dict[str, float]:
+        # Use static coral and dann weights (no curriculum scheduling)
+        coral_w = float(self.coral_weight)
+        dann_w = float(self.dann_weight)
         self.augment.set_epoch(epoch)
         self.model.train()
         total_loss = 0.0
@@ -451,42 +466,52 @@ class Trainer:
             if self.clinical_iter is not None:
                 clin_batch = next(self.clinical_iter)
 
+            # Parse source batch
             x1, x2, y = self._parse_batch(batch)
-            x_clin = None
 
+            # Optionally parse clinical batch and construct a domain-balanced batch
+            x_clin = None
+            y_clin = None
             if clin_batch is not None:
                 x_clin, _, y_clin = self._parse_batch(clin_batch, augment=False)
 
+            # Stage-3 adaptation is balanced primarily through loader batch sizes.
+            # Source and clinical batches remain separate so source/target losses,
+            # CORAL, and DANN can be tracked independently.
+            src_x1, src_x2, src_y = x1, x2, y
+            clin_x1, clin_y = x_clin, y_clin
+
             self.optimizer.zero_grad(set_to_none=True)
 
-            outputs1 = self._normalize_outputs(self.model(x1))
-            self._assert_logits_and_targets(outputs1["main_logits"], y, "source")
-            
+            # Forward pass for source part (if present)
+            outputs1 = None
             outputs2 = None
-            if x2 is not None:
-                outputs2 = self._normalize_outputs(self.model(x2))
+            if src_x1 is not None and src_x1.size(0) > 0:
+                src_x1 = src_x1.to(self.device)
+                src_y = src_y.to(self.device)
+                outputs1 = self._normalize_outputs(self.model(src_x1))
+                self._assert_logits_and_targets(outputs1["main_logits"], src_y, "source")
+
+            # For simplicity we do not support multi-view clinical inputs here; clinical loader should be single-view
+            outputs_clin = None
+            if clin_x1 is not None and clin_x1.size(0) > 0:
+                clin_x1 = clin_x1.to(self.device)
+                clin_y = clin_y.to(self.device)
+                outputs_clin = self._normalize_outputs(self.model(clin_x1))
+                self._assert_logits_and_targets(outputs_clin["main_logits"], clin_y, "target")
                 
             coral_term = self._zero_loss()
 
-            outputs_clin = None
             target_loss = self._zero_loss()
 
-            if x_clin is not None:
-
-                outputs_clin = self._normalize_outputs(self.model(x_clin))
-                self._assert_logits_and_targets(outputs_clin["main_logits"], y_clin, "target")
-
-                if self.coral_enabled:
-                    feat_ref = outputs1.get("features")
-                    feat_clin = outputs_clin.get("features")
-                    
-                    if feat_ref is not None and feat_clin is not None:
-
-                        min_bs = min(feat_ref.size(0), feat_clin.size(0))
-                        feat_ref = feat_ref[:min_bs]
-                        feat_clin = feat_clin[:min_bs]
-
-                        coral_term = coral_loss(feat_ref, feat_clin)
+            if outputs1 is not None and outputs_clin is not None and self.coral_enabled:
+                feat_ref = outputs1.get("features")
+                feat_clin = outputs_clin.get("features")
+                if feat_ref is not None and feat_clin is not None:
+                    min_bs = min(feat_ref.size(0), feat_clin.size(0))
+                    feat_ref = feat_ref[:min_bs]
+                    feat_clin = feat_clin[:min_bs]
+                    coral_term = coral_loss(feat_ref, feat_clin)
                             
             if self.contrastive_learning_enabled and self.classification_weight == 0.0:
                 source_loss = self._zero_loss()
@@ -510,13 +535,10 @@ class Trainer:
                 if (
                     outputs_clin is not None
                     and self.target_supervised_enabled
-                    and self.target_supervised_weight > 0.0
                 ):
-                    target_loss = self.loss_fn(outputs_clin["main_logits"], y_clin)
-                    main_loss = (
-                        source_loss
-                        + self.target_supervised_weight * target_loss
-                    ) / (1.0 + self.target_supervised_weight)
+                    target_loss = self.loss_fn(outputs_clin["main_logits"], clin_y)
+                    # Restore original Stage-3 weighting: source + w_target * target
+                    main_loss = source_loss + self.target_supervised_weight * target_loss
                 else:
                     main_loss = source_loss
 
@@ -538,7 +560,7 @@ class Trainer:
                     )
             
             if outputs_clin is not None and self.target_supervised_enabled:
-                aux_loss = self._compute_aux_loss(outputs_clin, y_clin)
+                aux_loss = self._compute_aux_loss(outputs_clin, clin_y)
             else:
                 aux_loss = self._compute_aux_loss(outputs1, y)
 
@@ -576,7 +598,7 @@ class Trainer:
                 + self.consistency_weight * consistency_term
                 + self.supcon_weight * supcon_term
                 + l2sp_term
-                + coral_weight * coral_term
+                + coral_w * coral_term
             )
             
             # DANN
@@ -619,7 +641,7 @@ class Trainer:
                     total_domain_loss += domain_loss.item() * domain_batch_size
                     total_domain_samples += domain_batch_size
 
-                    loss = loss + self.dann_weight * domain_loss
+                    loss = loss + dann_w * domain_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
@@ -978,6 +1000,7 @@ class Trainer:
 
     def _zero_loss(self) -> torch.Tensor:
         return torch.tensor(0.0, device=self.device)
+    
 
     def _assert_logits_and_targets(
         self,
