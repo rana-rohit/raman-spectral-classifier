@@ -186,6 +186,7 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
         kernel_sizes = getattr(model, "kernel_sizes", [])
         use_residual = getattr(model, "use_residual", False)
         bottleneck_channels = getattr(model, "bottleneck_channels", 0)
+        input_channels = getattr(model, "in_channels", None)
         print("\n============================================================")
         print("MODEL SUMMARY")
         print("=============")
@@ -193,6 +194,8 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
         print(f"Kernel Sizes: {kernel_sizes}")
         print(f"Residual Connections: {'Enabled' if use_residual else 'Disabled'}")
         print(f"Bottleneck Channels: {bottleneck_channels}")
+        if input_channels is not None:
+            print(f"Input Channels: {input_channels}")
         print(f"Total Parameters: {n_params:,}")
         print("============================================================\n")
     return model
