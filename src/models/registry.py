@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import torch.nn as nn
+import torch
 
 from src.models.cnn import CNN1D
 from src.models.multitask import MultiHeadSpectralModel
