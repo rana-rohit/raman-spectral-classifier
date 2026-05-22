@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import torch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -29,6 +30,11 @@ def parse_args():
     p.add_argument("--compare", nargs="+", default=None)
     p.add_argument("--split", default="test")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--no-save-outputs",
+        action="store_true",
+        help="Skip saving predictions/probabilities/features for plotting",
+    )
     return p.parse_args()
 
 
@@ -117,7 +123,83 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     return loaders, n_classes
 
 
-def evaluate_one(exp_dir: str, seed: int) -> dict:
+def _normalize_outputs(outputs):
+    if torch.is_tensor(outputs):
+        return {
+            "main_logits": outputs,
+            "features": None,
+        }
+    if isinstance(outputs, dict):
+        return {
+            "main_logits": outputs["main_logits"],
+            "features": outputs.get("features"),
+        }
+    raise TypeError(f"Unsupported model output type: {type(outputs)!r}")
+
+
+@torch.no_grad()
+def _collect_outputs(model, loader, device: torch.device):
+    logits_list = []
+    targets_list = []
+    features_list = []
+    has_features = True
+
+    for batch in loader:
+        if isinstance(batch, dict):
+            x = batch["x1"].to(device)
+            y = batch["y"].to(device)
+        elif isinstance(batch, (tuple, list)) and len(batch) == 2:
+            x = batch[0].to(device)
+            y = batch[1].to(device)
+        else:
+            raise TypeError(f"Unsupported batch type: {type(batch)!r}")
+
+        outputs = _normalize_outputs(model(x))
+        logits = outputs["main_logits"]
+        feats = outputs.get("features")
+
+        logits_list.append(logits.detach().cpu())
+        targets_list.append(y.detach().cpu())
+
+        if feats is None:
+            has_features = False
+        else:
+            features_list.append(feats.detach().cpu())
+
+    logits_all = torch.cat(logits_list, dim=0).numpy()
+    targets_all = torch.cat(targets_list, dim=0).numpy()
+    features_all = None
+    if has_features and features_list:
+        features_all = torch.cat(features_list, dim=0).numpy()
+
+    return logits_all, targets_all, features_all
+
+
+def _save_outputs(exp_dir: str, split_name: str, logits, targets, features) -> None:
+    import numpy as np
+    from pathlib import Path
+    import torch.nn.functional as F
+
+    out_dir = Path(exp_dir) / "predictions"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    logits_t = torch.from_numpy(logits)
+    probs = F.softmax(logits_t, dim=-1).numpy()
+    preds = probs.argmax(axis=-1)
+
+    np.save(out_dir / f"{split_name}_logits.npy", logits)
+    np.save(out_dir / f"{split_name}_probabilities.npy", probs)
+    np.save(out_dir / f"{split_name}_predictions.npy", preds)
+    np.save(out_dir / f"{split_name}_targets.npy", targets)
+
+    if features is not None:
+        emb_dir = Path(exp_dir) / "embeddings"
+        emb_dir.mkdir(parents=True, exist_ok=True)
+        np.save(emb_dir / f"{split_name}_features.npy", features)
+        np.save(emb_dir / f"{split_name}_targets.npy", targets)
+
+
+def evaluate_one(exp_dir: str, seed: int, save_outputs: bool = True) -> dict:
     cfg_path = os.path.join(exp_dir, "config.yaml")
     cfg = load_config(cfg_path)
     task_cfg = cfg["task"]
@@ -187,6 +269,22 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
     eval_path = os.path.join(exp_dir, f"{stage}_eval_results.json")
     evaluator.save(eval_path)
 
+    if save_outputs:
+        device = next(model.parameters()).device
+        for split_name, loader in [
+            ("test", loaders.get("test")),
+            ("train", loaders.get("train")),
+            ("val", loaders.get("val")),
+        ]:
+            if loader is None:
+                continue
+            logits, targets, features = _collect_outputs(model, loader, device)
+            _save_outputs(exp_dir, split_name, logits, targets, features)
+
+        for split_name, loader in (loaders.get("ood", {}) or {}).items():
+            logits, targets, features = _collect_outputs(model, loader, device)
+            _save_outputs(exp_dir, split_name, logits, targets, features)
+
     from src.utils.logging import print_output_paths
     print_output_paths({"Evaluation Results JSON": eval_path})
     return results
@@ -195,11 +293,12 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
 def main():
     args = parse_args()
     set_seed(args.seed)
+    save_outputs = not args.no_save_outputs
 
     if args.exp_dir and not args.compare:
-        evaluate_one(args.exp_dir, args.seed)
+        evaluate_one(args.exp_dir, args.seed, save_outputs=save_outputs)
     elif args.compare:
-        all_results = [evaluate_one(exp_dir, args.seed) for exp_dir in args.compare]
+        all_results = [evaluate_one(exp_dir, args.seed, save_outputs=save_outputs) for exp_dir in args.compare]
         split_names = [args.split] + [
             name for name in all_results[0].get("splits", {}).keys()
             if name != args.split
