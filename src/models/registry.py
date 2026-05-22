@@ -18,6 +18,7 @@ import torch.nn as nn
 from src.models.cnn import CNN1D
 from src.models.multitask import MultiHeadSpectralModel
 from src.models.resnet1d import ResNet1D
+from src.models.inception1d import Inception1D
 from src.models.tcn import TCN1D
 from src.models.transformer import SpectralTransformer
 
@@ -28,6 +29,7 @@ MODEL_REGISTRY = {
     "seresnet1d": ResNet1D,
     "tcn": TCN1D,
     "transformer": SpectralTransformer,
+    "inception1d": Inception1D,
 }
 
 
@@ -179,6 +181,19 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Model: {name} | Parameters: {n_params:,}")
+    if name == "inception1d":
+        kernel_sizes = getattr(model, "kernel_sizes", [])
+        use_residual = getattr(model, "use_residual", False)
+        bottleneck_channels = getattr(model, "bottleneck_channels", 0)
+        print("\n============================================================")
+        print("MODEL SUMMARY")
+        print("=============")
+        print("Model: Inception1D")
+        print(f"Kernel Sizes: {kernel_sizes}")
+        print(f"Residual Connections: {'Enabled' if use_residual else 'Disabled'}")
+        print(f"Bottleneck Channels: {bottleneck_channels}")
+        print(f"Total Parameters: {n_params:,}")
+        print("============================================================\n")
     return model
 
 

@@ -1,0 +1,12 @@
+model:
+  name: inception1d
+  signal_length: 1000
+  n_classes: 5
+  in_channels: 2
+  stem_channels: 32
+  inception_channels: [64, 128, 256]
+  kernel_sizes: [3, 5, 7]
+  bottleneck_channels: 0
+  use_residual: false
+  dropout: 0.3
+  fc_dim: 256
