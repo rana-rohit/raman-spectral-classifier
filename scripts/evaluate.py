@@ -29,6 +29,20 @@ from src.utils.config import load_config
 from src.utils.seed import set_seed
 
 
+def _load_config_any(exp_dir: str) -> dict:
+    cfg_yaml = os.path.join(exp_dir, "config.yaml")
+    cfg_json = os.path.join(exp_dir, "config.json")
+    if os.path.exists(cfg_yaml):
+        return load_config(cfg_yaml)
+    if os.path.exists(cfg_json):
+        import json
+        with open(cfg_json, "r") as f:
+            return json.load(f)
+    raise FileNotFoundError(
+        f"No config.yaml or config.json found in {exp_dir}"
+    )
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Evaluate trained spectral classifiers")
     p.add_argument("--exp-dir", default=None)
@@ -195,8 +209,7 @@ def evaluate_one(
     include_predictions: bool = False,
     use_staging: bool = True,
 ) -> dict:
-    cfg_path = os.path.join(exp_dir, "config.yaml")
-    cfg = load_config(cfg_path)
+    cfg = _load_config_any(exp_dir)
     task_cfg = cfg["task"]
     stage = task_cfg["stage"]
     label_space = task_cfg["label_space"]

@@ -397,6 +397,115 @@ def write_summary_md(exp_dir: Path, model_name: str, stages: List[str], splits: 
         f.write("- tables/metrics_summary.csv\n")
 
 
+def run_all_plots(exp_dir: str, dpi: int = 500, no_staging: bool = False, no_embeddings: bool = False) -> None:
+    exp_path = Path(exp_dir)
+    if not exp_path.exists():
+        raise FileNotFoundError(f"Experiment directory not found: {exp_path}")
+
+    cfg = _load_config_any(exp_path)
+    model_name = cfg.get("model", {}).get("name", exp_path.name)
+
+    eval_paths = _find_eval_results(exp_path)
+    if not eval_paths:
+        raise FileNotFoundError("No *_eval_results.json found in experiment directory")
+
+    staging_dir = None
+    if not no_staging:
+        staging_dir = tempfile.mkdtemp(prefix="plot_staging_")
+        print(f"[generate_all_plots] Using staging directory: {staging_dir}")
+
+    base_dir = Path(staging_dir) if staging_dir else exp_path
+
+    plots_dir = base_dir / "plots"
+    reports_dir = base_dir / "reports"
+    tables_dir = base_dir / "tables"
+
+    # Plot subfolders
+    confusion_dir = plots_dir / "confusion"
+    grouped_dir = plots_dir / "grouped"
+    roc_dir = plots_dir / "roc"
+    comparison_dir = plots_dir / "comparison"
+    per_class_dir = plots_dir / "per_class"
+    summaries_dir = plots_dir / "summaries"
+    embeddings_dir = plots_dir / "embeddings"
+
+    for d in [plots_dir, reports_dir, tables_dir, confusion_dir, grouped_dir, roc_dir, comparison_dir, per_class_dir, summaries_dir, embeddings_dir]:
+        _ensure_dir(d)
+
+    stages = []
+    all_splits = set()
+    stage_summaries = []
+
+    pred_dir = exp_path / "predictions"
+    emb_dir = exp_path / "embeddings"
+
+    for eval_path in eval_paths:
+        stage = _stage_from_path(eval_path)
+        stages.append(stage)
+        title = _stage_title(stage)
+        with open(eval_path, "r") as f:
+            results = json.load(f)
+
+        splits = list(results.get("splits", {}).keys())
+        all_splits.update(splits)
+
+        # Metrics table per stage
+        write_metrics_table(results, tables_dir / f"metrics_summary_{stage}.csv")
+
+        # Grouped vs spectrum
+        plot_grouped_vs_spectrum(results, title, summaries_dir, dpi)
+
+        # Per split plots
+        for split in splits:
+            preds_bundle = _load_predictions(pred_dir, split)
+            if preds_bundle is None:
+                continue
+            logits, probs, targets = preds_bundle
+            preds = probs.argmax(axis=-1)
+            labels = _class_labels(cfg, probs.shape[1])
+
+            plot_confusion(split, targets, preds, labels, title, confusion_dir, dpi)
+            plot_roc_pr(split, probs, targets, labels, title, roc_dir, dpi)
+            plot_per_class(split, targets, preds, labels, title, per_class_dir, dpi)
+
+            group_metrics = results.get("splits", {}).get(split, {}).get("group_metrics", {})
+            if group_metrics:
+                plot_grouped_confusion(
+                    split,
+                    group_metrics.get("targets", []),
+                    group_metrics.get("predictions", []),
+                    labels,
+                    title,
+                    grouped_dir,
+                    dpi,
+                )
+
+            if not no_embeddings:
+                plot_embeddings(emb_dir, split, labels, title, embeddings_dir, dpi)
+
+        # Stage summary for comparison plots
+        test_metrics = results.get("splits", {}).get("test", {}).get("metrics", {})
+        if test_metrics:
+            stage_summaries.append({
+                "stage": stage,
+                "accuracy": test_metrics.get("accuracy", 0.0),
+                "f1_macro": test_metrics.get("f1_macro", 0.0),
+            })
+
+    # Stage comparison plot (if multiple stages exist)
+    plot_stage_comparison(stage_summaries, comparison_dir, dpi)
+
+    # Unified summary report
+    write_summary_md(exp_path, model_name, stages, sorted(all_splits), reports_dir / "experiment_summary.md")
+
+    if staging_dir is not None:
+        _copy_tree_contents(staging_dir, str(exp_path))
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+    plt.close("all")
+    print(f"[generate_all_plots] Completed plot generation in {exp_path / 'plots'}")
+
+
 def main() -> None:
     args = parse_args()
     exp_dir = Path(args.exp_dir)
@@ -442,70 +551,5 @@ def main() -> None:
 
     for eval_path in eval_paths:
         stage = _stage_from_path(eval_path)
-        stages.append(stage)
-        title = _stage_title(stage)
-        with open(eval_path, "r") as f:
-            results = json.load(f)
-
-        splits = list(results.get("splits", {}).keys())
-        all_splits.update(splits)
-
-        # Metrics table per stage
-        write_metrics_table(results, tables_dir / f"metrics_summary_{stage}.csv")
-
-        # Grouped vs spectrum
-        plot_grouped_vs_spectrum(results, title, summaries_dir, args.dpi)
-
-        # Per split plots
-        for split in splits:
-            preds_bundle = _load_predictions(pred_dir, split)
-            if preds_bundle is None:
-                continue
-            logits, probs, targets = preds_bundle
-            preds = probs.argmax(axis=-1)
-            labels = _class_labels(cfg, probs.shape[1])
-
-            plot_confusion(split, targets, preds, labels, title, confusion_dir, args.dpi)
-            plot_roc_pr(split, probs, targets, labels, title, roc_dir, args.dpi)
-            plot_per_class(split, targets, preds, labels, title, per_class_dir, args.dpi)
-
-            group_metrics = results.get("splits", {}).get(split, {}).get("group_metrics", {})
-            if group_metrics:
-                plot_grouped_confusion(
-                    split,
-                    group_metrics.get("targets", []),
-                    group_metrics.get("predictions", []),
-                    labels,
-                    title,
-                    grouped_dir,
-                    args.dpi,
-                )
-
-            if not args.no_embeddings:
-                plot_embeddings(emb_dir, split, labels, title, embeddings_dir, args.dpi)
-
-        # Stage summary for comparison plots
-        test_metrics = results.get("splits", {}).get("test", {}).get("metrics", {})
-        if test_metrics:
-            stage_summaries.append({
-                "stage": stage,
-                "accuracy": test_metrics.get("accuracy", 0.0),
-                "f1_macro": test_metrics.get("f1_macro", 0.0),
-            })
-
-    # Stage comparison plot (if multiple stages exist)
-    plot_stage_comparison(stage_summaries, comparison_dir, args.dpi)
-
-    # Unified summary report
-    write_summary_md(exp_dir, model_name, stages, sorted(all_splits), reports_dir / "experiment_summary.md")
-
-    if staging_dir is not None:
-        _copy_tree_contents(staging_dir, str(exp_dir))
-        shutil.rmtree(staging_dir, ignore_errors=True)
-
-    plt.close("all")
-    print(f"[generate_all_plots] Completed plot generation in {exp_dir / 'plots'}")
-
-
-if __name__ == "__main__":
+        run_all_plots(args.exp_dir, dpi=args.dpi, no_staging=args.no_staging, no_embeddings=args.no_embeddings)
     main()
