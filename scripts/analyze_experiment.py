@@ -25,7 +25,7 @@ from typing import Dict, List, Optional
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from scripts.evaluate import evaluate_one, _load_config_any
-from scripts.generate_all_plots import run_all_plots
+from scripts.generate_research_plots import run_all_plots
 
 
 @dataclass
