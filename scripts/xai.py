@@ -15,8 +15,27 @@ from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config
 from src.utils.seed import set_seed
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+
+def plot_saliency(signal, saliency, save_path):
+    """Inline saliency plot (migrated from scripts/plot_saliency.py)."""
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(signal, label="Signal")
+    ax.plot(saliency, label="Saliency", alpha=0.7)
+    ax.set_xlabel("Wavelength Index")
+    ax.set_ylabel("Intensity / Importance")
+    ax.set_title("Saliency Map")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
 from src.xai.saliency import compute_saliency, compute_smoothgrad
-from scripts.plot_saliency import plot_saliency
 from metadata.ontology import (
     COMPACT_TO_GLOBAL,
     GLOBAL_TREATMENTS,

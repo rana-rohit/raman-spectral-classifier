@@ -38,15 +38,21 @@ from src.data.augmentation import AugmentationPipeline
 from itertools import cycle
 
 class EarlyStopping:
-    def __init__(self, patience: int = 10, min_delta: float = 1e-4) -> None: 
+    def __init__(self, patience: int = 10, min_delta: float = 1e-4, mode: str = "max") -> None: 
         self.patience = patience
         self.min_delta = min_delta
-        self._best = -float("inf")
+        self.mode = mode
+        self._best = -float("inf") if mode == "max" else float("inf")
         self._counter = 0
         self.should_stop = False
 
     def step(self, metric: float) -> bool:
-        if metric > self._best + self.min_delta:
+        if self.mode == "max":
+            improved = metric > self._best + self.min_delta
+        else:
+            improved = metric < self._best - self.min_delta
+
+        if improved:
             self._best = metric
             self._counter = 0
         else:
@@ -68,6 +74,15 @@ class GradReverse(Function):
     @staticmethod
     def backward(ctx, grad_output):
         return -ctx.lambda_ * grad_output, None
+
+
+def _training_feature_enabled(train_cfg: dict, section: str, alias: str | None = None) -> bool:
+    """Resolve explicit optional training feature flags without implicit defaults."""
+    enabled = bool(train_cfg.get(section, {}).get("enabled", False))
+    if alias is not None:
+        enabled = bool(train_cfg.get(alias, False) or enabled)
+    return enabled
+
 
 class Trainer:
     def __init__(
@@ -131,16 +146,36 @@ class Trainer:
             )
 
         self.dann_cfg = self.train_cfg.get("dann", {})
-        self.dann_enabled = self.dann_cfg.get("enabled", False)
+        self.dann_enabled = _training_feature_enabled(
+            self.train_cfg,
+            "dann",
+            alias="use_dann",
+        )
         self.dann_weight = self.dann_cfg.get("weight", 0.5)
         self.coral_cfg = self.train_cfg.get("coral", {})
-        self.coral_enabled = self.coral_cfg.get("enabled", False)
+        self.coral_enabled = _training_feature_enabled(
+            self.train_cfg,
+            "coral",
+            alias="use_coral",
+        )
         self.coral_weight = self.coral_cfg.get("weight", 0.5)
         self.monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
         self.gradient_clip = self.train_cfg.get("gradient_clip", 1.0)
         target_cfg = self.train_cfg.get("target_supervised", {})
-        self.target_supervised_enabled = target_cfg.get("enabled", True)
+        self.target_supervised_enabled = target_cfg.get("enabled", False)
         self.target_supervised_weight = float(target_cfg.get("weight", 1.0))
+        # Note: experimental adaptation/balancing configs were removed
+        # to preserve the original Stage-3 optimization philosophy.
+        # Use static coral/dann weights and `target_supervised_weight` for
+        # target supervision scaling.
+        self.alpha_schedule = {}
+        self.coral_schedule = {}
+        self.dann_schedule = {}
+
+        # RNG for deterministic intra-batch subsampling when needed
+        seed = int(cfg.get("seed", 42))
+        self._batch_rng = torch.Generator()
+        self._batch_rng.manual_seed(seed)
 
         # --------------------------------------------------------
         # MULTITASK SEMANTIC INTEGRITY
@@ -151,12 +186,11 @@ class Trainer:
         # (e.g. treating Meropenem as C. albicans).
         # --------------------------------------------------------
         if self.target_supervised_enabled and stage == "pretrain_30class":
-            print(
-                "[Audit Fix] WARNING: Disabling target_supervised because "
-                "clinical labels (treatments) cannot be supervised in "
-                "isolate-space. This prevents catastrophic semantic corruption."
+            raise ValueError(
+                "training.target_supervised.enabled=True is invalid for "
+                "pretrain_30class because clinical treatment labels cannot "
+                "supervise isolate-space logits."
             )
-            self.target_supervised_enabled = False
 
         # --------------------------------------------------------
         # Clinical data must ONLY participate during
@@ -190,12 +224,97 @@ class Trainer:
         self.consistency_enabled = self.consistency_cfg.get("enabled", False)
         self.consistency_weight = self.consistency_cfg.get("loss_weight", 0.0)
         self.supcon_cfg = self.train_cfg.get("supcon", {})
-        self.supcon_enabled = self.supcon_cfg.get("enabled", False)
-        self.supcon_weight = self.supcon_cfg.get("weight", 0.0)
-        self.supcon_loss = SupConLoss(
-            temperature=self.supcon_cfg.get("temperature", 0.1)
-        )
+        self.supcon_enabled = False
+        self.supcon_weight = 0.0
+        self.supcon_loss = None
         self.supervised_on_both_views = self.consistency_cfg.get("supervised_on_both_views", True)
+
+        # Canonical supervised contrastive training configuration.
+        # training.supcon.enabled is the source of truth after config
+        # resolution. model.contrastive remains a compatibility alias
+        # for older direct get_model/build_trainer tests and configs.
+        legacy_contrastive = bool(cfg.get("model", {}).get("contrastive", False))
+        if legacy_contrastive and not self.supcon_cfg.get("enabled", False):
+            self.supcon_cfg = {
+                **self.supcon_cfg,
+                "enabled": True,
+                "weight": self.train_cfg.get("contrastive_weight", 0.7),
+                "classification_weight": self.train_cfg.get("classification_weight", 0.3),
+                "temperature": self.train_cfg.get("temperature", 0.07),
+                "projection_dim": cfg.get("model", {}).get("projection_dim", 128),
+            }
+        self.contrastive_learning_enabled = bool(self.supcon_cfg.get("enabled", False))
+        self.contrastive_weight = float(self.supcon_cfg.get("weight", 0.0))
+        self.classification_weight = float(
+            self.supcon_cfg.get("classification_weight", 1.0)
+        )
+
+        if self.contrastive_weight == 0.0:
+            self.contrastive_learning_enabled = False
+
+        if self.contrastive_learning_enabled and not hasattr(self.model, "projection_head"):
+            raise ValueError(
+                "training.supcon.enabled=True requires a model projection_head. "
+                "Build the model through src.models.registry.get_model() with "
+                "the resolved training.supcon config."
+            )
+            
+        self.is_pure_supcon = False
+        if self.contrastive_learning_enabled:
+            self.supcon_temp = self.supcon_cfg.get("temperature", 0.07)
+            self.supcon_loss_fn = SupConLoss(temperature=self.supcon_temp)
+            
+            p_dim = self.supcon_cfg.get(
+                "projection_dim",
+                cfg.get("model", {}).get("projection_dim", 128),
+            )
+            
+            # Determine trainable/frozen modules
+            trainable_mods = []
+            frozen_mods = []
+            for name, param in self.model.named_parameters():
+                mod_name = name.split(".")[0]
+                if mod_name == "backbone" and len(name.split(".")) > 1 and name.split(".")[1] == "classifier":
+                    mod_name = "classifier"
+                if param.requires_grad:
+                    if mod_name not in trainable_mods:
+                        trainable_mods.append(mod_name)
+                else:
+                    if mod_name not in frozen_mods:
+                        frozen_mods.append(mod_name)
+            
+            trainable_mods = sorted(list(set(trainable_mods)))
+            frozen_mods = sorted(list(set(frozen_mods)))
+            
+            is_joint = self.classification_weight > 0.0 and self.contrastive_weight > 0.0
+            
+            print("\n============================================================")
+            if is_joint:
+                print("JOINT SUPERVISED CONTRASTIVE TRAINING")
+            else:
+                print("PURE SUPERVISED CONTRASTIVE PRETRAINING (PHASE 1)")
+            print("============================================================")
+            print(f"SupCon Enabled:        True")
+            print(f"Multi-View Mode:       True")
+            print(f"Number of Views:       2")
+            print(f"Projection Dim:        {p_dim}")
+            print(f"Temperature:           {self.supcon_temp}")
+            print(f"Contrastive Weight:    {self.contrastive_weight}")
+            print(f"Classification Weight: {self.classification_weight}")
+            
+            losses = []
+            if self.contrastive_weight > 0.0:
+                losses.append("Supervised Contrastive (SupCon)")
+            if self.classification_weight > 0.0:
+                losses.append("Cross Entropy (Classification)")
+            print(f"Active Losses:         {', '.join(losses)}")
+            print(f"Trainable Modules:     {', '.join(trainable_mods) if trainable_mods else 'None'}")
+            print(f"Frozen Modules:        {', '.join(frozen_mods) if frozen_mods else 'None'}")
+            print("============================================================\n")
+            
+            # Print dynamic projection tensor shape info once at startup
+            batch_sz = self.train_cfg.get("batch_size", 128)
+            print(f"\n[SupCon] Projection Tensor Shape: ({batch_sz}, 2, {p_dim})\n")
 
         self.l2sp = None
         l2sp_cfg = self.train_cfg.get("l2sp", {})
@@ -226,8 +345,11 @@ class Trainer:
                     m.requires_grad_(True)   # still allow gamma/beta to learn
 
         print(f"  Device: {self.device}")
+        monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
+        mode = "min" if "loss" in monitor_metric else "max"
         self.early_stopping = EarlyStopping(
-            patience=self.train_cfg.get("early_stopping_patience", 10)
+            patience=self.train_cfg.get("early_stopping_patience", 10),
+            mode=mode
         )
 
     def fit(self) -> Dict:
@@ -262,7 +384,10 @@ class Trainer:
             else:
                 self.scheduler.step()
 
-            is_best = monitor_value >= self.early_stopping.best
+            if self.early_stopping.mode == "max":
+                is_best = monitor_value >= self.early_stopping.best
+            else:
+                is_best = monitor_value <= self.early_stopping.best
             save_checkpoint(
                 path=str(self.exp_dir / "checkpoints" / f"epoch_{epoch:03d}.pt"),
                 model=self.model,
@@ -312,6 +437,9 @@ class Trainer:
         return results
 
     def _train_one_epoch(self, epoch: int) -> Dict[str, float]:
+        # Use static coral and dann weights (no curriculum scheduling)
+        coral_w = float(self.coral_weight)
+        dann_w = float(self.dann_weight)
         self.augment.set_epoch(epoch)
         self.model.train()
         total_loss = 0.0
@@ -325,6 +453,8 @@ class Trainer:
         total_coral_loss = 0.0
         total_domain_loss = 0.0
         total_domain_samples = 0
+        total_contrastive_loss = 0.0
+        total_classification_loss = 0.0
         total = 0
         t0 = time.time()
         source_logits, source_targets = [], []
@@ -336,62 +466,105 @@ class Trainer:
             if self.clinical_iter is not None:
                 clin_batch = next(self.clinical_iter)
 
+            # Parse source batch
             x1, x2, y = self._parse_batch(batch)
-            x_clin = None
 
+            # Optionally parse clinical batch and construct a domain-balanced batch
+            x_clin = None
+            y_clin = None
             if clin_batch is not None:
                 x_clin, _, y_clin = self._parse_batch(clin_batch, augment=False)
 
+            # Stage-3 adaptation is balanced primarily through loader batch sizes.
+            # Source and clinical batches remain separate so source/target losses,
+            # CORAL, and DANN can be tracked independently.
+            src_x1, src_x2, src_y = x1, x2, y
+            clin_x1, clin_y = x_clin, y_clin
+
             self.optimizer.zero_grad(set_to_none=True)
 
-            outputs1 = self._normalize_outputs(self.model(x1))
-            self._assert_logits_and_targets(outputs1["main_logits"], y, "source")
+            # Forward pass for source part (if present)
+            outputs1 = None
+            outputs2 = None
+            if src_x1 is not None and src_x1.size(0) > 0:
+                src_x1 = src_x1.to(self.device)
+                src_y = src_y.to(self.device)
+                outputs1 = self._normalize_outputs(self.model(src_x1))
+                self._assert_logits_and_targets(outputs1["main_logits"], src_y, "source")
+
+            # For simplicity we do not support multi-view clinical inputs here; clinical loader should be single-view
+            outputs_clin = None
+            if clin_x1 is not None and clin_x1.size(0) > 0:
+                clin_x1 = clin_x1.to(self.device)
+                clin_y = clin_y.to(self.device)
+                outputs_clin = self._normalize_outputs(self.model(clin_x1))
+                self._assert_logits_and_targets(outputs_clin["main_logits"], clin_y, "target")
+                
             coral_term = self._zero_loss()
 
-            outputs_clin = None
             target_loss = self._zero_loss()
 
-            if x_clin is not None:
-
-                outputs_clin = self._normalize_outputs(self.model(x_clin))
-                self._assert_logits_and_targets(outputs_clin["main_logits"], y_clin, "target")
-
-                if self.coral_enabled:
-                    feat_ref = outputs1.get("features")
-                    feat_clin = outputs_clin.get("features")
-                    
-                    if feat_ref is not None and feat_clin is not None:
-
-                        min_bs = min(feat_ref.size(0), feat_clin.size(0))
-                        feat_ref = feat_ref[:min_bs]
-                        feat_clin = feat_clin[:min_bs]
-
-                        coral_term = coral_loss(feat_ref, feat_clin)
-                        if epoch == 1 and total == 0:
-                            print(f"[DEBUG] CORAL LOSS: {coral_term.item():.6f}")
+            if outputs1 is not None and outputs_clin is not None and self.coral_enabled:
+                feat_ref = outputs1.get("features")
+                feat_clin = outputs_clin.get("features")
+                if feat_ref is not None and feat_clin is not None:
+                    min_bs = min(feat_ref.size(0), feat_clin.size(0))
+                    feat_ref = feat_ref[:min_bs]
+                    feat_clin = feat_clin[:min_bs]
+                    coral_term = coral_loss(feat_ref, feat_clin)
                             
-            source_loss = self.loss_fn(outputs1["main_logits"], y)
-            if (
-                outputs_clin is not None
-                and self.target_supervised_enabled
-                and self.target_supervised_weight > 0.0
-            ):
-                target_loss = self.loss_fn(outputs_clin["main_logits"], y_clin)
-                main_loss = (
-                    source_loss
-                    + self.target_supervised_weight * target_loss
-                ) / (1.0 + self.target_supervised_weight)
+            if self.contrastive_learning_enabled and self.classification_weight == 0.0:
+                source_loss = self._zero_loss()
+                main_loss = self._zero_loss()
+                classification_loss_term = self._zero_loss()
+                
+                # Pure contrastive loss term
+                contrastive_loss_term = self._zero_loss()
+                proj1 = outputs1.get("projection_features")
+                proj2 = outputs2.get("projection_features") if outputs2 is not None else None
+                if proj1 is not None:
+                    if proj2 is not None:
+                        proj_feats = torch.stack([proj1, proj2], dim=1)
+                    else:
+                        proj_feats = proj1
+                    contrastive_loss_term = self.supcon_loss_fn(proj_feats, y)
+                
+                main_loss = contrastive_loss_term
             else:
-                main_loss = source_loss
+                source_loss = self.loss_fn(outputs1["main_logits"], y)
+                if (
+                    outputs_clin is not None
+                    and self.target_supervised_enabled
+                ):
+                    target_loss = self.loss_fn(outputs_clin["main_logits"], clin_y)
+                    # Restore original Stage-3 weighting: source + w_target * target
+                    main_loss = source_loss + self.target_supervised_weight * target_loss
+                else:
+                    main_loss = source_loss
+
+                # Contrastive hybrid training objective
+                contrastive_loss_term = self._zero_loss()
+                classification_loss_term = main_loss
+                if self.contrastive_learning_enabled:
+                    proj1 = outputs1.get("projection_features")
+                    proj2 = outputs2.get("projection_features") if outputs2 is not None else None
+                    if proj1 is not None:
+                        if proj2 is not None:
+                            proj_feats = torch.stack([proj1, proj2], dim=1)
+                        else:
+                            proj_feats = proj1
+                        contrastive_loss_term = self.supcon_loss_fn(proj_feats, y)
+                    main_loss = (
+                        self.contrastive_weight * contrastive_loss_term
+                        + self.classification_weight * classification_loss_term
+                    )
             
             if outputs_clin is not None and self.target_supervised_enabled:
-                aux_loss = self._compute_aux_loss(outputs_clin, y_clin)
+                aux_loss = self._compute_aux_loss(outputs_clin, clin_y)
             else:
                 aux_loss = self._compute_aux_loss(outputs1, y)
 
-            outputs2 = None
-            if x2 is not None:
-                outputs2 = self._normalize_outputs(self.model(x2))
+
 
             consistency_term = self._compute_consistency_loss(outputs1, outputs2, y)
             supcon_term = self._zero_loss()
@@ -425,7 +598,7 @@ class Trainer:
                 + self.consistency_weight * consistency_term
                 + self.supcon_weight * supcon_term
                 + l2sp_term
-                + coral_weight * coral_term
+                + coral_w * coral_term
             )
             
             # DANN
@@ -468,7 +641,7 @@ class Trainer:
                     total_domain_loss += domain_loss.item() * domain_batch_size
                     total_domain_samples += domain_batch_size
 
-                    loss = loss + self.dann_weight * domain_loss
+                    loss = loss + dann_w * domain_loss
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
@@ -483,6 +656,9 @@ class Trainer:
             total_consistency_loss += consistency_term.item() * batch_size
             total_supcon_loss += supcon_term.item() * batch_size
             total_l2sp_loss += l2sp_term.item() * batch_size
+            if self.contrastive_learning_enabled:
+                total_contrastive_loss += contrastive_loss_term.item() * batch_size
+                total_classification_loss += classification_loss_term.item() * batch_size
             total_coral_loss += coral_term.item() * batch_size
             total += batch_size
             source_logits.append(outputs1["main_logits"].detach().cpu())
@@ -527,6 +703,11 @@ class Trainer:
                 "epoch_time": time.time() - t0,
             }
         )
+        if self.contrastive_learning_enabled:
+            metrics.update({
+                "contrastive_loss": total_contrastive_loss / total,
+                "classification_loss": total_classification_loss / total,
+            })
         return metrics
 
     @torch.no_grad()
@@ -536,29 +717,69 @@ class Trainer:
         total_loss = 0.0
         total_samples = 0
 
-        for batch in loader:
-            x, _, y = self._parse_batch(batch)
+        is_pure_supcon = getattr(self, "is_pure_supcon", False) or (
+            self.contrastive_learning_enabled and self.classification_weight == 0.0
+        )
 
-            outputs = self._normalize_outputs(self.model(x))
-            logits = outputs["main_logits"]
+        if is_pure_supcon:
+            for batch in loader:
+                x, _, y = self._parse_batch(batch)
+                x_np = x.cpu().numpy()
+                x1_aug = [self.augment(sample) for sample in x_np]
+                x2_aug = [self.augment(sample) for sample in x_np]
+                x1 = torch.from_numpy(np.array(x1_aug)).float().to(self.device)
+                x2 = torch.from_numpy(np.array(x2_aug)).float().to(self.device)
 
-            self._assert_logits_and_targets(logits, y, "eval")
-            loss = self.loss_fn(logits, y)
+                outputs1 = self._normalize_outputs(self.model(x1))
+                outputs2 = self._normalize_outputs(self.model(x2))
 
-            batch_size = y.size(0)
-            total_loss += loss.item() * batch_size
-            total_samples += batch_size
+                proj1 = outputs1.get("projection_features")
+                proj2 = outputs2.get("projection_features")
+                if proj1 is not None and proj2 is not None:
+                    proj_feats = torch.stack([proj1, proj2], dim=1)
+                    loss = self.supcon_loss_fn(proj_feats, y)
+                else:
+                    loss = self._zero_loss()
 
-            all_logits.append(logits.detach().cpu())
-            all_targets.append(y.detach().cpu())
+                batch_size = y.size(0)
+                total_loss += loss.item() * batch_size
+                total_samples += batch_size
 
-        logits = torch.cat(all_logits, dim=0)
-        targets = torch.cat(all_targets, dim=0)
+                dummy_logits = torch.zeros(batch_size, self.n_classes, device=self.device)
+                all_logits.append(dummy_logits.cpu())
+                all_targets.append(y.cpu())
 
-        epoch_loss = total_loss / total_samples
-        metrics = compute_metrics(logits, targets, self.n_classes)
-        metrics["loss"] = epoch_loss
-        return metrics
+            logits = torch.cat(all_logits, dim=0)
+            targets = torch.cat(all_targets, dim=0)
+            epoch_loss = total_loss / max(total_samples, 1)
+            metrics = compute_metrics(logits, targets, self.n_classes)
+            metrics["loss"] = epoch_loss
+            metrics["contrastive_loss"] = epoch_loss
+            return metrics
+        else:
+            for batch in loader:
+                x, _, y = self._parse_batch(batch)
+
+                outputs = self._normalize_outputs(self.model(x))
+                logits = outputs["main_logits"]
+
+                self._assert_logits_and_targets(logits, y, "eval")
+                loss = self.loss_fn(logits, y)
+
+                batch_size = y.size(0)
+                total_loss += loss.item() * batch_size
+                total_samples += batch_size
+
+                all_logits.append(logits.detach().cpu())
+                all_targets.append(y.detach().cpu())
+
+            logits = torch.cat(all_logits, dim=0)
+            targets = torch.cat(all_targets, dim=0)
+
+            epoch_loss = total_loss / total_samples
+            metrics = compute_metrics(logits, targets, self.n_classes)
+            metrics["loss"] = epoch_loss
+            return metrics
 
     def _normalize_outputs(self, outputs) -> dict[str, torch.Tensor | None]:
         if torch.is_tensor(outputs):
@@ -568,11 +789,14 @@ class Trainer:
                 "features": None,
             }
         if isinstance(outputs, dict):
-            return {
+            res = {
                 "main_logits": outputs["main_logits"],
                 "aux_logits": outputs.get("aux_logits"),
                 "features": outputs.get("features"),
             }
+            if "projection_features" in outputs:
+                res["projection_features"] = outputs["projection_features"]
+            return res
         raise TypeError(f"Unsupported model output type: {type(outputs)!r}")
 
     def _parse_batch(self, batch, augment=True):
@@ -583,7 +807,7 @@ class Trainer:
             if self.model.training and augment:
                 x_np = x.cpu().numpy()
 
-                if self.consistency_enabled:
+                if self.consistency_enabled or self.contrastive_learning_enabled:
                     x1_aug = []
                     x2_aug = []
 
@@ -612,20 +836,30 @@ class Trainer:
             x, y = batch
 
             if isinstance(x, (tuple, list)) and len(x) == 2:
-                x1, _ = x 
+                x1, x2 = x 
+                return x1.to(self.device), x2.to(self.device), y.to(self.device)
 
-                if self.model.training and augment:
-                    x1 = x1.cpu().numpy()
+            if self.model.training and augment:
+                if self.consistency_enabled or self.contrastive_learning_enabled:
+                    x_np = x.cpu().numpy()
                     x1_aug = []
+                    x2_aug = []
 
-                    for sample in x1:
-                        augmented = self.augment(sample)
+                    for sample in x_np:
+                        aug1 = self.augment(sample)
+                        aug2 = self.augment(sample)
 
-                        x1_aug.append(augmented)
+                        x1_aug.append(aug1)
+                        x2_aug.append(aug2)
 
-                    x1 = torch.from_numpy(np.array(x1_aug)).float().contiguous()
-
-                return x1.to(self.device), None, y.to(self.device)
+                    x1 = torch.from_numpy(np.array(x1_aug)).float().to(self.device)
+                    x2 = torch.from_numpy(np.array(x2_aug)).float().to(self.device)
+                else:
+                    x_np = x.cpu().numpy()
+                    x1_aug = [self.augment(sample) for sample in x_np]
+                    x1 = torch.from_numpy(np.array(x1_aug)).float().to(self.device)
+                    x2 = None
+                return x1, x2, y.to(self.device)
 
             return x.to(self.device), None, y.to(self.device)
 
@@ -766,6 +1000,7 @@ class Trainer:
 
     def _zero_loss(self) -> torch.Tensor:
         return torch.tensor(0.0, device=self.device)
+    
 
     def _assert_logits_and_targets(
         self,

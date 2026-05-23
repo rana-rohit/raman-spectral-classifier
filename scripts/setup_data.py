@@ -49,6 +49,35 @@ def parse_args():
 
     return parser.parse_args()
 
+
+def _active_registry_splits(cfg: dict, registry: DataRegistry) -> list[str]:
+    stage = cfg.get("task", {}).get("stage")
+    active = ["reference", "test"]
+
+    include_finetune = (
+        cfg.get("training", {})
+        .get("finetune", {})
+        .get("enabled", False)
+        or cfg.get("data", {}).get("include_finetune_split", False)
+    )
+    if include_finetune:
+        active.append("finetune")
+
+    if stage == "transfer_5class":
+        active.extend(registry.ood_split_names())
+    elif (
+        stage == "pretrain_treatment_8class"
+        and cfg.get("evaluation", {}).get("clinical_ood", {}).get("enabled", False)
+    ):
+        active.extend(registry.ood_split_names())
+
+    return [
+        split_name
+        for split_name in active
+        if split_name in registry.available_splits()
+    ]
+
+
 def main():
     set_seed(42)
     args = parse_args()
@@ -68,16 +97,6 @@ def main():
         **splits_cfg,
         **stage_cfg,
     }
-    # ---- Build registry and load all splits ----
-    print("\n[1/5] Loading all splits from disk...")
-
-    registry = DataRegistry(
-        data_root="data/raw",
-        cfg=cfg,
-    )
-
-    registry.load_all()
-    registry.summary()
 
     # ---- Task semantics ----
     task_cfg = cfg["task"]
@@ -89,6 +108,19 @@ def main():
         "clinical_sparse_global_ids",
         [],
     )
+
+    # ---- Build registry and load active splits ----
+    print("\n[1/5] Loading semantically active splits from disk...")
+
+    registry = DataRegistry(
+        data_root="data/raw",
+        cfg=cfg,
+    )
+
+    active_splits = _active_registry_splits(cfg, registry)
+    for split_name in active_splits:
+        registry.load(split_name)
+    registry.summary(active_splits)
 
     if stage == "pretrain_30class":
 
@@ -166,7 +198,7 @@ def main():
     # ---- Verify transforms on other splits ----
     print("\n[3/5] Verifying transforms across all splits...")
 
-    for split_name in registry.available_splits():
+    for split_name in active_splits:
 
         if split_name.lower() == "test":
             print(f"      {split_name:>16s}  (skipped HOLDOUT)")
@@ -224,6 +256,9 @@ def main():
         clinical_sparse_ids=clinical_sparse_ids,
         n_classes=n_classes,
     )
+
+    from src.utils.logging import print_split_provenance
+    print_split_provenance(loaders, cfg, context="setup")
 
     for name, loader in loaders.items():
 

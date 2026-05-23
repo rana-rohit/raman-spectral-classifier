@@ -14,10 +14,12 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import torch.nn as nn
+import torch
 
 from src.models.cnn import CNN1D
 from src.models.multitask import MultiHeadSpectralModel
 from src.models.resnet1d import ResNet1D
+from src.models.inception1d import Inception1D
 from src.models.tcn import TCN1D
 from src.models.transformer import SpectralTransformer
 
@@ -28,6 +30,7 @@ MODEL_REGISTRY = {
     "seresnet1d": ResNet1D,
     "tcn": TCN1D,
     "transformer": SpectralTransformer,
+    "inception1d": Inception1D,
 }
 
 
@@ -99,6 +102,8 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
 
     non_constructor_keys = {
         "semantic_space",
+        "contrastive",
+        "projection_dim",
     }
 
     for key in non_constructor_keys:
@@ -133,8 +138,66 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
             aux_dropout=aux_cfg.get("dropout", 0.0),
         )
 
+    # --------------------------------------------------------
+    # Optional SupCon projection head.
+    #
+    # Canonical activation lives in training.supcon.enabled.
+    # model.contrastive is accepted only as a legacy compatibility
+    # alias for older experiment configs.
+    # --------------------------------------------------------
+    supcon_cfg = cfg.get("training", {}).get("supcon", {})
+    legacy_contrastive = bool(model_cfg.get("contrastive", False))
+    supcon_enabled = bool(supcon_cfg.get("enabled", False) or legacy_contrastive)
+    if legacy_contrastive and not supcon_cfg.get("enabled", False):
+        print(
+            "  [Config] Legacy model.contrastive=True detected; "
+            "using canonical training.supcon.enabled behavior."
+        )
+    if supcon_enabled:
+        projection_dim = int(
+            supcon_cfg.get(
+                "projection_dim",
+                model_cfg.get("projection_dim", 128),
+            )
+        )
+        model.projection_head = nn.Sequential(
+            nn.Linear(model.embedding_dim, model.embedding_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(model.embedding_dim, projection_dim),
+        )
+        model.contrastive = True
+        
+        orig_forward = model.forward
+        def contrastive_forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+            out = orig_forward(x)
+            if getattr(self, "bypass_projection", False):
+                return out
+            features = out["features"]
+            proj = self.projection_head(features)
+            out["projection_features"] = nn.functional.normalize(proj, p=2, dim=-1)
+            return out
+            
+        import types
+        model.forward = types.MethodType(contrastive_forward, model)
+
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Model: {name} | Parameters: {n_params:,}")
+    if name == "inception1d":
+        kernel_sizes = getattr(model, "kernel_sizes", [])
+        use_residual = getattr(model, "use_residual", False)
+        bottleneck_channels = getattr(model, "bottleneck_channels", 0)
+        input_channels = getattr(model, "in_channels", None)
+        print("\n============================================================")
+        print("MODEL SUMMARY")
+        print("=============")
+        print("Model: Inception1D")
+        print(f"Kernel Sizes: {kernel_sizes}")
+        print(f"Residual Connections: {'Enabled' if use_residual else 'Disabled'}")
+        print(f"Bottleneck Channels: {bottleneck_channels}")
+        if input_channels is not None:
+            print(f"Input Channels: {input_channels}")
+        print(f"Total Parameters: {n_params:,}")
+        print("============================================================\n")
     return model
 
 

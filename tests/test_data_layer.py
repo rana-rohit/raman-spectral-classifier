@@ -22,6 +22,7 @@ from src.data.augmentation import (
     AugmentationPipeline,
 )
 from src.data.dataset import SpectralDataset, make_train_val_split
+from src.data.dataloader import build_all_loaders
 from src.data.split_roles import SplitRole, role_from_str
 from src.utils.class_subset import filter_and_remap_classes
 
@@ -193,6 +194,83 @@ class TestSpectralDataset:
         X, y = synthetic_data
         ds = SpectralDataset(X, y)
         assert len(ds) == len(X)
+
+    def test_sparse_membership_validation_allows_semantic_ood_labels(self):
+        X = np.random.default_rng(0).normal(size=(10, 32)).astype(np.float32)
+        y = np.array([0, 2, 3, 5, 6] * 2, dtype=np.int64)
+        ds = SpectralDataset(
+            X,
+            y,
+            label_validation="membership",
+            valid_label_ids=[0, 2, 3, 5, 6],
+        )
+        assert sorted(np.unique(ds.y).tolist()) == [0, 2, 3, 5, 6]
+
+
+class _FakeRegistry:
+    def __init__(self) -> None:
+        rng = np.random.default_rng(1)
+        self.arrays = {
+            "reference": (
+                rng.normal(size=(60, 32)).astype(np.float32),
+                np.tile(np.arange(30, dtype=np.int64), 2),
+            ),
+            "test": (
+                rng.normal(size=(60, 32)).astype(np.float32),
+                np.tile(np.arange(30, dtype=np.int64), 2),
+            ),
+            "2018clinical": (
+                rng.normal(size=(50, 32)).astype(np.float32),
+                np.array([0, 2, 3, 5, 6] * 10, dtype=np.int64),
+            ),
+        }
+        self.cfg = {
+            "splits": {
+                "reference": {"label_space": "isolate_space"},
+                "test": {"label_space": "isolate_space"},
+                "2018clinical": {"label_space": "sparse_global_treatment_space"},
+            }
+        }
+
+    def get_arrays(self, split_name, allow_holdout=False):
+        del allow_holdout
+        return self.arrays[split_name]
+
+    def ood_split_names(self):
+        return ["2018clinical"]
+
+
+def test_stage1_loader_does_not_construct_clinical_ood_loaders():
+    registry = _FakeRegistry()
+    preprocessor = SpectralPreprocessor([]).fit(registry.arrays["reference"][0])
+    cfg = {
+        "validation": {
+            "val_fraction": 0.2,
+            "random_seed": 42,
+            "clinical_val_fraction": 0.2,
+            "clinical_eval_fraction": 0.2,
+        },
+        "task": {
+            "stage": "pretrain_30class",
+            "label_space": "isolate_space",
+        },
+        "training": {"batch_size": 8, "num_workers": 0},
+    }
+
+    loaders = build_all_loaders(
+        registry,
+        preprocessor,
+        augmentation=None,
+        cfg=cfg,
+        clinical_sparse_ids=[],
+        n_classes=30,
+    )
+
+    assert set(loaders) == {"train", "source_val", "val", "test", "ood"}
+    assert loaders["ood"] == {}
+    assert "clinical_train" not in loaders
+    assert "clinical_val" not in loaders
+    assert loaders["val"] is loaders["source_val"]
 
 
 class TestTrainValSplit:

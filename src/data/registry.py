@@ -183,11 +183,13 @@ class DataRegistry:
     # Summary
     # ------------------------------------------------------------------ #
 
-    def summary(self) -> None:
+    def summary(self, split_names: Optional[List[str]] = None) -> None:
         print(f"\n{'Split':>16}  {'Role':>12}  {'Samples':>8}  "
               f"{'Classes':>8}  {'Loaded':>7}")
         print("-" * 60)
-        for name, meta in self._splits.items():
+        names = split_names or list(self._splits.keys())
+        for name in names:
+            meta = self._get_meta(name)
             n_samples = len(meta.X) if meta.loaded else "—"
             n_classes = len(np.unique(meta.y)) if meta.loaded else "—"
             print(f"{name:>16}  {meta.role.name:>12}  {str(n_samples):>8}  "

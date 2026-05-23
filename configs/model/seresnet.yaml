@@ -9,4 +9,7 @@ model:
   
   use_se: true
   se_reduction: 16
+  use_cbam: false
+  cbam_reduction: 16
+  cbam_kernel_size: 7
   semantic_space: isolate_space

@@ -7,8 +7,14 @@ Standalone evaluation for trained experiments.
 from __future__ import annotations
 
 import argparse
+import gc
 import os
 import sys
+import tempfile
+import shutil
+
+import torch
+import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -23,16 +29,66 @@ from src.utils.config import load_config
 from src.utils.seed import set_seed
 
 
+def _load_config_any(exp_dir: str) -> dict:
+    cfg_yaml = os.path.join(exp_dir, "config.yaml")
+    cfg_json = os.path.join(exp_dir, "config.json")
+    if os.path.exists(cfg_yaml):
+        return load_config(cfg_yaml)
+    if os.path.exists(cfg_json):
+        import json
+        with open(cfg_json, "r") as f:
+            return json.load(f)
+    raise FileNotFoundError(
+        f"No config.yaml or config.json found in {exp_dir}"
+    )
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Evaluate trained spectral classifiers")
     p.add_argument("--exp-dir", default=None)
     p.add_argument("--compare", nargs="+", default=None)
     p.add_argument("--split", default="test")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--no-save-outputs",
+        action="store_true",
+        help="Skip saving predictions/probabilities/features for plotting",
+    )
     return p.parse_args()
 
 
-def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
+def _is_notebook() -> bool:
+    try:
+        from IPython import get_ipython
+        return get_ipython() is not None
+    except Exception:
+        return False
+
+
+def _resolve_eval_num_workers(cfg: dict) -> int:
+    eval_cfg = cfg.get("evaluation", {})
+    if "num_workers" in eval_cfg:
+        return int(eval_cfg["num_workers"])
+
+    if os.name == "nt" or _is_notebook():
+        return 0
+
+    train_cfg = cfg.get("training", {})
+    return int(cfg.get("num_workers", train_cfg.get("num_workers", 4)))
+
+
+def _copy_tree_contents(src: str, dst: str) -> None:
+    for root, _, files in os.walk(src):
+        rel_root = os.path.relpath(root, src)
+        target_root = os.path.join(dst, rel_root) if rel_root != "." else dst
+        os.makedirs(target_root, exist_ok=True)
+        for fname in files:
+            src_path = os.path.join(root, fname)
+            dst_path = os.path.join(target_root, fname)
+            shutil.copy2(src_path, dst_path)
+
+
+def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int, DataRegistry]:
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
     registry.load_all()
 
@@ -102,34 +158,65 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int]:
     augmentation = AugmentationPipeline.from_config(cfg["augmentation"])
     if len(augmentation.steps) == 0 or augmentation.p == 0:
         augmentation = None
+
+    num_workers = _resolve_eval_num_workers(cfg)
+    cfg["num_workers"] = num_workers
+    if num_workers == 0:
+        print("[EvaluationRunner] Using num_workers=0 for evaluation safety.")
     
-    cfg["batch_size"] = (
-        cfg.get("training", {})
-        .get("batch_size", 512)
-    )
-
-    cfg["num_workers"] = (
-        cfg.get("training", {})
-        .get("num_workers", 4)
-    )
-
-    cfg["consistency"] = (
-        cfg.get("training", {})
-        .get("consistency", {})
+    loaders = build_all_loaders(
+        registry,
+        preprocessor,
+        augmentation,
+        cfg,
+        clinical_sparse_ids=clinical_sparse_ids,
+        n_classes=n_classes,
     )
 
     from src.utils.logging import print_split_provenance
     print_split_provenance(loaders, cfg, context="evaluation")
-    return loaders, n_classes
+    return loaders, n_classes, registry
 
 
-def evaluate_one(exp_dir: str, seed: int) -> dict:
-    cfg_path = os.path.join(exp_dir, "config.yaml")
-    cfg = load_config(cfg_path)
+def _save_outputs(base_dir: str, split_name: str, artifact) -> None:
+    import numpy as np
+    from pathlib import Path
+
+    out_dir = Path(base_dir) / "predictions"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    logits = artifact.logits
+    probs = artifact.probabilities
+    preds = artifact.predictions
+    targets = artifact.targets
+
+    np.save(out_dir / f"{split_name}_logits.npy", logits)
+    np.save(out_dir / f"{split_name}_probabilities.npy", probs)
+    np.save(out_dir / f"{split_name}_predictions.npy", preds)
+    np.save(out_dir / f"{split_name}_targets.npy", targets)
+
+    if artifact.features is not None:
+        emb_dir = Path(base_dir) / "embeddings"
+        emb_dir.mkdir(parents=True, exist_ok=True)
+        np.save(emb_dir / f"{split_name}_features.npy", artifact.features)
+        np.save(emb_dir / f"{split_name}_targets.npy", targets)
+
+
+def evaluate_one(
+    exp_dir: str,
+    seed: int,
+    save_outputs: bool = True,
+    include_predictions: bool = False,
+    use_staging: bool = True,
+) -> dict:
+    cfg = _load_config_any(exp_dir)
     task_cfg = cfg["task"]
     stage = task_cfg["stage"]
     label_space = task_cfg["label_space"]
-    loaders, n_classes = build_eval_loaders(cfg, seed)
+    cfg.setdefault("evaluation", {})["include_predictions"] = bool(include_predictions)
+
+    print("[EvaluationRunner] Building loaders...")
+    loaders, n_classes, registry = build_eval_loaders(cfg, seed)
 
     model_name = cfg.get("model", {}).get("name", "unknown")
     model = get_model(model_name, dict(cfg))
@@ -153,12 +240,14 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
         .get("task", {})
         .get("label_space", None)
     )
-
-    assert checkpoint_label_space == label_space, (
-        "Checkpoint label-space mismatch:\n"
-        f"Expected: {label_space}\n"
-        f"Found: {checkpoint_label_space}"
-    )
+    if checkpoint_label_space is None:
+        print("[EvaluationRunner] Warning: checkpoint missing 'task.label_space'; continuing.")
+    else:
+        assert checkpoint_label_space == label_space, (
+            "Checkpoint label-space mismatch:\n"
+            f"Expected: {label_space}\n"
+            f"Found: {checkpoint_label_space}"
+        )
 
     checkpoint_model_space = (
         checkpoint_cfg
@@ -166,46 +255,122 @@ def evaluate_one(exp_dir: str, seed: int) -> dict:
         .get("semantic_space", None)
     )
 
-    assert (
-        checkpoint_model_space
-        == cfg["model"]["semantic_space"]
-    ), (
-        "Checkpoint model semantic-space mismatch:\n"
-        f"Expected: "
-        f"{cfg['model']['semantic_space']}\n"
-        f"Found: {checkpoint_model_space}"
-    )
+    if checkpoint_model_space is None:
+        print("[EvaluationRunner] Warning: checkpoint missing 'model.semantic_space'; continuing.")
+    else:
+        assert (
+            checkpoint_model_space
+            == cfg["model"]["semantic_space"]
+        ), (
+            "Checkpoint model semantic-space mismatch:\n"
+            f"Expected: "
+            f"{cfg['model']['semantic_space']}\n"
+            f"Found: {checkpoint_model_space}"
+        )
 
     cfg = dict(cfg)
-    cfg["experiment"] = {
-        "save_dir": exp_dir
-    }
 
-    evaluator = ModelEvaluator(
-        model=model,
-        model_name=model_name,
-        n_classes=n_classes,
-        device=str(next(model.parameters()).device),
-        cfg=cfg,
-    )
-    results = evaluator.evaluate_all(loaders)
-    results["task"] = task_cfg["name"]
-    eval_path = os.path.join(exp_dir, f"{stage}_eval_results.json")
-    evaluator.save(eval_path)
+    staging_dir = None
+    if use_staging:
+        staging_dir = tempfile.mkdtemp(prefix="eval_staging_")
+        print(f"[EvaluationRunner] Using staging directory: {staging_dir}")
+        cfg["experiment"] = {"save_dir": staging_dir}
+    else:
+        cfg["experiment"] = {"save_dir": exp_dir}
 
-    from src.utils.logging import print_output_paths
-    print_output_paths({"Evaluation Results JSON": eval_path})
-    return results
+    evaluator = None
+    results = {}
+    try:
+        evaluator = ModelEvaluator(
+            model=model,
+            model_name=model_name,
+            n_classes=n_classes,
+            device=str(next(model.parameters()).device),
+            cfg=cfg,
+        )
+
+        print("[EvaluationRunner] Running prediction pass...")
+        results = evaluator.evaluate_all(loaders)
+        results["task"] = task_cfg["name"]
+
+        eval_base = staging_dir or exp_dir
+        eval_path = os.path.join(eval_base, f"{stage}_eval_results.json")
+        print("[EvaluationRunner] Exporting evaluation JSON...")
+        evaluator.save(eval_path)
+
+        if save_outputs:
+            print("[EvaluationRunner] Exporting prediction artifacts...")
+            for split_name in ["test"]:
+                if split_name in evaluator.artifacts:
+                    _save_outputs(eval_base, split_name, evaluator.artifacts[split_name])
+
+            for split_name, _ in (loaders.get("ood", {}) or {}).items():
+                if split_name in evaluator.artifacts:
+                    _save_outputs(eval_base, split_name, evaluator.artifacts[split_name])
+
+            for split_name in ["train", "val"]:
+                loader = loaders.get(split_name)
+                if loader is None:
+                    continue
+                artifact = evaluator.collect_artifact(loader, split_name)
+                _save_outputs(eval_base, split_name, artifact)
+
+        if staging_dir is not None:
+            print("[EvaluationRunner] Copying staged outputs...")
+            os.makedirs(exp_dir, exist_ok=True)
+            _copy_tree_contents(staging_dir, exp_dir)
+
+        from src.utils.logging import print_output_paths
+        print_output_paths({"Evaluation Results JSON": os.path.join(exp_dir, f"{stage}_eval_results.json")})
+        print("[EvaluationRunner] Evaluation complete.")
+        return results
+    finally:
+        print("[EvaluationRunner] Cleaning up workers/resources...")
+        try:
+            del loaders
+        except Exception:
+            pass
+        try:
+            del registry
+        except Exception:
+            pass
+        try:
+            del evaluator
+        except Exception:
+            pass
+        try:
+            del model
+        except Exception:
+            pass
+        try:
+            plt.close("all")
+        except Exception:
+            pass
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        if staging_dir and os.path.isdir(staging_dir):
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 def main():
     args = parse_args()
     set_seed(args.seed)
+    save_outputs = not args.no_save_outputs
 
     if args.exp_dir and not args.compare:
-        evaluate_one(args.exp_dir, args.seed)
+        evaluate_one(args.exp_dir, args.seed, save_outputs=save_outputs, include_predictions=False, use_staging=True)
     elif args.compare:
-        all_results = [evaluate_one(exp_dir, args.seed) for exp_dir in args.compare]
+        all_results = [
+            evaluate_one(
+                exp_dir,
+                args.seed,
+                save_outputs=save_outputs,
+                include_predictions=True,
+                use_staging=True,
+            )
+            for exp_dir in args.compare
+        ]
         split_names = [args.split] + [
             name for name in all_results[0].get("splits", {}).keys()
             if name != args.split

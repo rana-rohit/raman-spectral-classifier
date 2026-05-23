@@ -99,19 +99,8 @@ class CNN1D(nn.Module):
         self._init_weights()
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
-        # # compute attention mask
-        # attn = self.attention(x)
-
-        # # apply residual attention
-        # x = x * attn + x
-
-        # pass through CNN
         feat = self.features(x)
         feat = self.gap(feat)
-        
-        # if self.training and torch.rand(1).item() < 0.001:
-        #     print(f"attn mean: {attn.mean().detach().cpu().item():.4f}")
-    
         return feat.squeeze(-1)
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:

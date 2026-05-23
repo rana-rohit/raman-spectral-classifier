@@ -46,6 +46,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiment_dir", type=str, required=True, help="Path to experiment directory")
     parser.add_argument("--split", type=str, default="test", help="Dataset split to analyze (e.g. test, 2018clinical)")
+    parser.add_argument("--use-projection", action="store_true", help="Extract and analyze projection head embeddings instead of backbone features")
     return parser.parse_args()
 
 
@@ -77,7 +78,7 @@ def load_model(cfg, experiment_dir, device):
 # ============================================================
 
 @torch.no_grad()
-def extract_embeddings(model, dataloader, device):
+def extract_embeddings(model, dataloader, device, use_projection: bool = False):
     all_embeddings = []
     all_labels = []
     all_predictions = []
@@ -88,10 +89,14 @@ def extract_embeddings(model, dataloader, device):
         labels = y.to(device)
 
         # Extract latent features
-        embeddings = model.forward_features(inputs)
+        if use_projection and hasattr(model, "projection_head") and model.projection_head is not None:
+            out = model(inputs)
+            embeddings = out["projection_features"]
+        else:
+            embeddings = model.forward_features(inputs)
 
         # Get logits for prediction analysis
-        logits = model.forward_logits(embeddings)
+        logits = model.forward_logits(model.forward_features(inputs) if use_projection else embeddings)
         predictions = torch.argmax(logits, dim=1)
         correctness = (predictions == labels)
 
@@ -292,7 +297,7 @@ def main():
     # Extract embeddings
     # --------------------------------------------------------
     print("\nExtracting embeddings...")
-    embeddings, labels, predictions, correctness = extract_embeddings(model, dataloader, device)
+    embeddings, labels, predictions, correctness = extract_embeddings(model, dataloader, device, use_projection=args.use_projection)
     print(f"\nEmbeddings shape: {embeddings.shape}")
     
     print("\nNormalizing embeddings...")

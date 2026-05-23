@@ -43,6 +43,7 @@ def parse_args():
     p.add_argument("--pretrained", default=None)
     p.add_argument("--exp-dir", default="experiments/ablations")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--stage", required=True, choices=["s1_isolate", "s2_treatment", "s3_transfer"])
 
     return p.parse_args()
 
@@ -120,17 +121,13 @@ def _build_loaders_for_cfg(cfg: dict, seed: int) -> dict:
     if len(augmentation.steps) == 0 or augmentation.p == 0:
         augmentation = None
 
+    cfg = dict(cfg)
+    cfg["seed"] = seed
     return build_all_loaders(
         registry,
         preprocessor,
         augmentation,
-        {
-            "batch_size": cfg.get("training", {}).get("batch_size", 256),
-            "num_workers": cfg.get("training", {}).get("num_workers", 4),
-            "validation": cfg["validation"],
-            "seed": seed,
-            "consistency": cfg.get("training", {}).get("consistency", {}),
-        },
+        cfg,
         clinical_sparse_ids=clinical_sparse_ids,
         n_classes=n_classes,
     )
@@ -442,6 +439,7 @@ def main():
         "configs/data/preprocessing.yaml",
         "configs/data/augmentation.yaml",
         "configs/training/base.yaml",
+        f"configs/stages/{args.stage}.yaml",
         "configs/model/resnet1d.yaml",
     )
 
