@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -40,6 +42,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--split", default=None, help="Only plot a specific split")
     p.add_argument("--dpi", type=int, default=500)
     p.add_argument("--no-embeddings", action="store_true")
+    p.add_argument("--no-staging", action="store_true", help="Write outputs directly to exp dir")
     return p.parse_args()
 
 
@@ -97,6 +100,17 @@ def _class_labels(cfg: dict, n_classes: int) -> List[str]:
 
 def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
+
+
+def _copy_tree_contents(src: str, dst: str) -> None:
+    for root, _, files in os.walk(src):
+        rel_root = os.path.relpath(root, src)
+        target_root = os.path.join(dst, rel_root) if rel_root != "." else dst
+        os.makedirs(target_root, exist_ok=True)
+        for fname in files:
+            src_path = os.path.join(root, fname)
+            dst_path = os.path.join(target_root, fname)
+            shutil.copy2(src_path, dst_path)
 
 
 def _save_figure(fig, base_path: Path, dpi: int) -> None:
@@ -363,14 +377,20 @@ def main() -> None:
     cfg = _load_config_any(exp_dir)
     title = _stage_title(cfg)
 
+    staging_dir = None
+    if not args.no_staging:
+        staging_dir = tempfile.mkdtemp(prefix="plot_staging_")
+        print(f"[plots] Using staging directory: {staging_dir}")
+
     eval_path = _find_eval_results(exp_dir)
     if eval_path is None:
         raise FileNotFoundError("No *_eval_results.json found in exp dir")
     with open(eval_path, "r") as f:
         results = json.load(f)
 
-    plots_dir = exp_dir / "plots"
-    reports_dir = exp_dir / "reports"
+    base_dir = Path(staging_dir) if staging_dir else exp_dir
+    plots_dir = base_dir / "plots"
+    reports_dir = base_dir / "reports"
     pred_dir = exp_dir / "predictions"
     _ensure_dir(plots_dir)
     _ensure_dir(reports_dir)
@@ -414,7 +434,11 @@ def main() -> None:
         with open(reports_dir / "classification_report.txt", "w") as f:
             f.write("\n".join(report_lines))
 
-    print(f"[plots] Completed plot generation in {plots_dir}")
+    if staging_dir is not None:
+        _copy_tree_contents(staging_dir, str(exp_dir))
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+    print(f"[plots] Completed plot generation in {exp_dir / 'plots'}")
 
 
 if __name__ == "__main__":

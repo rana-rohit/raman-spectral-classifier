@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -44,6 +45,20 @@ from metadata.clinical import (
     CLINICAL_LABELS,
     CLINICAL_LABEL_INVERSE_REMAP
 )
+
+@dataclass
+class SplitEvaluationArtifact:
+    logits: np.ndarray
+    probabilities: np.ndarray
+    predictions: np.ndarray
+    targets: np.ndarray
+    features: Optional[np.ndarray]
+    grouped_predictions: Optional[np.ndarray]
+    grouped_targets: Optional[np.ndarray]
+    metrics: Dict[str, float]
+    confusion_matrix: np.ndarray
+    present_classes: List[int]
+
 
 class ModelEvaluator:
     def __init__(
@@ -91,6 +106,7 @@ class ModelEvaluator:
         self.aux_blend = aux_cfg.get("clinical_blend", 0.5)
 
         self.results: Dict = {"model": model_name, "splits": {}}
+        self.artifacts: Dict[str, SplitEvaluationArtifact] = {}
 
         self.output_dir = Path(
             self.cfg.get(
@@ -103,26 +119,47 @@ class ModelEvaluator:
         )
 
     @torch.no_grad()
-    def evaluate_split(
+    def _forward_pass(
         self,
         loader: DataLoader,
-        split_name: str,
-    ) -> Dict:
+    ) -> tuple[torch.Tensor, torch.Tensor, Optional[np.ndarray]]:
         all_main_logits, all_targets = [], []
+        features_list = []
+        has_features = True
 
         for batch in loader:
             x, y = self._parse_batch(batch)
             outputs = self._normalize_outputs(self.model(x))
             all_main_logits.append(outputs["main_logits"].cpu())
             all_targets.append(y.cpu())
+            feats = outputs.get("features")
+            if feats is None:
+                has_features = False
+            else:
+                features_list.append(feats.detach().cpu())
 
         main_logits = torch.cat(all_main_logits, dim=0)
         targets = torch.cat(all_targets, dim=0)
+        features = None
+        if has_features and features_list:
+            features = torch.cat(features_list, dim=0).numpy()
+
+        return main_logits, targets, features
+
+    @torch.no_grad()
+    def evaluate_split(
+        self,
+        loader: DataLoader,
+        split_name: str,
+    ) -> Dict:
+        main_logits, targets, features = self._forward_pass(loader)
         self._assert_logits_and_targets(main_logits, targets, split_name)
         eval_logits, eval_targets = main_logits, targets
         n_classes = self.n_classes
 
         metrics = compute_metrics(eval_logits, eval_targets, n_classes)
+        probabilities = torch.softmax(eval_logits, dim=-1).cpu().numpy()
+        predictions = eval_logits.argmax(dim=-1).cpu().numpy()
 
         # --------------------------------------------------------
         # Patient-level majority voting
@@ -144,9 +181,12 @@ class ModelEvaluator:
         )
         spectra_per_group = spectra_per_group_map.get(split_name) if grouped_enabled else None
 
+        group_preds = None
+        group_targets = None
+
         if spectra_per_group is not None:
 
-            preds_np = eval_logits.argmax(dim=-1).cpu().numpy()
+            preds_np = predictions
             targets_np = eval_targets.cpu().numpy()
 
             assert len(preds_np) % spectra_per_group == 0, (
@@ -155,7 +195,7 @@ class ModelEvaluator:
             )
 
             group_preds, group_targets = confidence_vote_predictions(
-                logits=torch.softmax(eval_logits, dim=-1).cpu().numpy(),
+                logits=probabilities,
                 targets=targets_np,
                 sample_ids=None,
                 spectra_per_group=spectra_per_group,
@@ -246,6 +286,10 @@ class ModelEvaluator:
                         ]["global_treatment"],
                     }
         
+        include_predictions = bool(
+            self.cfg.get("evaluation", {}).get("include_predictions", False)
+        )
+
         self.results["splits"][split_name] = {
             "metrics": {
                 k: float(v) if isinstance(v, np.floating) else v
@@ -264,8 +308,6 @@ class ModelEvaluator:
             "original_present_classes": [int(x) for x in original_present_classes],
             "clinical_semantics": clinical_semantics,
             "n_samples": int(len(eval_targets)),
-            "predictions": eval_logits.argmax(dim=-1).numpy().tolist(),
-            "targets": eval_targets.numpy().tolist(),
             "group_metrics": group_metrics,
             "compact_to_sparse_label_map": (
                 {
@@ -277,6 +319,10 @@ class ModelEvaluator:
                 else {}
             ),
         }
+
+        if include_predictions:
+            self.results["splits"][split_name]["predictions"] = predictions.tolist()
+            self.results["splits"][split_name]["targets"] = eval_targets.cpu().numpy().tolist()
         # Automatic confusion matrix visualization generation
 
         figure_dir = (
@@ -348,7 +394,7 @@ class ModelEvaluator:
         if self.cfg.get("evaluation", {}).get("save_confusion_matrices", True):
             save_confusion_matrix_figure(
                 targets=eval_targets.numpy(),
-                predictions=eval_logits.argmax(dim=-1).numpy(),
+                predictions=predictions,
                 class_labels=class_labels,
                 save_path=(
                     figure_dir
@@ -381,7 +427,47 @@ class ModelEvaluator:
                     ),
                     normalize=True,
                 )
+        self.artifacts[split_name] = SplitEvaluationArtifact(
+            logits=eval_logits.cpu().numpy(),
+            probabilities=probabilities,
+            predictions=predictions,
+            targets=eval_targets.cpu().numpy(),
+            features=features,
+            grouped_predictions=group_preds,
+            grouped_targets=group_targets,
+            metrics=metrics,
+            confusion_matrix=cm,
+            present_classes=[int(x) for x in present_classes],
+        )
+
         return metrics
+
+    @torch.no_grad()
+    def collect_artifact(
+        self,
+        loader: DataLoader,
+        split_name: str,
+    ) -> SplitEvaluationArtifact:
+        main_logits, targets, features = self._forward_pass(loader)
+        self._assert_logits_and_targets(main_logits, targets, split_name)
+        probabilities = torch.softmax(main_logits, dim=-1).cpu().numpy()
+        predictions = main_logits.argmax(dim=-1).cpu().numpy()
+        cm, present_classes = compute_confusion_matrix(main_logits, targets, self.n_classes)
+
+        artifact = SplitEvaluationArtifact(
+            logits=main_logits.cpu().numpy(),
+            probabilities=probabilities,
+            predictions=predictions,
+            targets=targets.cpu().numpy(),
+            features=features,
+            grouped_predictions=None,
+            grouped_targets=None,
+            metrics={},
+            confusion_matrix=cm,
+            present_classes=[int(x) for x in present_classes],
+        )
+        self.artifacts[split_name] = artifact
+        return artifact
     
     # --------------------------------------------------------
     # Evaluation protocol
@@ -481,12 +567,12 @@ class ModelEvaluator:
 
     def save(self, path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        clean = json.loads(json.dumps(self.results))
-        for split_data in clean.get("splits", {}).values():
-            split_data.pop("predictions", None)
-            split_data.pop("targets", None)
+        export = {"model": self.results.get("model"), "splits": {}, "summary": self.results.get("summary")}
+        for split_name, split_data in self.results.get("splits", {}).items():
+            clean = {k: v for k, v in split_data.items() if k not in {"predictions", "targets"}}
+            export["splits"][split_name] = clean
         with open(path, "w") as f:
-            json.dump(clean, f, indent=2)
+            json.dump(export, f, indent=2)
         print(f"  Results saved to {path}")
 
     def _build_summary(self, test_key: str) -> Dict:

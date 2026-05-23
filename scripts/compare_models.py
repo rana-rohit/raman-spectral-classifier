@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +27,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--split", default="test")
     p.add_argument("--out-dir", default="experiments/comparisons")
     p.add_argument("--dpi", type=int, default=500)
+    p.add_argument("--no-staging", action="store_true", help="Write outputs directly to out dir")
     return p.parse_args()
+
+
+def _copy_tree_contents(src: str, dst: str) -> None:
+    for root, _, files in os.walk(src):
+        rel_root = os.path.relpath(root, src)
+        target_root = os.path.join(dst, rel_root) if rel_root != "." else dst
+        os.makedirs(target_root, exist_ok=True)
+        for fname in files:
+            src_path = os.path.join(root, fname)
+            dst_path = os.path.join(target_root, fname)
+            shutil.copy2(src_path, dst_path)
 
 
 def _find_eval_results(exp_dir: Path) -> Path:
@@ -45,7 +60,12 @@ def _load_predictions(exp_dir: Path, split: str):
 
 def main() -> None:
     args = parse_args()
-    out_dir = Path(args.out_dir)
+    staging_dir = None
+    if not args.no_staging:
+        staging_dir = tempfile.mkdtemp(prefix="compare_staging_")
+        print(f"[compare] Using staging directory: {staging_dir}")
+
+    out_dir = Path(staging_dir) if staging_dir else Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     models = []
@@ -122,7 +142,11 @@ def main() -> None:
     fig.savefig(out_dir / "comparison_roc.pdf", dpi=args.dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
-    print(f"[compare] Saved comparison plots in {out_dir}")
+    if staging_dir is not None:
+        _copy_tree_contents(staging_dir, args.out_dir)
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+    print(f"[compare] Saved comparison plots in {args.out_dir}")
 
 
 if __name__ == "__main__":

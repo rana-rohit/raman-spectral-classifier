@@ -117,6 +117,7 @@ def load_backbone_weights(
     checkpoint = torch.load(
         checkpoint_path,
         map_location=device,
+        weights_only=False,
     )
 
     pretrained_state = checkpoint["model_state"]
@@ -239,7 +240,7 @@ def load_checkpoint(
     Load a checkpoint into model (and optionally optimizer).
     Returns the full checkpoint dict so caller can access metrics/config.
     """
-    checkpoint = torch.load(path, map_location=device)
+    checkpoint = torch.load(path, map_location=device, weights_only=False)
     
     if "semantic_space" in checkpoint:
         checkpoint_space = checkpoint["semantic_space"]
@@ -297,7 +298,13 @@ def load_checkpoint(
                 "model parameters changed for optional CBAM."
             )
     else:
-        model.load_state_dict(checkpoint_state)
+        try:
+            model.load_state_dict(checkpoint_state)
+        except RuntimeError as e:
+            print("\n[Checkpoint] WARNING: strict load failed, attempting non-strict load.\n", e)
+            model.load_state_dict(checkpoint_state, strict=False)
+            if optimizer is not None and "optimizer_state" in checkpoint:
+                print("[Checkpoint] WARNING: Loaded model with non-strict state; optimizer state may be incompatible.")
         if optimizer is not None and "optimizer_state" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state"])
     return checkpoint
@@ -325,7 +332,7 @@ def load_encoder_only(
     path_obj = Path(path)
     checkpoint_path = str(path_obj) if path_obj.is_file() else resolve_best_checkpoint_path(path)
     
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     pretrained_state = checkpoint["model_state"]
     current_state = model.state_dict()
     
