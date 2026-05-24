@@ -38,8 +38,6 @@ from metadata.ontology import (
     INVERSE_COMPACT_LABEL_MAP,
     ONTOLOGY_VERSION,
 )
-from src.xai.saliency import compute_saliency
-from src.xai.saliency import plot_saliency
 from pathlib import Path
 
 def parse_args():
@@ -50,7 +48,6 @@ def parse_args():
     p.add_argument("--exp-dir", default="experiments")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--override", nargs="*", default=[])
-    p.add_argument("--run-xai", action="store_true", help="Run saliency analysis after training")
     p.add_argument("--run-finetune", action="store_true", help="Run explicit post-training clinical finetuning")
     p.add_argument("--two-stage", action="store_true", help="Enable decoupled two-stage representation and linear classifier training")
     args, dotlist_overrides = p.parse_known_args()
@@ -157,7 +154,7 @@ def print_phase_status(
     loaded_checkpoint: str | None,
     frozen_params: int,
     trainable_params: int,
-) -> None:
+    ) -> None:
     border = "=" * 60
     print(f"\n{border}")
     if phase == 1:
@@ -600,76 +597,7 @@ def main():
         print(f"\n  Fine-tune artifacts: {finetune_dir}/")
 
     print(f"\n  Done. Training artifacts: {exp_dir}/")
-    
-    # --------------------------------------------------------
-    # XAI analysis operates on:
-    # compact transfer-space predictions
-    #
-    # Predictions are restored back to:
-    # sparse clinical ontology IDs
-    #
-    # before semantic visualization.
-    # --------------------------------------------------------
-    if args.run_xai and clinical_sparse_ids is not None:
-        print("\n[XAI] Generating saliency maps...")
 
-        xai_root = Path(exp_dir) / "xai"
-        xai_root.mkdir(parents=True, exist_ok=True)
-
-        loader = loaders["ood"]["2018clinical"]
-
-        model.eval()
-        device = next(model.parameters()).device
-
-        class_counts = {
-            remapped_label: 0
-            for remapped_label in range(n_classes)
-        }
-
-        for x, y in loader:
-            for i in range(x.shape[0]):
-
-                label = int(y[i].item())
-
-                if label not in class_counts or class_counts[label] >= 2:
-                    continue
-
-                xi = x[i:i+1].to(device)
-
-                saliency = compute_saliency(model, xi)
-                signal = xi[0].mean(dim=0).detach().cpu().numpy()
-                
-                assert label in INVERSE_COMPACT_LABEL_MAP, (
-                    f"Unknown compact label: {label}"
-                )
-                
-                original_label = INVERSE_COMPACT_LABEL_MAP[label]
-                clinical_info = CLINICAL_LABELS[original_label]
-
-                treatment = clinical_info["global_treatment"]
-
-                safe_name = (
-                    f"treatment_{original_label}_{treatment}"
-                    .replace(" ", "_")
-                    .replace("/", "_")
-                )
-
-                save_dir = xai_root / safe_name
-                save_dir.mkdir(parents=True, exist_ok=True)
-
-                save_path = save_dir / f"sample_{class_counts[label]}.png"
-
-                plot_saliency(signal, saliency, save_path)
-
-                class_counts[label] += 1
-
-                if all(v >= 2 for v in class_counts.values()):
-                    break
-
-            if all(v >= 2 for v in class_counts.values()):
-                break
-
-        print(f"[XAI] Saved to {xai_root}")
 
 if __name__ == "__main__":
     main()
