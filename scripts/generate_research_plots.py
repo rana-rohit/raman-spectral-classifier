@@ -194,7 +194,35 @@ def _load_config(exp_dir: Path) -> dict:
 
 
 def _find_eval_results(exp_dir: Path) -> List[Path]:
-    return sorted(exp_dir.glob("*_eval_results.json"))
+    direct_matches = sorted(exp_dir.glob("*_eval_results.json"))
+    if direct_matches:
+        return direct_matches
+
+    recursive_matches = sorted(exp_dir.rglob("*_eval_results.json"))
+    if recursive_matches:
+        return recursive_matches
+
+    analysis_dir = exp_dir / "analysis"
+    if analysis_dir.exists():
+        analysis_matches = sorted(analysis_dir.glob("*_eval_results.json"))
+        if analysis_matches:
+            return analysis_matches
+
+        analysis_recursive_matches = sorted(analysis_dir.rglob("*_eval_results.json"))
+        if analysis_recursive_matches:
+            return analysis_recursive_matches
+
+    parent_analysis_dir = exp_dir.parent / "analysis"
+    if parent_analysis_dir.exists():
+        parent_matches = sorted(parent_analysis_dir.glob("*_eval_results.json"))
+        if parent_matches:
+            return parent_matches
+
+        parent_recursive_matches = sorted(parent_analysis_dir.rglob("*_eval_results.json"))
+        if parent_recursive_matches:
+            return parent_recursive_matches
+
+    return []
 
 
 def _load_predictions(pred_dir: Path, split: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:

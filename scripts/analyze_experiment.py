@@ -288,7 +288,7 @@ class ExperimentAnalysisRunner:
         # intermediate inputs for plotting.
         ArtifactExporter.trim_temporary_inputs(self.analysis_dir)
 
-        comparisons_src = self.analysis_dir / "plots" / "comparison"
+        comparisons_src = self.analysis_dir / "research_plots" / "model_comparisons"
         comparisons_dst = self.analysis_dir / "comparisons"
         comparisons_dst.mkdir(parents=True, exist_ok=True)
         if comparisons_src.exists():
@@ -304,6 +304,7 @@ class ExperimentAnalysisRunner:
     def run(self) -> Dict:
         self.discover()
         results = self.evaluate()
+        self.discover()
         self.prepare_analysis_inputs()
         self.generate_analysis_package()
         self.write_summary()

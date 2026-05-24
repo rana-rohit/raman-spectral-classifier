@@ -149,7 +149,7 @@ def apply_freeze_backbone_policy(model, cfg: dict) -> None:
 def print_phase_status(
     phase: int,
     losses_enabled: list[str],
-    frozen_modules: list[str],
+    frozen_modules: list[str],  
     trainable_modules: list[str],
     loaded_checkpoint: str | None,
     frozen_params: int,
