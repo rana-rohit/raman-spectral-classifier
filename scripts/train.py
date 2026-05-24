@@ -39,7 +39,7 @@ from metadata.ontology import (
     ONTOLOGY_VERSION,
 )
 from src.xai.saliency import compute_saliency
-from scripts.plot_saliency import plot_saliency
+from src.xai.saliency import plot_saliency
 from pathlib import Path
 
 def parse_args():
