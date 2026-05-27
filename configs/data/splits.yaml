@@ -59,9 +59,10 @@ validation:
   source_split: reference
   val_fraction: 0.20
   iid_reference:
-    train_fraction: 0.70
+    strategy: group_aware_reference_split
     val_fraction: 0.15
-    test_fraction: 0.15
+    test_groups: 30
+    spectra_per_group: 100
     random_seed: 42
   # TODO:
   # replace spectrum-level validation

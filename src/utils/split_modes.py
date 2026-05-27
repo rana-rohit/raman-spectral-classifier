@@ -18,9 +18,9 @@ VALID_SPLIT_MODES = {HOLDOUT, IID_REFERENCE}
 
 @dataclass(frozen=True)
 class IIDReferenceSplitConfig:
-    train_fraction: float
     val_fraction: float
-    test_fraction: float
+    test_groups: int
+    spectra_per_group: int
     random_seed: int
 
 
@@ -68,33 +68,41 @@ def canonicalize_split_mode_config(
 
 
 def resolve_iid_reference_split_config(cfg: Mapping[str, Any]) -> IIDReferenceSplitConfig:
-    """Resolve IID reference split fractions and seed from config."""
+    """Resolve group-aware IID reference split settings."""
     validation_cfg = cfg.get("validation", {}) or {}
     iid_cfg = validation_cfg.get("iid_reference", {}) or {}
 
     val_fraction = float(iid_cfg.get("val_fraction", 0.15))
-    test_fraction = float(iid_cfg.get("test_fraction", 0.15))
-    train_fraction = float(
-        iid_cfg.get("train_fraction", 1.0 - val_fraction - test_fraction)
+    test_groups = int(iid_cfg.get("test_groups", 30))
+    grouped_cfg = cfg.get("evaluation", {}).get("grouped", {}) or {}
+    spectra_per_group_map = grouped_cfg.get("spectra_per_group", {}) or {}
+    spectra_per_group = int(
+        iid_cfg.get(
+            "spectra_per_group",
+            spectra_per_group_map.get("test", 100),
+        )
     )
     random_seed = int(iid_cfg.get("random_seed", validation_cfg.get("random_seed", 42)))
 
-    total = train_fraction + val_fraction + test_fraction
-    if abs(total - 1.0) > 1e-6:
+    if not 0.0 < val_fraction < 1.0:
         raise ValueError(
-            "validation.iid_reference split fractions must sum to 1.0; "
-            f"got train={train_fraction}, val={val_fraction}, "
-            f"test={test_fraction}, total={total}"
+            "validation.iid_reference.val_fraction must be in (0, 1); "
+            f"got {val_fraction}"
         )
-    if min(train_fraction, val_fraction, test_fraction) <= 0.0:
+    if test_groups <= 0:
         raise ValueError(
-            "validation.iid_reference split fractions must all be positive; "
-            f"got train={train_fraction}, val={val_fraction}, test={test_fraction}"
+            "validation.iid_reference.test_groups must be positive; "
+            f"got {test_groups}"
+        )
+    if spectra_per_group <= 0:
+        raise ValueError(
+            "validation.iid_reference.spectra_per_group must be positive; "
+            f"got {spectra_per_group}"
         )
 
     return IIDReferenceSplitConfig(
-        train_fraction=train_fraction,
         val_fraction=val_fraction,
-        test_fraction=test_fraction,
+        test_groups=test_groups,
+        spectra_per_group=spectra_per_group,
         random_seed=random_seed,
     )

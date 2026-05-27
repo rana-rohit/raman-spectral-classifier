@@ -133,22 +133,25 @@ def print_split_provenance(
     print(f"  Split Mode: {split_mode}")
     if split_mode == IID_REFERENCE:
         iid_cfg = resolve_iid_reference_split_config(cfg)
-        print("  Split Source: stratified IID split from X_reference.npy / y_reference.npy")
-        print(
-            "  Split Ratios: "
-            f"train={iid_cfg.train_fraction:.2f}, "
-            f"val={iid_cfg.val_fraction:.2f}, "
-            f"test={iid_cfg.test_fraction:.2f}"
-        )
+        print("  Split Strategy: group-aware reference-domain split")
+        print("  Split Source: X_reference.npy / y_reference.npy only")
+        print("  Group Leakage: prevented")
+        print("  Grouped Evaluation: preserved")
+        print(f"  Expected Test Groups: {iid_cfg.test_groups}")
+        print(f"  Spectra/Group: {iid_cfg.spectra_per_group}")
+        print(f"  Validation Group Fraction: {iid_cfg.val_fraction:.2f}")
         print(f"  Random Seed: {iid_cfg.random_seed}")
     elif split_mode == HOLDOUT:
         val_fraction = float(cfg.get("validation", {}).get("val_fraction", 0.20))
+        test_spg = spectra_per_group_map.get("test")
         print("  Split Source: reference train/val + dedicated X_test.npy / y_test.npy")
         print(
             "  Reference Split Ratios: "
             f"train={1.0 - val_fraction:.2f}, val={val_fraction:.2f}; "
             "test=dedicated holdout"
         )
+        if test_spg:
+            print(f"  Holdout Grouping: {test_spg} spectra/group")
 
     source_loaders = [loaders.get("train"), loaders.get("source_val")]
     source_loaders = [loader for loader in source_loaders if loader is not None]

@@ -223,6 +223,8 @@ class ModelEvaluator:
                 k: float(v) if isinstance(v, np.floating) else v
                 for k, v in group_results.items()
             }
+            group_metrics["n_groups"] = int(len(group_targets))
+            group_metrics["spectra_per_group"] = int(spectra_per_group)
             group_metrics["predictions"] = group_preds.tolist()
             group_metrics["targets"] = group_targets.tolist()
 

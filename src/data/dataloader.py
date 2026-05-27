@@ -13,7 +13,6 @@ from typing import Dict
 
 import numpy as np
 import torch
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 
 from src.data.preprocessing import SpectralPreprocessor
@@ -366,30 +365,81 @@ def _contiguous_split(X, y, sample_ids, test_fraction: float):
 
 def _iid_reference_split(X, y, sample_ids, cfg: dict):
     """
-    Build train/val/test partitions from the reference split only.
+    Build train/val/test partitions from reference groups only.
 
-    The two-step split keeps class proportions in all three partitions:
-    first train vs temp, then val vs test inside temp.
+    Raman grouped evaluation assumes contiguous spectra_per_group chunks.
+    IID reference mode therefore partitions those chunks, not individual
+    spectra, so no isolate/replicate group can span train/val/test.
     """
     iid_cfg = resolve_iid_reference_split_config(cfg)
-    indices = np.arange(len(y))
-    temp_fraction = iid_cfg.val_fraction + iid_cfg.test_fraction
-
-    train_idx, temp_idx = train_test_split(
-        indices,
-        test_size=temp_fraction,
-        stratify=y,
-        random_state=iid_cfg.random_seed,
-        shuffle=True,
+    groups_by_label = _reference_groups_by_label(
+        y,
+        spectra_per_group=iid_cfg.spectra_per_group,
     )
+    group_counts = {label: len(groups) for label, groups in groups_by_label.items()}
+    total_groups = sum(group_counts.values())
 
-    relative_test_fraction = iid_cfg.test_fraction / temp_fraction
-    val_idx, test_idx = train_test_split(
-        temp_idx,
-        test_size=relative_test_fraction,
-        stratify=y[temp_idx],
-        random_state=iid_cfg.random_seed + 1,
-        shuffle=True,
+    if iid_cfg.test_groups >= total_groups:
+        raise ValueError(
+            "validation.iid_reference.test_groups must be smaller than the "
+            f"number of reference groups; got {iid_cfg.test_groups} for "
+            f"{total_groups} groups"
+        )
+
+    rng = np.random.default_rng(iid_cfg.random_seed)
+    shuffled_groups = {
+        label: list(rng.permutation(groups))
+        for label, groups in groups_by_label.items()
+    }
+
+    test_counts = _allocate_group_counts(group_counts, iid_cfg.test_groups)
+    test_groups_by_label = {}
+    remaining_groups_by_label = {}
+    for label, groups in shuffled_groups.items():
+        n_test = test_counts[label]
+        test_groups_by_label[label] = groups[:n_test]
+        remaining_groups_by_label[label] = groups[n_test:]
+
+    remaining_counts = {
+        label: len(groups)
+        for label, groups in remaining_groups_by_label.items()
+    }
+    val_group_target = int(round(total_groups * iid_cfg.val_fraction))
+    val_group_target = max(len(remaining_counts), val_group_target)
+    val_group_target = min(sum(remaining_counts.values()) - len(remaining_counts), val_group_target)
+    val_counts = _allocate_group_counts(remaining_counts, val_group_target)
+
+    val_groups_by_label = {}
+    train_groups_by_label = {}
+    for label, groups in remaining_groups_by_label.items():
+        n_val = val_counts[label]
+        val_groups_by_label[label] = groups[:n_val]
+        train_groups_by_label[label] = groups[n_val:]
+
+    train_idx = _flatten_group_indices(train_groups_by_label)
+    val_idx = _flatten_group_indices(val_groups_by_label)
+    test_idx = _flatten_group_indices(test_groups_by_label)
+
+    _assert_group_keys_disjoint(
+        "train",
+        sample_ids[train_idx],
+        "source_val",
+        sample_ids[val_idx],
+        iid_cfg.spectra_per_group,
+    )
+    _assert_group_keys_disjoint(
+        "train",
+        sample_ids[train_idx],
+        "test",
+        sample_ids[test_idx],
+        iid_cfg.spectra_per_group,
+    )
+    _assert_group_keys_disjoint(
+        "source_val",
+        sample_ids[val_idx],
+        "test",
+        sample_ids[test_idx],
+        iid_cfg.spectra_per_group,
     )
 
     return (
@@ -403,6 +453,91 @@ def _iid_reference_split(X, y, sample_ids, cfg: dict):
         sample_ids[val_idx],
         sample_ids[test_idx],
     )
+
+
+def _reference_groups_by_label(y, spectra_per_group: int):
+    y = np.asarray(y)
+    groups_by_label = {}
+
+    for label in sorted(np.unique(y).astype(int).tolist()):
+        label_indices = np.where(y == label)[0]
+        if len(label_indices) % spectra_per_group != 0:
+            raise ValueError(
+                f"Reference label {label} has {len(label_indices)} spectra, "
+                f"which is not divisible by spectra_per_group={spectra_per_group}"
+            )
+
+        groups = []
+        for start in range(0, len(label_indices), spectra_per_group):
+            group = label_indices[start:start + spectra_per_group]
+            if len(np.unique(y[group])) != 1:
+                raise RuntimeError(
+                    f"Reference group for label {label} contains mixed labels"
+                )
+            groups.append(group)
+
+        groups_by_label[label] = groups
+
+    return groups_by_label
+
+
+def _allocate_group_counts(group_counts: dict[int, int], target_total: int) -> dict[int, int]:
+    labels = sorted(group_counts)
+    available = sum(group_counts.values())
+    if target_total <= 0 or target_total > available:
+        raise ValueError(
+            f"Cannot allocate {target_total} groups from {available} available groups"
+        )
+    if target_total < len(labels):
+        raise ValueError(
+            f"Need at least one group per class; got target_total={target_total} "
+            f"for {len(labels)} classes"
+        )
+
+    exact = {
+        label: target_total * group_counts[label] / available
+        for label in labels
+    }
+    allocation = {
+        label: min(group_counts[label], max(1, int(np.floor(exact[label]))))
+        for label in labels
+    }
+
+    while sum(allocation.values()) > target_total:
+        candidates = [
+            label for label in labels
+            if allocation[label] > 1
+        ]
+        label = min(
+            candidates,
+            key=lambda item: (exact[item] - np.floor(exact[item]), allocation[item]),
+        )
+        allocation[label] -= 1
+
+    while sum(allocation.values()) < target_total:
+        candidates = [
+            label for label in labels
+            if allocation[label] < group_counts[label]
+        ]
+        label = max(
+            candidates,
+            key=lambda item: (exact[item] - np.floor(exact[item]), group_counts[item]),
+        )
+        allocation[label] += 1
+
+    return allocation
+
+
+def _flatten_group_indices(groups_by_label: dict[int, list[np.ndarray]]) -> np.ndarray:
+    groups = [
+        group
+        for label in sorted(groups_by_label)
+        for group in groups_by_label[label]
+    ]
+    if not groups:
+        return np.asarray([], dtype=np.int64)
+    groups = sorted(groups, key=lambda group: int(group[0]))
+    return np.concatenate(groups).astype(np.int64)
 
 def _make_loader(
     X,
@@ -634,3 +769,30 @@ def _assert_disjoint(left_name: str, left_ids, right_name: str, right_ids) -> No
             f"{left_name} and {right_name} overlap at sample {example}; "
             "clinical train/eval leakage is not allowed"
         )
+
+
+def _assert_group_keys_disjoint(
+    left_name: str,
+    left_ids,
+    right_name: str,
+    right_ids,
+    spectra_per_group: int,
+) -> None:
+    left_keys = _sample_group_keys(left_ids, spectra_per_group)
+    right_keys = _sample_group_keys(right_ids, spectra_per_group)
+    overlap = left_keys.intersection(right_keys)
+    if overlap:
+        example = sorted(overlap)[0]
+        raise RuntimeError(
+            f"{left_name} and {right_name} share reference group {example}; "
+            "group-aware IID mode requires isolate/replicate groups to be disjoint"
+        )
+
+
+def _sample_group_keys(sample_ids, spectra_per_group: int) -> set[str]:
+    keys = set()
+    for raw_id in sample_ids:
+        sample_id = str(raw_id)
+        split_name, index_text = sample_id.rsplit(":", 1)
+        keys.add(f"{split_name}:{int(index_text) // spectra_per_group}")
+    return keys

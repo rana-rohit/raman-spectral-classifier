@@ -302,7 +302,7 @@ class _ReferenceOnlyRegistry:
         return []
 
 
-def test_iid_reference_mode_uses_reference_only_stratified_splits():
+def test_iid_reference_mode_uses_reference_only_group_aware_splits():
     registry = _ReferenceOnlyRegistry()
     preprocessor = SpectralPreprocessor([]).fit(registry.arrays["reference"][0])
     cfg = {
@@ -311,10 +311,16 @@ def test_iid_reference_mode_uses_reference_only_stratified_splits():
             "val_fraction": 0.2,
             "random_seed": 123,
             "iid_reference": {
-                "train_fraction": 0.70,
                 "val_fraction": 0.15,
-                "test_fraction": 0.15,
+                "test_groups": 30,
+                "spectra_per_group": 2,
                 "random_seed": 123,
+            },
+        },
+        "evaluation": {
+            "grouped": {
+                "enabled": True,
+                "spectra_per_group": {"test": 2},
             },
         },
         "task": {
@@ -339,9 +345,9 @@ def test_iid_reference_mode_uses_reference_only_stratified_splits():
 
     assert set(loaders) == {"train", "source_val", "val", "test", "ood"}
     assert loaders["val"] is loaders["source_val"]
-    assert len(loaders["train"].dataset) == 210
-    assert len(loaders["source_val"].dataset) == 45
-    assert len(loaders["test"].dataset) == 45
+    assert len(loaders["train"].dataset) == 180
+    assert len(loaders["source_val"].dataset) == 60
+    assert len(loaders["test"].dataset) == 60
     assert all(call[0] != "test" for call in registry.calls)
     assert all(
         str(sample_id).startswith("reference:")
@@ -349,12 +355,28 @@ def test_iid_reference_mode_uses_reference_only_stratified_splits():
     )
 
     train_counts = loaders["train"].dataset.class_counts
-    assert set(train_counts.values()) == {7}
+    assert set(train_counts.values()) == {6}
 
     for split_name in ("source_val", "test"):
         counts = loaders[split_name].dataset.class_counts
         assert set(counts) == set(range(30))
-        assert max(counts.values()) - min(counts.values()) <= 1
+        assert set(counts.values()) == {2}
+
+    for split_name in ("source_val", "test"):
+        y = loaders[split_name].dataset.y
+        for start in range(0, len(y), 2):
+            assert len(set(y[start:start + 2].tolist())) == 1
+
+    def group_keys(loader):
+        return {
+            int(str(sample_id).split(":")[1]) // 2
+            for sample_id in loader.dataset.sample_ids
+        }
+
+    assert group_keys(loaders["train"]).isdisjoint(group_keys(loaders["source_val"]))
+    assert group_keys(loaders["train"]).isdisjoint(group_keys(loaders["test"]))
+    assert group_keys(loaders["source_val"]).isdisjoint(group_keys(loaders["test"]))
+    assert len(group_keys(loaders["test"])) == 30
 
     registry_2 = _ReferenceOnlyRegistry()
     loaders_2 = build_all_loaders(
