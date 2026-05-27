@@ -12,9 +12,10 @@ Usage:
     print(cfg.model.n_classes)
 """
 
-import yaml
 from pathlib import Path
-from typing import Union
+from typing import Iterable, Union
+
+import yaml
 
 
 class Config(dict):
@@ -59,6 +60,32 @@ def load_config(*paths: Union[str, Path]) -> Config:
             data = yaml.safe_load(f) or {}
         merged = _deep_merge(merged, data)
     return Config(merged)
+
+
+def apply_overrides(cfg: dict, overrides: Iterable[str] | None) -> dict:
+    """
+    Apply dotted key=value config overrides in-place.
+
+    Values are parsed with yaml.safe_load so booleans, numbers, lists,
+    and quoted strings behave consistently across entry points.
+    """
+    for item in overrides or []:
+        if "=" not in item:
+            raise ValueError(
+                f"Invalid override '{item}'. Expected dotted key=value, "
+                "for example training.batch_size=64"
+            )
+        key, val = item.split("=", 1)
+        keys = key.split(".")
+        cursor = cfg
+        for part in keys[:-1]:
+            cursor = cursor.setdefault(part, {})
+        try:
+            val = yaml.safe_load(val)
+        except Exception:
+            pass
+        cursor[keys[-1]] = val
+    return cfg
 
 
 def save_config(cfg: dict, path: Union[str, Path]) -> None:

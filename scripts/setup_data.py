@@ -10,7 +10,7 @@ Bootstraps the entire data pipeline:
 Run once before training to verify everything is wired correctly:
     python scripts/setup_data.py
 
-This script does NOT touch the test or clinical splits for training —
+This script does NOT touch the test or clinical splits for training -
 it only inspects their shapes and confirms loading works.
 """
 
@@ -19,7 +19,6 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import yaml
 import argparse
 
 from src.utils.seed import set_seed
@@ -27,11 +26,13 @@ from src.data.registry import DataRegistry
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
+from src.utils.config import apply_overrides, load_config
+from src.utils.split_modes import (
+    IID_REFERENCE,
+    canonicalize_split_mode_config,
+    resolve_split_mode,
+)
 
-
-def load_yaml(path: str) -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
 
 def parse_args():
 
@@ -46,13 +47,30 @@ def parse_args():
             "s3_transfer",
         ],
     )
+    parser.add_argument(
+        "--split-mode",
+        choices=["holdout", "iid_reference"],
+        default=None,
+        help="Evaluation protocol to activate for this runtime check.",
+    )
+    parser.add_argument(
+        "--override",
+        nargs="*",
+        default=[],
+        help="Dotted key=value config overrides, matching scripts/train.py.",
+    )
 
-    return parser.parse_args()
+    args, dotlist_overrides = parser.parse_known_args()
+    args.override = list(args.override) + dotlist_overrides
+    return args
 
 
 def _active_registry_splits(cfg: dict, registry: DataRegistry) -> list[str]:
     stage = cfg.get("task", {}).get("stage")
-    active = ["reference", "test"]
+    split_mode = resolve_split_mode(cfg)
+    active = ["reference"]
+    if split_mode != IID_REFERENCE:
+        active.append("test")
 
     include_finetune = (
         cfg.get("training", {})
@@ -82,21 +100,22 @@ def main():
     set_seed(42)
     args = parse_args()
     print("=" * 60)
-    print("  Spectral Classifier — Data Pipeline Bootstrap")
+    print("  Spectral Classifier - Data Pipeline Bootstrap")
     print("=" * 60)
 
     # ---- Load configs ----
-    splits_cfg = load_yaml("configs/data/splits.yaml")
-    prep_cfg = load_yaml("configs/data/preprocessing.yaml")
-    aug_cfg = load_yaml("configs/data/augmentation.yaml")
-    stage_cfg = load_yaml(
-        f"configs/stages/{args.stage}.yaml"
+    cfg = load_config(
+        "configs/data/splits.yaml",
+        "configs/data/preprocessing.yaml",
+        "configs/data/augmentation.yaml",
+        "configs/training/base.yaml",
+        f"configs/stages/{args.stage}.yaml",
     )
-    
-    cfg = {
-        **splits_cfg,
-        **stage_cfg,
-    }
+    cfg = apply_overrides(dict(cfg), args.override)
+    split_mode = canonicalize_split_mode_config(
+        cfg,
+        split_mode=args.split_mode,
+    )
 
     # ---- Task semantics ----
     task_cfg = cfg["task"]
@@ -111,6 +130,7 @@ def main():
 
     # ---- Build registry and load active splits ----
     print("\n[1/5] Loading semantically active splits from disk...")
+    print(f"      Split Mode: {split_mode}")
 
     registry = DataRegistry(
         data_root="data/raw",
@@ -179,7 +199,7 @@ def main():
 
     # Always fit preprocessor on FULL reference set
     preprocessor = SpectralPreprocessor.from_config(
-        prep_cfg["preprocessing"]
+        cfg["preprocessing"]
     )
 
     X_ref_clean = preprocessor.fit_transform(X_ref)
@@ -219,7 +239,7 @@ def main():
     print("\n[4/5] Building augmentation pipeline...")
 
     augmentation = AugmentationPipeline.from_config(
-        aug_cfg["augmentation"]
+        cfg["augmentation"]
     )
 
     if len(augmentation.steps) == 0 or augmentation.p == 0:

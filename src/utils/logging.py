@@ -133,7 +133,7 @@ def print_split_provenance(
     print(f"  Split Mode: {split_mode}")
     if split_mode == IID_REFERENCE:
         iid_cfg = resolve_iid_reference_split_config(cfg)
-        print("  Split Source: X_reference.npy / y_reference.npy only")
+        print("  Split Source: stratified IID split from X_reference.npy / y_reference.npy")
         print(
             "  Split Ratios: "
             f"train={iid_cfg.train_fraction:.2f}, "
@@ -182,12 +182,22 @@ def print_split_provenance(
     ]
 
     split_cfg = cfg.get("splits", {})
-    role_labels = {
-        "train": "SOURCE (train)",
-        "source_val": "SOURCE (val)",
-        "clinical_train": "OOD (adapt-train)",
-        "clinical_val": "OOD (adapt-val)",
-    }
+    if split_mode == IID_REFERENCE:
+        role_labels = {
+            "train": "IID (train)",
+            "source_val": "IID (val)",
+            "test": "IID (test)",
+            "clinical_train": "OOD (adapt-train)",
+            "clinical_val": "OOD (adapt-val)",
+        }
+    else:
+        role_labels = {
+            "train": "SOURCE (train)",
+            "source_val": "SOURCE (val)",
+            "test": "HOLDOUT",
+            "clinical_train": "OOD (adapt-train)",
+            "clinical_val": "OOD (adapt-val)",
+        }
 
     # Table header
     hdr = (

@@ -8,7 +8,7 @@ reference-only path used for standard Raman classification experiments.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, MutableMapping
 
 
 HOLDOUT = "holdout"
@@ -30,8 +30,8 @@ def resolve_split_mode(cfg: Mapping[str, Any]) -> str:
     validation_cfg = cfg.get("validation", {}) or {}
     mode = (
         cfg.get("split_mode")
-        or training_cfg.get("split_mode")
         or validation_cfg.get("split_mode")
+        or training_cfg.get("split_mode")
         or HOLDOUT
     )
     mode = str(mode).strip().lower()
@@ -40,6 +40,30 @@ def resolve_split_mode(cfg: Mapping[str, Any]) -> str:
             f"Unknown split_mode={mode!r}. Expected one of: "
             f"{sorted(VALID_SPLIT_MODES)}"
         )
+    return mode
+
+
+def canonicalize_split_mode_config(
+    cfg: MutableMapping[str, Any],
+    split_mode: str | None = None,
+) -> str:
+    """
+    Resolve and persist the active split mode in every runtime location.
+
+    The top-level key is the source of truth after canonicalization, while
+    training.split_mode is kept in sync for existing consumers and saved
+    experiment configs.
+    """
+    if split_mode is not None:
+        cfg["split_mode"] = split_mode
+
+    mode = resolve_split_mode(cfg)
+    cfg["split_mode"] = mode
+
+    training_cfg = cfg.setdefault("training", {})
+    training_cfg["split_mode"] = mode
+    validation_cfg = cfg.setdefault("validation", {})
+    validation_cfg["split_mode"] = mode
     return mode
 
 
@@ -74,4 +98,3 @@ def resolve_iid_reference_split_config(cfg: Mapping[str, Any]) -> IIDReferenceSp
         test_fraction=test_fraction,
         random_seed=random_seed,
     )
-

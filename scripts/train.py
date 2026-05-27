@@ -14,13 +14,16 @@ import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import torch
-import yaml
 
 from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.registry import DataRegistry
-from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
+from src.utils.split_modes import (
+    IID_REFERENCE,
+    canonicalize_split_mode_config,
+    resolve_split_mode,
+)
 from src.evaluation.evaluator import ModelEvaluator
 from src.models.registry import get_model, model_summary
 from src.training.finetuner import finetune
@@ -32,7 +35,7 @@ from src.utils.checkpoint import (
     load_encoder_only,
     resolve_pretrained_checkpoint,
 )
-from src.utils.config import load_config, save_config
+from src.utils.config import apply_overrides, load_config, save_config
 from src.utils.seed import set_seed
 from metadata.ontology import (
     CLINICAL_LABELS,
@@ -48,32 +51,13 @@ def parse_args():
     p.add_argument("--exp-name", default=None)
     p.add_argument("--exp-dir", default="experiments")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--split-mode", choices=["holdout", "iid_reference"], default=None)
     p.add_argument("--override", nargs="*", default=[])
     p.add_argument("--run-finetune", action="store_true", help="Run explicit post-training clinical finetuning")
     p.add_argument("--two-stage", action="store_true", help="Enable decoupled two-stage representation and linear classifier training")
     args, dotlist_overrides = p.parse_known_args()
     args.override = list(args.override) + dotlist_overrides
     return args
-
-
-def apply_overrides(cfg: dict, overrides: list) -> dict:
-    for item in overrides:
-        if "=" not in item:
-            raise ValueError(
-                f"Invalid override '{item}'. Expected dotted key=value, "
-                "for example model.use_cbam=true"
-            )
-        key, val = item.split("=", 1)
-        keys = key.split(".")
-        cursor = cfg
-        for part in keys[:-1]:
-            cursor = cursor.setdefault(part, {})
-        try:
-            val = yaml.safe_load(val)
-        except Exception:
-            pass
-        cursor[keys[-1]] = val
-    return cfg
 
 
 def canonicalize_runtime_config(cfg: dict, args) -> dict:
@@ -84,9 +68,11 @@ def canonicalize_runtime_config(cfg: dict, args) -> dict:
     supcon_cfg = train_cfg.setdefault("supcon", {})
     finetune_cfg = train_cfg.setdefault("finetune", {})
 
-    split_mode = resolve_split_mode(cfg)
-    cfg["split_mode"] = split_mode
-    train_cfg["split_mode"] = split_mode
+    split_mode = canonicalize_split_mode_config(
+        cfg,
+        split_mode=args.split_mode,
+    )
+    train_cfg = cfg.setdefault("training", {})
 
     if args.two_stage:
         train_cfg["two_stage"] = True
@@ -260,6 +246,7 @@ def main():
     cfg["runtime"] = {
         "n_classes": n_classes,
         "stage": stage,
+        "split_mode": resolve_split_mode(cfg),
         "resolved_by": "scripts/train.py",
     }
     

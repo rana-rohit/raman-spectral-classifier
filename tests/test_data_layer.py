@@ -25,6 +25,7 @@ from src.data.dataset import SpectralDataset, make_train_val_split
 from src.data.dataloader import build_all_loaders
 from src.data.split_roles import SplitRole, role_from_str
 from src.utils.class_subset import filter_and_remap_classes
+from src.utils.split_modes import canonicalize_split_mode_config, resolve_split_mode
 
 
 # ============================================================ #
@@ -368,6 +369,21 @@ def test_iid_reference_mode_uses_reference_only_stratified_splits():
     assert loaders["train"].dataset.sample_ids.tolist() == loaders_2["train"].dataset.sample_ids.tolist()
     assert loaders["source_val"].dataset.sample_ids.tolist() == loaders_2["source_val"].dataset.sample_ids.tolist()
     assert loaders["test"].dataset.sample_ids.tolist() == loaders_2["test"].dataset.sample_ids.tolist()
+
+
+def test_validation_split_mode_override_beats_training_default():
+    cfg = {
+        "training": {"split_mode": "holdout"},
+        "validation": {"split_mode": "iid_reference"},
+    }
+
+    assert resolve_split_mode(cfg) == "iid_reference"
+
+    mode = canonicalize_split_mode_config(cfg)
+    assert mode == "iid_reference"
+    assert cfg["split_mode"] == "iid_reference"
+    assert cfg["training"]["split_mode"] == "iid_reference"
+    assert cfg["validation"]["split_mode"] == "iid_reference"
 
 
 class TestTrainValSplit:
