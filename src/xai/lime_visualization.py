@@ -29,6 +29,11 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.colors import LinearSegmentedColormap
 
+try:
+    from scipy.signal import savgol_filter
+except Exception:  # pragma: no cover - optional visualization dependency
+    savgol_filter = None
+
 
 # ------------------------------------------------------------------ #
 #  Color scheme — research-quality, colorblind-friendly
@@ -41,6 +46,26 @@ _NEGATIVE_COLOR = "#F44336"     # Red — opposes prediction
 _SPECTRUM_COLOR = "#212121"     # Near-black for spectrum line
 _BACKGROUND_COLOR = "#FAFAFA"   # Light grey background
 _GRID_COLOR = "#E0E0E0"        # Subtle grid
+
+
+def _display_spectrum(signal: np.ndarray) -> np.ndarray:
+    if savgol_filter is None:
+        return signal
+
+    if signal.size < 9:
+        return signal
+
+    window_length = 11 if signal.size >= 11 else 9
+    if window_length % 2 == 0:
+        window_length -= 1
+    if window_length < 5:
+        return signal
+
+    polyorder = 3 if window_length >= 11 else 2
+    if signal.size <= polyorder:
+        return signal
+
+    return savgol_filter(signal, window_length, polyorder)
 
 
 def plot_lime_explanation(
@@ -115,9 +140,11 @@ def plot_lime_explanation(
     ax_spectrum = fig.add_subplot(gs[0, :])
     ax_spectrum.set_facecolor(_BACKGROUND_COLOR)
 
+    display_spectrum = _display_spectrum(spectrum)
+
     # Plot spectrum
     ax_spectrum.plot(
-        x_axis, spectrum,
+        x_axis, display_spectrum,
         color=_SPECTRUM_COLOR,
         linewidth=0.8,
         alpha=0.9,
@@ -313,10 +340,11 @@ def plot_lime_comparison(
     for i, (ax, exp) in enumerate(zip(axes, explanations)):
         wavenumbers = exp.wavenumbers
         x_axis = wavenumbers if wavenumbers is not None else np.arange(len(exp.spectrum))
+        display_spectrum = _display_spectrum(exp.spectrum)
 
         ax.set_facecolor(_BACKGROUND_COLOR)
         ax.plot(
-            x_axis, exp.spectrum,
+            x_axis, display_spectrum,
             color=_SPECTRUM_COLOR,
             linewidth=0.8, alpha=0.8,
         )
