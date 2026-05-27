@@ -34,7 +34,9 @@ from matplotlib.colors import LinearSegmentedColormap
 #  Color scheme — research-quality, colorblind-friendly
 # ------------------------------------------------------------------ #
 
-_POSITIVE_COLOR = "#2196F3"     # Blue — supports prediction
+_POSITIVE_COLOR = "#22C55E"     # Premium green — supports prediction
+_POSITIVE_FILL_COLOR = "#86EFAC"  # Soft support fill
+_POSITIVE_GLOW_COLOR = "#DCFCE7"  # Atmospheric support glow
 _NEGATIVE_COLOR = "#F44336"     # Red — opposes prediction
 _SPECTRUM_COLOR = "#212121"     # Near-black for spectrum line
 _BACKGROUND_COLOR = "#FAFAFA"   # Light grey background
@@ -123,34 +125,53 @@ def plot_lime_explanation(
         zorder=3,
     )
 
-    # Overlay positive contributions
+    # Overlay spectral regions for positive/negative contributions.
     positive = np.maximum(importance, 0)
     negative = np.minimum(importance, 0)
 
-    if positive.max() > 0:
-        # Normalize for visual clarity
-        pos_norm = positive / (np.abs(importance).max() + 1e-12)
-        ax_spectrum.fill_between(
-            x_axis,
-            spectrum.min(),
-            spectrum.min() + pos_norm * (spectrum.max() - spectrum.min()) * 0.3,
-            alpha=0.4,
-            color=_POSITIVE_COLOR,
-            label="Supports prediction",
-            zorder=2,
-        )
+    if np.any(positive > 0):
+        pos_indices = np.flatnonzero(positive > 0)
+        pos_width = max(np.diff(x_axis).mean() if len(x_axis) > 1 else 1.0, 1.0) * 1.35
+        for idx in pos_indices:
+            x_center = float(x_axis[idx])
+            left = x_center - pos_width / 2.0
+            right = x_center + pos_width / 2.0
+            ax_spectrum.axvspan(
+                left,
+                right,
+                facecolor=_POSITIVE_GLOW_COLOR,
+                alpha=0.22,
+                edgecolor="none",
+                zorder=1,
+            )
+            ax_spectrum.axvspan(
+                left,
+                right,
+                facecolor=_POSITIVE_FILL_COLOR,
+                alpha=0.12,
+                edgecolor="none",
+                zorder=1.1,
+            )
 
-    if negative.min() < 0:
-        neg_norm = np.abs(negative) / (np.abs(importance).max() + 1e-12)
-        ax_spectrum.fill_between(
-            x_axis,
-            spectrum.min(),
-            spectrum.min() + neg_norm * (spectrum.max() - spectrum.min()) * 0.3,
-            alpha=0.4,
-            color=_NEGATIVE_COLOR,
-            label="Opposes prediction",
-            zorder=2,
-        )
+        ax_spectrum.plot([], [], color=_POSITIVE_COLOR, linewidth=6, alpha=0.0, label="Supports prediction")
+
+    if np.any(negative < 0):
+        neg_indices = np.flatnonzero(negative < 0)
+        neg_width = max(np.diff(x_axis).mean() if len(x_axis) > 1 else 1.0, 1.0) * 1.35
+        for idx in neg_indices:
+            x_center = float(x_axis[idx])
+            left = x_center - neg_width / 2.0
+            right = x_center + neg_width / 2.0
+            ax_spectrum.axvspan(
+                left,
+                right,
+                facecolor=_NEGATIVE_COLOR,
+                alpha=0.12,
+                edgecolor="none",
+                zorder=1,
+            )
+
+        ax_spectrum.plot([], [], color=_NEGATIVE_COLOR, linewidth=6, alpha=0.0, label="Opposes prediction")
 
     ax_spectrum.set_xlabel(x_label, fontsize=11)
     ax_spectrum.set_ylabel("Intensity (a.u.)", fontsize=11)
@@ -294,30 +315,48 @@ def plot_lime_comparison(
             linewidth=0.8, alpha=0.8,
         )
 
-        # Overlay importance as colored fill
+        # Overlay importance as translucent spectral regions.
         pos = np.maximum(exp.importance, 0)
         neg = np.abs(np.minimum(exp.importance, 0))
-        vmax = max(pos.max(), neg.max()) or 1.0
+        if np.any(pos > 0):
+            pos_indices = np.flatnonzero(pos > 0)
+            pos_width = max(np.diff(x_axis).mean() if len(x_axis) > 1 else 1.0, 1.0) * 1.35
+            for idx in pos_indices:
+                x_center = float(x_axis[idx])
+                left = x_center - pos_width / 2.0
+                right = x_center + pos_width / 2.0
+                ax.axvspan(
+                    left,
+                    right,
+                    facecolor=_POSITIVE_GLOW_COLOR,
+                    alpha=0.18,
+                    edgecolor="none",
+                    zorder=1,
+                )
+                ax.axvspan(
+                    left,
+                    right,
+                    facecolor=_POSITIVE_FILL_COLOR,
+                    alpha=0.10,
+                    edgecolor="none",
+                    zorder=1.1,
+                )
 
-        if pos.max() > 0:
-            pos_scaled = pos / vmax * (exp.spectrum.max() - exp.spectrum.min()) * 0.25
-            ax.fill_between(
-                x_axis,
-                exp.spectrum.min(),
-                exp.spectrum.min() + pos_scaled,
-                alpha=0.4,
-                color=_POSITIVE_COLOR,
-            )
-
-        if neg.max() > 0:
-            neg_scaled = neg / vmax * (exp.spectrum.max() - exp.spectrum.min()) * 0.25
-            ax.fill_between(
-                x_axis,
-                exp.spectrum.min(),
-                exp.spectrum.min() + neg_scaled,
-                alpha=0.4,
-                color=_NEGATIVE_COLOR,
-            )
+        if np.any(neg > 0):
+            neg_indices = np.flatnonzero(neg > 0)
+            neg_width = max(np.diff(x_axis).mean() if len(x_axis) > 1 else 1.0, 1.0) * 1.35
+            for idx in neg_indices:
+                x_center = float(x_axis[idx])
+                left = x_center - neg_width / 2.0
+                right = x_center + neg_width / 2.0
+                ax.axvspan(
+                    left,
+                    right,
+                    facecolor=_NEGATIVE_COLOR,
+                    alpha=0.10,
+                    edgecolor="none",
+                    zorder=1,
+                )
 
         label = (
             f"{exp.explained_label} — "
