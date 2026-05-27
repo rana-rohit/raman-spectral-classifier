@@ -210,6 +210,7 @@ class TestSpectralDataset:
 class _FakeRegistry:
     def __init__(self) -> None:
         rng = np.random.default_rng(1)
+        self.calls = []
         self.arrays = {
             "reference": (
                 rng.normal(size=(60, 32)).astype(np.float32),
@@ -233,7 +234,7 @@ class _FakeRegistry:
         }
 
     def get_arrays(self, split_name, allow_holdout=False):
-        del allow_holdout
+        self.calls.append((split_name, allow_holdout))
         return self.arrays[split_name]
 
     def ood_split_names(self):
@@ -271,6 +272,102 @@ def test_stage1_loader_does_not_construct_clinical_ood_loaders():
     assert "clinical_train" not in loaders
     assert "clinical_val" not in loaders
     assert loaders["val"] is loaders["source_val"]
+
+
+class _ReferenceOnlyRegistry:
+    def __init__(self) -> None:
+        rng = np.random.default_rng(2)
+        self.calls = []
+        self.arrays = {
+            "reference": (
+                rng.normal(size=(300, 32)).astype(np.float32),
+                np.repeat(np.arange(30, dtype=np.int64), 10),
+            ),
+        }
+        self.cfg = {
+            "splits": {
+                "reference": {"label_space": "isolate_space"},
+                "test": {"label_space": "isolate_space"},
+            }
+        }
+
+    def get_arrays(self, split_name, allow_holdout=False):
+        self.calls.append((split_name, allow_holdout))
+        if split_name == "test":
+            raise AssertionError("iid_reference mode must not request the holdout test split")
+        return self.arrays[split_name]
+
+    def ood_split_names(self):
+        return []
+
+
+def test_iid_reference_mode_uses_reference_only_stratified_splits():
+    registry = _ReferenceOnlyRegistry()
+    preprocessor = SpectralPreprocessor([]).fit(registry.arrays["reference"][0])
+    cfg = {
+        "split_mode": "iid_reference",
+        "validation": {
+            "val_fraction": 0.2,
+            "random_seed": 123,
+            "iid_reference": {
+                "train_fraction": 0.70,
+                "val_fraction": 0.15,
+                "test_fraction": 0.15,
+                "random_seed": 123,
+            },
+        },
+        "task": {
+            "stage": "pretrain_30class",
+            "label_space": "isolate_space",
+        },
+        "training": {
+            "split_mode": "iid_reference",
+            "batch_size": 16,
+            "num_workers": 0,
+        },
+    }
+
+    loaders = build_all_loaders(
+        registry,
+        preprocessor,
+        augmentation=None,
+        cfg=cfg,
+        clinical_sparse_ids=[],
+        n_classes=30,
+    )
+
+    assert set(loaders) == {"train", "source_val", "val", "test", "ood"}
+    assert loaders["val"] is loaders["source_val"]
+    assert len(loaders["train"].dataset) == 210
+    assert len(loaders["source_val"].dataset) == 45
+    assert len(loaders["test"].dataset) == 45
+    assert all(call[0] != "test" for call in registry.calls)
+    assert all(
+        str(sample_id).startswith("reference:")
+        for sample_id in loaders["test"].dataset.sample_ids
+    )
+
+    train_counts = loaders["train"].dataset.class_counts
+    assert set(train_counts.values()) == {7}
+
+    for split_name in ("source_val", "test"):
+        counts = loaders[split_name].dataset.class_counts
+        assert set(counts) == set(range(30))
+        assert max(counts.values()) - min(counts.values()) <= 1
+
+    registry_2 = _ReferenceOnlyRegistry()
+    loaders_2 = build_all_loaders(
+        registry_2,
+        preprocessor,
+        augmentation=None,
+        cfg=cfg,
+        clinical_sparse_ids=[],
+        n_classes=30,
+    )
+
+    assert loaders["train"].dataset.sample_ids.tolist() == loaders_2["train"].dataset.sample_ids.tolist()
+    assert loaders["source_val"].dataset.sample_ids.tolist() == loaders_2["source_val"].dataset.sample_ids.tolist()
+    assert loaders["test"].dataset.sample_ids.tolist() == loaders_2["test"].dataset.sample_ids.tolist()
 
 
 class TestTrainValSplit:

@@ -33,6 +33,7 @@ from src.data.registry import DataRegistry
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
+from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
 from src.utils.config import load_config
 from src.utils.checkpoint import load_best_model
 from sklearn.preprocessing import StandardScaler
@@ -259,7 +260,11 @@ def main():
     # Setup data
     # --------------------------------------------------------
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
-    registry.load_all()
+    split_mode = resolve_split_mode(cfg)
+    if split_mode == IID_REFERENCE:
+        registry.load("reference")
+    else:
+        registry.load_all()
 
     X_ref, _ = registry.get_arrays("reference")
     preprocessor = SpectralPreprocessor.from_config(cfg.get("preprocessing", {}))

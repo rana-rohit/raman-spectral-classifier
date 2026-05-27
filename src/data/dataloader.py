@@ -13,11 +13,18 @@ from typing import Dict
 
 import numpy as np
 import torch
+from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.dataset import SpectralDataset
 from src.data.registry import DataRegistry
+from src.utils.split_modes import (
+    HOLDOUT,
+    IID_REFERENCE,
+    resolve_iid_reference_split_config,
+    resolve_split_mode,
+)
 from src.utils.class_subset import (
     class_maps,
     filter_and_remap_classes,
@@ -38,7 +45,7 @@ def build_all_loaders(
     num_workers = cfg.get("num_workers", train_cfg.get("num_workers", 4))
     seed = cfg.get("seed", 42)
     val_fraction = cfg["validation"]["val_fraction"]
-    val_seed = cfg["validation"]["random_seed"]
+    split_mode = resolve_split_mode(cfg)
     clinical_val_fraction = cfg["validation"].get("clinical_val_fraction", val_fraction)
     clinical_eval_fraction = cfg["validation"].get("clinical_eval_fraction", val_fraction)
     consistency_cfg = cfg.get("consistency") or train_cfg.get("consistency", {})
@@ -87,9 +94,35 @@ def build_all_loaders(
 
     X_ref, y_ref, ref_ids = _load_shared_split(registry, "reference", clinical_sparse_ids, stage=stage)
 
-    X_tr, X_val, y_tr, y_val, tr_ids, val_ids = _contiguous_split(
-        X_ref, y_ref, ref_ids, val_fraction
-    )
+    if split_mode == HOLDOUT:
+        X_tr, X_val, y_tr, y_val, tr_ids, val_ids = _contiguous_split(
+            X_ref, y_ref, ref_ids, val_fraction
+        )
+        X_test, y_test, test_ids = _load_shared_split(
+            registry,
+            "test",
+            clinical_sparse_ids,
+            allow_holdout=True,
+            stage=stage,
+        )
+    elif split_mode == IID_REFERENCE:
+        (
+            X_tr,
+            X_val,
+            X_test,
+            y_tr,
+            y_val,
+            y_test,
+            tr_ids,
+            val_ids,
+            test_ids,
+        ) = _iid_reference_split(X_ref, y_ref, ref_ids, cfg)
+    else:
+        raise AssertionError(f"Unhandled split_mode: {split_mode}")
+
+    _assert_disjoint("train", tr_ids, "source_val", val_ids)
+    _assert_disjoint("train", tr_ids, "test", test_ids)
+    _assert_disjoint("source_val", val_ids, "test", test_ids)
 
     loaders["train"] = _make_loader(
         X_tr, y_tr,
@@ -125,22 +158,17 @@ def build_all_loaders(
     loaders["val"] = loaders["source_val"]
     
     # --------------------------------------------------------
-    # REFERENCE-DOMAIN HOLDOUT EVALUATION
+    # REFERENCE-DOMAIN EVALUATION
     #
-    # IMPORTANT:
-    # In transfer mode, this evaluates compact
-    # transfer-space performance on reference-domain spectra.
+    # holdout:
+    #   dedicated X_test / y_test split.
     #
-    # This is NOT 30-class isolate evaluation.
+    # iid_reference:
+    #   held-out stratified partition of X_reference / y_reference.
+    #
+    # In transfer mode, both evaluate compact transfer-space
+    # performance on reference-domain spectra.
     # --------------------------------------------------------
-
-    X_test, y_test, test_ids = _load_shared_split(
-        registry,
-        "test",
-        clinical_sparse_ids,
-        allow_holdout=True,
-        stage=stage,
-    )
     loaders["test"] = _make_loader(
         X_test, y_test,
         batch_size=batch_size,
@@ -334,6 +362,47 @@ def _contiguous_split(X, y, sample_ids, test_fraction: float):
     val_idx = np.array(val_idx_list)
     
     return X[tr_idx], X[val_idx], y[tr_idx], y[val_idx], sample_ids[tr_idx], sample_ids[val_idx]
+
+
+def _iid_reference_split(X, y, sample_ids, cfg: dict):
+    """
+    Build train/val/test partitions from the reference split only.
+
+    The two-step split keeps class proportions in all three partitions:
+    first train vs temp, then val vs test inside temp.
+    """
+    iid_cfg = resolve_iid_reference_split_config(cfg)
+    indices = np.arange(len(y))
+    temp_fraction = iid_cfg.val_fraction + iid_cfg.test_fraction
+
+    train_idx, temp_idx = train_test_split(
+        indices,
+        test_size=temp_fraction,
+        stratify=y,
+        random_state=iid_cfg.random_seed,
+        shuffle=True,
+    )
+
+    relative_test_fraction = iid_cfg.test_fraction / temp_fraction
+    val_idx, test_idx = train_test_split(
+        temp_idx,
+        test_size=relative_test_fraction,
+        stratify=y[temp_idx],
+        random_state=iid_cfg.random_seed + 1,
+        shuffle=True,
+    )
+
+    return (
+        X[train_idx],
+        X[val_idx],
+        X[test_idx],
+        y[train_idx],
+        y[val_idx],
+        y[test_idx],
+        sample_ids[train_idx],
+        sample_ids[val_idx],
+        sample_ids[test_idx],
+    )
 
 def _make_loader(
     X,

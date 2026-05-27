@@ -40,6 +40,7 @@ from src.evaluation.metrics import (
 from src.evaluation.visualization import (
     save_confusion_matrix_figure,
 )
+from src.utils.split_modes import resolve_split_mode
 
 from metadata.clinical import (
     CLINICAL_LABELS,
@@ -105,7 +106,11 @@ class ModelEvaluator:
         self.aux_enabled = aux_cfg.get("enabled", False)
         self.aux_blend = aux_cfg.get("clinical_blend", 0.5)
 
-        self.results: Dict = {"model": model_name, "splits": {}}
+        self.results: Dict = {
+            "model": model_name,
+            "split_mode": resolve_split_mode(self.cfg),
+            "splits": {},
+        }
         self.artifacts: Dict[str, SplitEvaluationArtifact] = {}
 
         self.output_dir = Path(
@@ -567,7 +572,12 @@ class ModelEvaluator:
 
     def save(self, path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        export = {"model": self.results.get("model"), "splits": {}, "summary": self.results.get("summary")}
+        export = {
+            "model": self.results.get("model"),
+            "split_mode": self.results.get("split_mode"),
+            "splits": {},
+            "summary": self.results.get("summary"),
+        }
         for split_name, split_data in self.results.get("splits", {}).items():
             clean = {k: v for k, v in split_data.items() if k not in {"predictions", "targets"}}
             export["splits"][split_name] = clean
@@ -576,7 +586,10 @@ class ModelEvaluator:
         print(f"  Results saved to {path}")
 
     def _build_summary(self, test_key: str) -> Dict:
-        summary = {"model": self.model_name}
+        summary = {
+            "model": self.model_name,
+            "split_mode": self.results.get("split_mode"),
+        }
         for split_name, data in self.results["splits"].items():
             metrics = data["metrics"]
             summary[split_name] = {

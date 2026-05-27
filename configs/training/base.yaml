@@ -2,6 +2,7 @@
 # Shared defaults. Model-specific configs override these.
 
 training:
+  split_mode: holdout
   max_epochs: 20
   batch_size: 128
   num_workers: 2

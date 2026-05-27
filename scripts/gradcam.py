@@ -21,6 +21,7 @@ from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.registry import DataRegistry
+from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
 from src.models.registry import get_model
 from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config
@@ -95,9 +96,13 @@ def main() -> None:
         raise ValueError(f"Unknown stage: {stage}")
 
     cfg["model"]["n_classes"] = n_classes
+    cfg["seed"] = int(args.seed)
 
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
-    registry.load_all()
+    if resolve_split_mode(cfg) == IID_REFERENCE:
+        registry.load("reference")
+    else:
+        registry.load_all()
 
     X_ref, _ = registry.get_arrays("reference")
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])

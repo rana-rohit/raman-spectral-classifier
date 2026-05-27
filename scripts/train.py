@@ -20,6 +20,7 @@ from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.registry import DataRegistry
+from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
 from src.evaluation.evaluator import ModelEvaluator
 from src.models.registry import get_model, model_summary
 from src.training.finetuner import finetune
@@ -77,10 +78,15 @@ def apply_overrides(cfg: dict, overrides: list) -> dict:
 
 def canonicalize_runtime_config(cfg: dict, args) -> dict:
     """Resolve explicit feature flags into one saved, reproducible config."""
+    cfg["seed"] = int(args.seed)
     train_cfg = cfg.setdefault("training", {})
     model_cfg = cfg.setdefault("model", {})
     supcon_cfg = train_cfg.setdefault("supcon", {})
     finetune_cfg = train_cfg.setdefault("finetune", {})
+
+    split_mode = resolve_split_mode(cfg)
+    cfg["split_mode"] = split_mode
+    train_cfg["split_mode"] = split_mode
 
     if args.two_stage:
         train_cfg["two_stage"] = True
@@ -280,7 +286,16 @@ def main():
     print_stage_header(stage, task_name)
     print_label_space_info(label_space, clinical_sparse_ids)
 
-    exp_name = args.exp_name or f"{args.model}_{time.strftime('%Y%m%d_%H%M%S')}"
+    split_mode = resolve_split_mode(cfg)
+    split_suffix = "iid" if split_mode == IID_REFERENCE else "holdout"
+    stage_suffix = {
+        "pretrain_30class": "s1",
+        "pretrain_treatment_8class": "s2",
+        "transfer_5class": "s3",
+    }.get(stage, stage)
+    exp_name = args.exp_name or (
+        f"{args.model}_{stage_suffix}_{split_suffix}_{time.strftime('%Y%m%d_%H%M%S')}"
+    )
     exp_dir = os.path.join(args.exp_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
     save_config(cfg, os.path.join(exp_dir, "config.yaml"))
@@ -289,7 +304,10 @@ def main():
 
     print("\n[1/4] Loading data...")
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
-    registry.load_all()
+    if split_mode == IID_REFERENCE:
+        registry.load("reference")
+    else:
+        registry.load_all()
 
     X_ref, y_ref = registry.get_arrays("reference")
 

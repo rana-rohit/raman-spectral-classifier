@@ -22,6 +22,7 @@ from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.registry import DataRegistry
+from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
 from src.evaluation.evaluator import ModelEvaluator, compare_models
 from src.models.registry import get_model
 from src.utils.checkpoint import load_best_model
@@ -89,8 +90,14 @@ def _copy_tree_contents(src: str, dst: str) -> None:
 
 
 def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int, DataRegistry]:
+    cfg = dict(cfg)
+    cfg["seed"] = int(seed)
+    split_mode = resolve_split_mode(cfg)
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
-    registry.load_all()
+    if split_mode == IID_REFERENCE:
+        registry.load("reference")
+    else:
+        registry.load_all()
 
     task_cfg = cfg["task"]
     clinical_sparse_ids = task_cfg.get(
@@ -119,7 +126,6 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int, DataRegistry]:
         raise ValueError(
             f"Unknown evaluation stage: {stage}"
         )
-    cfg = dict(cfg)
     cfg["model"] = dict(cfg["model"])
     cfg["model"]["n_classes"] = n_classes
 

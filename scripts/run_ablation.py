@@ -17,6 +17,7 @@ from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.registry import DataRegistry
+from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
 from src.evaluation.evaluator import ModelEvaluator, compare_models
 from src.models.registry import get_model
 from src.training.finetuner import finetune
@@ -49,9 +50,14 @@ def parse_args():
 
 
 def _build_loaders_for_cfg(cfg: dict, seed: int) -> dict:
+    cfg = dict(cfg)
+    cfg["seed"] = seed
 
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
-    registry.load_all()
+    if resolve_split_mode(cfg) == IID_REFERENCE:
+        registry.load("reference")
+    else:
+        registry.load_all()
 
     task_cfg = cfg["task"]
 
@@ -77,7 +83,6 @@ def _build_loaders_for_cfg(cfg: dict, seed: int) -> dict:
     else:
         raise ValueError(f"Unknown ablation stage: {stage}")
 
-    cfg = dict(cfg)
     cfg["model"] = dict(cfg["model"])
     cfg["model"]["n_classes"] = n_classes
 
@@ -121,8 +126,6 @@ def _build_loaders_for_cfg(cfg: dict, seed: int) -> dict:
     if len(augmentation.steps) == 0 or augmentation.p == 0:
         augmentation = None
 
-    cfg = dict(cfg)
-    cfg["seed"] = seed
     return build_all_loaders(
         registry,
         preprocessor,

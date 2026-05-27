@@ -14,6 +14,13 @@ from typing import Dict, Any, Optional
 
 import numpy as np
 
+from src.utils.split_modes import (
+    HOLDOUT,
+    IID_REFERENCE,
+    resolve_iid_reference_split_config,
+    resolve_split_mode,
+)
+
 
 # ============================================================
 # GROUPED EVALUATION CONFIG
@@ -118,6 +125,52 @@ def print_split_provenance(
     border = "=" * 60
 
     print(f"\n{border}")
+    print("ACTIVE SPLIT MODE")
+    print("=" * 17)
+    print()
+
+    split_mode = resolve_split_mode(cfg)
+    print(f"  Split Mode: {split_mode}")
+    if split_mode == IID_REFERENCE:
+        iid_cfg = resolve_iid_reference_split_config(cfg)
+        print("  Split Source: X_reference.npy / y_reference.npy only")
+        print(
+            "  Split Ratios: "
+            f"train={iid_cfg.train_fraction:.2f}, "
+            f"val={iid_cfg.val_fraction:.2f}, "
+            f"test={iid_cfg.test_fraction:.2f}"
+        )
+        print(f"  Random Seed: {iid_cfg.random_seed}")
+    elif split_mode == HOLDOUT:
+        val_fraction = float(cfg.get("validation", {}).get("val_fraction", 0.20))
+        print("  Split Source: reference train/val + dedicated X_test.npy / y_test.npy")
+        print(
+            "  Reference Split Ratios: "
+            f"train={1.0 - val_fraction:.2f}, val={val_fraction:.2f}; "
+            "test=dedicated holdout"
+        )
+
+    source_loaders = [loaders.get("train"), loaders.get("source_val")]
+    source_loaders = [loader for loader in source_loaders if loader is not None]
+    if source_loaders:
+        source_samples = sum(len(loader.dataset) for loader in source_loaders)
+        source_classes = sorted({
+            int(label)
+            for loader in source_loaders
+            for label in np.unique(np.asarray(getattr(loader.dataset, "y", [])))
+        })
+        print(
+            f"  Source Samples/Classes: {source_samples:,} / "
+            f"{len(source_classes)}"
+        )
+    if "test" in loaders:
+        test_info = _introspect_loader(loaders["test"], "test", spectra_per_group_map)
+        ns = test_info["n_samples"]
+        nc = test_info["n_classes"]
+        print(f"  Test Samples/Classes: {ns:,} / {nc}")
+
+    print()
+    print(f"{border}")
     print("ACTIVE DATA SPLITS")
     print("=" * 18)
     print()

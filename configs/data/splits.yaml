@@ -58,6 +58,11 @@ validation:
   strategy: stratified_split
   source_split: reference
   val_fraction: 0.20
+  iid_reference:
+    train_fraction: 0.70
+    val_fraction: 0.15
+    test_fraction: 0.15
+    random_seed: 42
   # TODO:
   # replace spectrum-level validation
   # with patient-level LOOCV
