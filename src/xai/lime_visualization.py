@@ -128,19 +128,23 @@ def plot_lime_explanation(
     # Overlay spectral regions for positive/negative contributions.
     positive = np.maximum(importance, 0)
     negative = np.minimum(importance, 0)
+    max_importance = float(np.abs(importance).max() or 1.0)
 
     if np.any(positive > 0):
         pos_indices = np.flatnonzero(positive > 0)
-        pos_width = max(np.diff(x_axis).mean() if len(x_axis) > 1 else 1.0, 1.0) * 1.35
         for idx in pos_indices:
             x_center = float(x_axis[idx])
-            left = x_center - pos_width / 2.0
-            right = x_center + pos_width / 2.0
+            strength = float(positive[idx] / max_importance)
+            band_width = 18.0 + 17.0 * strength
+            glow_alpha = 0.16 + 0.10 * strength
+            fill_alpha = 0.08 + 0.06 * strength
+            left = x_center - band_width / 2.0
+            right = x_center + band_width / 2.0
             ax_spectrum.axvspan(
                 left,
                 right,
                 facecolor=_POSITIVE_GLOW_COLOR,
-                alpha=0.22,
+                alpha=glow_alpha,
                 edgecolor="none",
                 zorder=1,
             )
@@ -148,7 +152,7 @@ def plot_lime_explanation(
                 left,
                 right,
                 facecolor=_POSITIVE_FILL_COLOR,
-                alpha=0.12,
+                alpha=fill_alpha,
                 edgecolor="none",
                 zorder=1.1,
             )
@@ -157,16 +161,18 @@ def plot_lime_explanation(
 
     if np.any(negative < 0):
         neg_indices = np.flatnonzero(negative < 0)
-        neg_width = max(np.diff(x_axis).mean() if len(x_axis) > 1 else 1.0, 1.0) * 1.35
         for idx in neg_indices:
             x_center = float(x_axis[idx])
-            left = x_center - neg_width / 2.0
-            right = x_center + neg_width / 2.0
+            strength = float(np.abs(negative[idx]) / max_importance)
+            band_width = 18.0 + 17.0 * strength
+            band_alpha = 0.08 + 0.08 * strength
+            left = x_center - band_width / 2.0
+            right = x_center + band_width / 2.0
             ax_spectrum.axvspan(
                 left,
                 right,
                 facecolor=_NEGATIVE_COLOR,
-                alpha=0.12,
+                alpha=band_alpha,
                 edgecolor="none",
                 zorder=1,
             )
@@ -318,18 +324,22 @@ def plot_lime_comparison(
         # Overlay importance as translucent spectral regions.
         pos = np.maximum(exp.importance, 0)
         neg = np.abs(np.minimum(exp.importance, 0))
+        max_importance = float(np.abs(exp.importance).max() or 1.0)
         if np.any(pos > 0):
             pos_indices = np.flatnonzero(pos > 0)
-            pos_width = max(np.diff(x_axis).mean() if len(x_axis) > 1 else 1.0, 1.0) * 1.35
             for idx in pos_indices:
                 x_center = float(x_axis[idx])
-                left = x_center - pos_width / 2.0
-                right = x_center + pos_width / 2.0
+                strength = float(pos[idx] / max_importance)
+                band_width = 18.0 + 17.0 * strength
+                glow_alpha = 0.14 + 0.10 * strength
+                fill_alpha = 0.07 + 0.05 * strength
+                left = x_center - band_width / 2.0
+                right = x_center + band_width / 2.0
                 ax.axvspan(
                     left,
                     right,
                     facecolor=_POSITIVE_GLOW_COLOR,
-                    alpha=0.18,
+                    alpha=glow_alpha,
                     edgecolor="none",
                     zorder=1,
                 )
@@ -337,23 +347,25 @@ def plot_lime_comparison(
                     left,
                     right,
                     facecolor=_POSITIVE_FILL_COLOR,
-                    alpha=0.10,
+                    alpha=fill_alpha,
                     edgecolor="none",
                     zorder=1.1,
                 )
 
         if np.any(neg > 0):
             neg_indices = np.flatnonzero(neg > 0)
-            neg_width = max(np.diff(x_axis).mean() if len(x_axis) > 1 else 1.0, 1.0) * 1.35
             for idx in neg_indices:
                 x_center = float(x_axis[idx])
-                left = x_center - neg_width / 2.0
-                right = x_center + neg_width / 2.0
+                strength = float(neg[idx] / max_importance)
+                band_width = 18.0 + 17.0 * strength
+                band_alpha = 0.07 + 0.07 * strength
+                left = x_center - band_width / 2.0
+                right = x_center + band_width / 2.0
                 ax.axvspan(
                     left,
                     right,
                     facecolor=_NEGATIVE_COLOR,
-                    alpha=0.10,
+                    alpha=band_alpha,
                     edgecolor="none",
                     zorder=1,
                 )
