@@ -1,0 +1,338 @@
+"""
+src/xai/lime_visualization.py
+
+Publication-quality visualization for LIME spectral explanations.
+
+Generates presentation-ready figures showing:
+    - Original Raman spectrum
+    - Positive contributions (regions supporting prediction)
+    - Negative contributions (regions supporting other classes)
+    - Prediction confidence and class label
+    - Stage-aware semantic annotations
+
+IMPORTANT:
+    This module is purely a plotting utility. It does NOT modify
+    any model, dataloader, trainer, or evaluation logic.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Optional, List
+
+import numpy as np
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from matplotlib.colors import LinearSegmentedColormap
+
+
+# ------------------------------------------------------------------ #
+#  Color scheme — research-quality, colorblind-friendly
+# ------------------------------------------------------------------ #
+
+_POSITIVE_COLOR = "#2196F3"     # Blue — supports prediction
+_NEGATIVE_COLOR = "#F44336"     # Red — opposes prediction
+_SPECTRUM_COLOR = "#212121"     # Near-black for spectrum line
+_BACKGROUND_COLOR = "#FAFAFA"   # Light grey background
+_GRID_COLOR = "#E0E0E0"        # Subtle grid
+
+
+def plot_lime_explanation(
+    explanation,
+    save_path: str | Path,
+    title: Optional[str] = None,
+    stage_label: Optional[str] = None,
+    split_label: Optional[str] = None,
+    figsize: tuple = (14, 8),
+    dpi: int = 300,
+    show_top_features: int = 15,
+) -> None:
+    """
+    Generate a publication-quality LIME explanation figure.
+
+    Parameters
+    ----------
+    explanation : SpectralLimeExplanation
+        Result from SpectralLimeExplainer.explain_sample().
+
+    save_path : str or Path
+        Output file path for the figure.
+
+    title : str or None
+        Custom title. If None, auto-generated from explanation metadata.
+
+    stage_label : str or None
+        Stage descriptor (e.g., "Stage 1 — Isolate Space").
+
+    split_label : str or None
+        Split descriptor (e.g., "test", "2018clinical").
+
+    figsize : tuple
+        Figure dimensions.
+
+    dpi : int
+        Resolution for saved figure.
+
+    show_top_features : int
+        Number of top features to display in the bar chart panel.
+    """
+    save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    spectrum = explanation.spectrum
+    importance = explanation.importance
+    wavenumbers = explanation.wavenumbers
+    x_axis = wavenumbers if wavenumbers is not None else np.arange(len(spectrum))
+    x_label = "Wavenumber (cm⁻¹)" if wavenumbers is not None else "Spectral Index"
+
+    # Auto-generate title
+    if title is None:
+        parts = [f"LIME Explanation — {explanation.explained_label}"]
+        if stage_label:
+            parts.append(f"[{stage_label}]")
+        if split_label:
+            parts.append(f"({split_label})")
+        title = " ".join(parts)
+
+    fig = plt.figure(figsize=figsize, facecolor="white")
+    gs = gridspec.GridSpec(
+        3, 2,
+        height_ratios=[3, 2, 0.3],
+        width_ratios=[3, 1],
+        hspace=0.35,
+        wspace=0.25,
+    )
+
+    # ================================================================
+    # Panel 1: Spectrum + LIME importance overlay (top-left, wide)
+    # ================================================================
+    ax_spectrum = fig.add_subplot(gs[0, :])
+    ax_spectrum.set_facecolor(_BACKGROUND_COLOR)
+
+    # Plot spectrum
+    ax_spectrum.plot(
+        x_axis, spectrum,
+        color=_SPECTRUM_COLOR,
+        linewidth=0.8,
+        alpha=0.9,
+        label="Raman Spectrum",
+        zorder=3,
+    )
+
+    # Overlay positive contributions
+    positive = np.maximum(importance, 0)
+    negative = np.minimum(importance, 0)
+
+    if positive.max() > 0:
+        # Normalize for visual clarity
+        pos_norm = positive / (np.abs(importance).max() + 1e-12)
+        ax_spectrum.fill_between(
+            x_axis,
+            spectrum.min(),
+            spectrum.min() + pos_norm * (spectrum.max() - spectrum.min()) * 0.3,
+            alpha=0.4,
+            color=_POSITIVE_COLOR,
+            label="Supports prediction",
+            zorder=2,
+        )
+
+    if negative.min() < 0:
+        neg_norm = np.abs(negative) / (np.abs(importance).max() + 1e-12)
+        ax_spectrum.fill_between(
+            x_axis,
+            spectrum.min(),
+            spectrum.min() + neg_norm * (spectrum.max() - spectrum.min()) * 0.3,
+            alpha=0.4,
+            color=_NEGATIVE_COLOR,
+            label="Opposes prediction",
+            zorder=2,
+        )
+
+    ax_spectrum.set_xlabel(x_label, fontsize=11)
+    ax_spectrum.set_ylabel("Intensity (a.u.)", fontsize=11)
+    ax_spectrum.set_title(title, fontsize=13, fontweight="bold", pad=12)
+    ax_spectrum.legend(loc="upper right", fontsize=9, framealpha=0.9)
+    ax_spectrum.grid(True, alpha=0.3, color=_GRID_COLOR)
+
+    # Add confidence annotation
+    conf_text = (
+        f"Predicted: {explanation.predicted_label}\n"
+        f"Confidence: {explanation.confidence:.1%}"
+    )
+    ax_spectrum.text(
+        0.02, 0.95, conf_text,
+        transform=ax_spectrum.transAxes,
+        fontsize=9,
+        verticalalignment="top",
+        bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.85, edgecolor="#BDBDBD"),
+    )
+
+    # ================================================================
+    # Panel 2: Importance heatmap strip (middle-left)
+    # ================================================================
+    ax_heatmap = fig.add_subplot(gs[1, 0])
+
+    # Create a diverging colormap
+    cmap = LinearSegmentedColormap.from_list(
+        "lime_diverging",
+        [_NEGATIVE_COLOR, "#FFFFFF", _POSITIVE_COLOR],
+    )
+
+    imp_2d = importance[np.newaxis, :]
+    vmax = np.abs(importance).max() or 1.0
+
+    ax_heatmap.imshow(
+        imp_2d,
+        aspect="auto",
+        cmap=cmap,
+        vmin=-vmax,
+        vmax=vmax,
+        extent=[x_axis[0], x_axis[-1], 0, 1],
+        interpolation="bilinear",
+    )
+    ax_heatmap.set_xlabel(x_label, fontsize=11)
+    ax_heatmap.set_yticks([])
+    ax_heatmap.set_title("Spectral Importance Map", fontsize=11, fontweight="bold")
+
+    # ================================================================
+    # Panel 3: Top features bar chart (middle-right)
+    # ================================================================
+    ax_bars = fig.add_subplot(gs[1, 1])
+
+    top_features = explanation.top_features(n=show_top_features)
+    if top_features:
+        names = [f[0] for f in reversed(top_features)]
+        weights = [f[1] for f in reversed(top_features)]
+        colors = [
+            _POSITIVE_COLOR if w >= 0 else _NEGATIVE_COLOR
+            for w in weights
+        ]
+
+        ax_bars.barh(range(len(names)), weights, color=colors, alpha=0.8, height=0.7)
+        ax_bars.set_yticks(range(len(names)))
+        ax_bars.set_yticklabels(names, fontsize=7)
+        ax_bars.set_xlabel("LIME Weight", fontsize=9)
+        ax_bars.set_title("Top Features", fontsize=10, fontweight="bold")
+        ax_bars.axvline(x=0, color="#757575", linewidth=0.5, linestyle="--")
+        ax_bars.grid(True, axis="x", alpha=0.3)
+
+    # ================================================================
+    # Panel 4: Probability bar (bottom)
+    # ================================================================
+    ax_probs = fig.add_subplot(gs[2, :])
+
+    probs = explanation.probabilities
+    n_classes = len(probs)
+    class_names = explanation.class_names or [
+        f"Class {i}" for i in range(n_classes)
+    ]
+
+    bar_colors = ["#BDBDBD"] * n_classes
+    bar_colors[explanation.predicted_class] = _POSITIVE_COLOR
+    if explanation.explained_class != explanation.predicted_class:
+        bar_colors[explanation.explained_class] = "#FF9800"
+
+    ax_probs.barh(
+        range(n_classes), probs,
+        color=bar_colors, alpha=0.85, height=0.6,
+    )
+    ax_probs.set_yticks(range(n_classes))
+    ax_probs.set_yticklabels(class_names, fontsize=8)
+    ax_probs.set_xlabel("Probability", fontsize=9)
+    ax_probs.set_xlim(0, 1)
+    ax_probs.grid(True, axis="x", alpha=0.3)
+
+    fig.savefig(
+        save_path,
+        dpi=dpi,
+        bbox_inches="tight",
+        facecolor="white",
+        edgecolor="none",
+    )
+    plt.close(fig)
+
+
+def plot_lime_comparison(
+    explanations: list,
+    save_path: str | Path,
+    title: str = "LIME Explanation Comparison",
+    figsize_per_row: tuple = (14, 3),
+    dpi: int = 300,
+) -> None:
+    """
+    Plot multiple LIME explanations stacked vertically for comparison.
+
+    Useful for comparing:
+        - Same class across IID vs OOD
+        - Different classes in the same split
+        - Same sample across models
+    """
+    n = len(explanations)
+    if n == 0:
+        return
+
+    fig, axes = plt.subplots(
+        n, 1,
+        figsize=(figsize_per_row[0], figsize_per_row[1] * n),
+        facecolor="white",
+    )
+    if n == 1:
+        axes = [axes]
+
+    for i, (ax, exp) in enumerate(zip(axes, explanations)):
+        wavenumbers = exp.wavenumbers
+        x_axis = wavenumbers if wavenumbers is not None else np.arange(len(exp.spectrum))
+
+        ax.set_facecolor(_BACKGROUND_COLOR)
+        ax.plot(
+            x_axis, exp.spectrum,
+            color=_SPECTRUM_COLOR,
+            linewidth=0.8, alpha=0.8,
+        )
+
+        # Overlay importance as colored fill
+        pos = np.maximum(exp.importance, 0)
+        neg = np.abs(np.minimum(exp.importance, 0))
+        vmax = max(pos.max(), neg.max()) or 1.0
+
+        if pos.max() > 0:
+            pos_scaled = pos / vmax * (exp.spectrum.max() - exp.spectrum.min()) * 0.25
+            ax.fill_between(
+                x_axis,
+                exp.spectrum.min(),
+                exp.spectrum.min() + pos_scaled,
+                alpha=0.4,
+                color=_POSITIVE_COLOR,
+            )
+
+        if neg.max() > 0:
+            neg_scaled = neg / vmax * (exp.spectrum.max() - exp.spectrum.min()) * 0.25
+            ax.fill_between(
+                x_axis,
+                exp.spectrum.min(),
+                exp.spectrum.min() + neg_scaled,
+                alpha=0.4,
+                color=_NEGATIVE_COLOR,
+            )
+
+        label = (
+            f"{exp.explained_label} — "
+            f"P={exp.confidence:.1%}"
+        )
+        ax.set_ylabel(label, fontsize=9)
+        ax.grid(True, alpha=0.2)
+
+        if i == n - 1:
+            x_label = "Wavenumber (cm⁻¹)" if wavenumbers is not None else "Index"
+            ax.set_xlabel(x_label, fontsize=10)
+
+    fig.suptitle(title, fontsize=13, fontweight="bold", y=1.01)
+    fig.tight_layout()
+
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
