@@ -84,6 +84,12 @@ def plot_lime_explanation(
     x_axis = wavenumbers if wavenumbers is not None else np.arange(len(spectrum))
     x_label = "Wavenumber (cm⁻¹)" if wavenumbers is not None else "Spectral Index"
 
+    if wavenumbers is not None:
+        order = np.argsort(x_axis)
+        x_axis = x_axis[order]
+        spectrum = spectrum[order]
+        importance = importance[order]
+
     if title is None:
         parts = [f"LIME Explanation — {explanation.explained_label}"]
         if stage_label:
@@ -285,6 +291,14 @@ def plot_lime_comparison(
         x_axis = wavenumbers if wavenumbers is not None else np.arange(len(exp.spectrum))
         display_spectrum = _display_spectrum(exp.spectrum)
 
+        if wavenumbers is not None:
+            order = np.argsort(x_axis)
+            x_axis = x_axis[order]
+            display_spectrum = display_spectrum[order]
+            importance = exp.importance[order]
+        else:
+            importance = exp.importance
+
         ax.set_facecolor(_BACKGROUND_COLOR)
         ax.plot(
             x_axis, display_spectrum,
@@ -292,9 +306,9 @@ def plot_lime_comparison(
             linewidth=0.8, alpha=0.8,
         )
 
-        pos = np.maximum(exp.importance, 0)
-        neg = np.abs(np.minimum(exp.importance, 0))
-        max_importance = float(np.abs(exp.importance).max() or 1.0)
+        pos = np.maximum(importance, 0)
+        neg = np.abs(np.minimum(importance, 0))
+        max_importance = float(np.abs(importance).max() or 1.0)
         if np.any(pos > 0):
             pos_indices = np.flatnonzero(pos > 0)
             for idx in pos_indices:
