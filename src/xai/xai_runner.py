@@ -429,7 +429,7 @@ def _run_lime(
     print("[XAI] Generating LIME explanations...")
 
     from src.xai.lime_explainer import SpectralLimeExplainer
-    from src.xai.lime_visualization import (
+    from src.xai.xai_visualization import (
         plot_lime_comparison,
         plot_lime_explanation,
     )

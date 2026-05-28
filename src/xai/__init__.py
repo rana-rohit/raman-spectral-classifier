@@ -7,7 +7,7 @@ Exposes saliency methods, prediction wrappers, LIME explainers, and visualizatio
 
 from src.xai.saliency import compute_saliency, compute_smoothgrad
 from src.xai.predict_wrapper import SpectralPredictWrapper, build_predict_fn
-from src.xai.lime_visualization import plot_lime_explanation, plot_lime_comparison
+from src.xai.xai_visualization import plot_lime_explanation, plot_lime_comparison
 
 try:
     from src.xai.lime_explainer import SpectralLimeExplainer, SpectralLimeExplanation

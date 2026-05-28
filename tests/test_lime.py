@@ -17,7 +17,7 @@ import torch.nn as nn
 from src.data.preprocessing import SpectralPreprocessor
 from src.xai.predict_wrapper import build_predict_fn, SpectralPredictWrapper
 from src.xai.lime_explainer import SpectralLimeExplainer
-from src.xai.lime_visualization import plot_lime_explanation, plot_lime_comparison
+from src.xai.xai_visualization import plot_lime_explanation, plot_lime_comparison
 
 
 class DummyModel(nn.Module):

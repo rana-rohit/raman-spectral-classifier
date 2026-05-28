@@ -50,7 +50,7 @@ from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
 
 from src.xai.lime_explainer import SpectralLimeExplainer
 from src.xai.predict_wrapper import build_predict_fn
-from src.xai.lime_visualization import (
+from src.xai.xai_visualization import (
     plot_lime_explanation,
     plot_lime_comparison,
 )
