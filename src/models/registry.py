@@ -22,6 +22,7 @@ from src.models.resnet1d import ResNet1D
 from src.models.inception1d import Inception1D
 from src.models.tcn import TCN1D
 from src.models.transformer import SpectralTransformer
+from src.models.cnn_transformer import CNNTransformer
 
 
 MODEL_REGISTRY = {
@@ -31,6 +32,7 @@ MODEL_REGISTRY = {
     "tcn": TCN1D,
     "transformer": SpectralTransformer,
     "inception1d": Inception1D,
+    "cnn_transformer": CNNTransformer,
 }
 
 
@@ -168,16 +170,29 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
         model.contrastive = True
         
         orig_forward = model.forward
-        def contrastive_forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-            out = orig_forward(x)
+        
+        def contrastive_forward(self, *args, **kwargs):
+            out = orig_forward(*args, **kwargs)
             if getattr(self, "bypass_projection", False):
                 return out
-            features = out["features"]
-            proj = self.projection_head(features)
-            out["projection_features"] = nn.functional.normalize(proj, p=2, dim=-1)
+            if isinstance(out, dict):
+                features = out.get("features")
+                if features is not None:
+                    proj = self.projection_head(features)
+                    out["projection_features"] = nn.functional.normalize(proj, p=2, dim=-1)
             return out
             
+        import functools
+        import inspect
         import types
+        
+        functools.update_wrapper(contrastive_forward, orig_forward)
+        
+        # Build signature that includes 'self' prepended so it is correctly stripped when bound
+        orig_sig = inspect.signature(orig_forward)
+        params = [inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)] + list(orig_sig.parameters.values())
+        contrastive_forward.__signature__ = inspect.Signature(params)
+        
         model.forward = types.MethodType(contrastive_forward, model)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
