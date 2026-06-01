@@ -77,14 +77,9 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
             f"{len(clinical_sparse_ids)}"
         )
 
-    # Determine input channels (1 = raw only, 2 = raw + derivative)
-    deriv_cfg = cfg.get("preprocessing", cfg.get("derivative", {}))
-    if isinstance(deriv_cfg, dict) and "derivative" in deriv_cfg:
-        deriv_cfg = deriv_cfg["derivative"]
-    elif isinstance(deriv_cfg, dict) and "derivative" not in deriv_cfg:
-        deriv_cfg = cfg.get("derivative", {})
-    use_derivative = deriv_cfg.get("enabled", False) if isinstance(deriv_cfg, dict) else False
-    default_in_channels = 2 if use_derivative else 1
+    # The active preprocessing pipeline emits raw + derivative channels.
+    # Keep the default aligned with the runtime dataloader output.
+    default_in_channels = 2
 
     common = {
         "signal_length": model_cfg.get("signal_length", 1000),
