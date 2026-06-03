@@ -51,7 +51,8 @@ def parse_args():
     p.add_argument("--exp-name", default=None)
     p.add_argument("--exp-dir", default="experiments")
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--split-mode", choices=["holdout", "iid_reference"], default=None)
+    p.add_argument("--split-mode", choices=["holdout", "iid_reference", "patient_cv"], default=None)
+    p.add_argument("--fold", type=int, default=None, help="Fold index (0-4) for patient_cv split mode")
     p.add_argument("--override", nargs="*", default=[])
     p.add_argument("--run-finetune", action="store_true", help="Run explicit post-training clinical finetuning")
     p.add_argument("--two-stage", action="store_true", help="Enable decoupled two-stage representation and linear classifier training")
@@ -72,6 +73,10 @@ def canonicalize_runtime_config(cfg: dict, args) -> dict:
         cfg,
         split_mode=args.split_mode,
     )
+    if split_mode == "patient_cv":
+        if args.fold is None:
+            raise ValueError("split_mode='patient_cv' requires specifying --fold index (0-4)")
+        cfg["fold_index"] = int(args.fold)
     train_cfg = cfg.setdefault("training", {})
 
     if args.two_stage:
@@ -274,15 +279,27 @@ def main():
     print_label_space_info(label_space, clinical_sparse_ids)
 
     split_mode = resolve_split_mode(cfg)
-    split_suffix = "iid" if split_mode == IID_REFERENCE else "holdout"
+    if split_mode == "patient_cv":
+        split_suffix = f"patient_cv_fold{cfg['fold_index']}"
+    elif split_mode == IID_REFERENCE:
+        split_suffix = "iid"
+    else:
+        split_suffix = "holdout"
+
     stage_suffix = {
         "pretrain_30class": "s1",
         "pretrain_treatment_8class": "s2",
         "transfer_5class": "s3",
     }.get(stage, stage)
-    exp_name = args.exp_name or (
-        f"{args.model}_{stage_suffix}_{split_suffix}_{time.strftime('%Y%m%d_%H%M%S')}"
-    )
+
+    if args.exp_name:
+        if split_mode == "patient_cv":
+            exp_name = f"{args.exp_name}_fold{cfg['fold_index']}"
+        else:
+            exp_name = args.exp_name
+    else:
+        exp_name = f"{args.model}_{stage_suffix}_{split_suffix}_{time.strftime('%Y%m%d_%H%M%S')}"
+
     exp_dir = os.path.join(args.exp_dir, exp_name)
     os.makedirs(exp_dir, exist_ok=True)
     save_config(cfg, os.path.join(exp_dir, "config.yaml"))
@@ -315,6 +332,7 @@ def main():
         cfg,
         clinical_sparse_ids=clinical_sparse_ids,
         n_classes=n_classes,
+        fold_index=cfg.get("fold_index"),
     )
 
     from src.utils.logging import print_split_provenance
@@ -577,6 +595,8 @@ def main():
         )
 
     evaluator.save(os.path.join(exp_dir, results_name))
+    if split_mode == "patient_cv":
+        evaluator.save_detailed_predictions(os.path.join(exp_dir, "detailed_predictions.json"))
 
     print(f"\n  Results saved in {exp_dir}/")
     

@@ -21,6 +21,7 @@ from src.data.registry import DataRegistry
 from src.utils.split_modes import (
     HOLDOUT,
     IID_REFERENCE,
+    PATIENT_CV,
     resolve_iid_reference_split_config,
     resolve_split_mode,
 )
@@ -38,6 +39,7 @@ def build_all_loaders(
     cfg: dict,
     clinical_sparse_ids,
     n_classes,
+    fold_index: int | None = None,
 ) -> Dict:
     train_cfg = cfg.get("training", {})
     batch_size = cfg.get("batch_size", train_cfg.get("batch_size", 256))
@@ -93,7 +95,7 @@ def build_all_loaders(
 
     X_ref, y_ref, ref_ids = _load_shared_split(registry, "reference", clinical_sparse_ids, stage=stage)
 
-    if split_mode == HOLDOUT:
+    if split_mode in {HOLDOUT, PATIENT_CV}:
         X_tr, X_val, y_tr, y_val, tr_ids, val_ids = _contiguous_split(
             X_ref, y_ref, ref_ids, val_fraction
         )
@@ -118,6 +120,23 @@ def build_all_loaders(
         ) = _iid_reference_split(X_ref, y_ref, ref_ids, cfg)
     else:
         raise AssertionError(f"Unhandled split_mode: {split_mode}")
+
+    if split_mode == PATIENT_CV and stage == "transfer_5class":
+        include_finetune_in_source = (
+            cfg.get("validation", {})
+            .get("patient_cv", {})
+            .get("include_finetune_in_train", True)
+        )
+        if include_finetune_in_source:
+            X_ft_source, y_ft_source, ft_source_ids = _load_shared_split(
+                registry,
+                "finetune",
+                clinical_sparse_ids,
+                stage=stage,
+            )
+            X_tr = np.concatenate([X_tr, X_ft_source], axis=0)
+            y_tr = np.concatenate([y_tr, y_ft_source], axis=0)
+            tr_ids = np.concatenate([tr_ids, ft_source_ids], axis=0)
 
     _assert_disjoint("train", tr_ids, "source_val", val_ids)
     _assert_disjoint("train", tr_ids, "test", test_ids)
@@ -199,81 +218,161 @@ def build_all_loaders(
     # -----------------------------
     loaders["ood"] = {}
     if clinical_enabled:
-        clinical_train_parts = []
-        clinical_val_parts = []
-        clinical_train_ids = []
-        clinical_val_ids = []
+        if split_mode == PATIENT_CV:
+            from src.data.patient_cv import build_patient_folds, get_fold_indices
 
-        for idx, split_name in enumerate(registry.ood_split_names()):
-            X_clin, y_clin, clin_ids = _load_shared_split(
-                registry,
-                split_name,
-                clinical_sparse_ids,
-                stage=stage,
-            )
-            (
-                X_pool,
-                X_eval,
-                y_pool,
-                y_eval,
-                ids_pool,
-                ids_eval,
-            ) = _contiguous_split(
-                X_clin,
-                y_clin,
-                clin_ids,
-                test_fraction=clinical_eval_fraction,
-            )
+            patient_cv_cfg = cfg.get("validation", {}).get("patient_cv", {})
+            n_patient_folds = int(patient_cv_cfg.get("n_folds", 5))
+            clinical_ys = {}
+            for split_name in registry.ood_split_names():
+                _, y_raw = registry.get_arrays(split_name)
+                clinical_ys[split_name] = y_raw
 
-            val_relative = clinical_val_fraction / max(1e-8, (1.0 - clinical_eval_fraction))
-            val_relative = min(max(val_relative, 0.0), 0.5)
-            (
-                X_clin_tr,
-                X_clin_val,
-                y_clin_tr,
-                y_clin_val,
-                ids_clin_tr,
-                ids_clin_val,
-            ) = _contiguous_split(
-                X_pool,
-                y_pool,
-                ids_pool,
-                test_fraction=val_relative,
-            )
+            folds = build_patient_folds(clinical_ys, n_folds=n_patient_folds, seed=seed)
+            if fold_index is None:
+                fold_index = cfg.get("fold_index") or cfg.get("validation", {}).get("fold_index", 0)
+            fold_index = int(fold_index)
+            if fold_index < 0 or fold_index >= len(folds):
+                raise ValueError(
+                    f"fold_index must be in [0, {len(folds) - 1}], got {fold_index}"
+                )
+            fold = folds[fold_index]
 
-            clinical_train_parts.append((X_clin_tr, y_clin_tr))
-            clinical_val_parts.append((X_clin_val, y_clin_val))
-            clinical_train_ids.extend(ids_clin_tr.tolist())
-            clinical_val_ids.extend(ids_clin_val.tolist())
+            clinical_train_parts = []
+            clinical_train_ids = []
 
-            loaders["ood"][split_name] = _make_loader(
-                X_eval,
-                y_eval,
-                batch_size=batch_size,
-                num_workers=num_workers,
-                shuffle=False,
-                seed=seed + 10 + idx,
-                preprocessor=preprocessor,
-                expected_n_classes=n_classes,
-                class_filter=clinical_sparse_ids,
-                class_map=class_map,
-                inverse_class_map=inverse_class_map,
-                sample_ids=ids_eval,
-                label_validation=_clinical_label_validation(stage),
-                valid_label_ids=_valid_label_ids(stage, clinical_sparse_ids),
-            )
+            for idx, split_name in enumerate(registry.ood_split_names()):
+                X_clin, y_clin, clin_ids = _load_shared_split(
+                    registry,
+                    split_name,
+                    clinical_sparse_ids,
+                    stage=stage,
+                )
 
-        X_clin_tr = np.concatenate([part[0] for part in clinical_train_parts], axis=0)
-        y_clin_tr = np.concatenate([part[1] for part in clinical_train_parts], axis=0)
-        X_clin_val = np.concatenate([part[0] for part in clinical_val_parts], axis=0)
-        y_clin_val = np.concatenate([part[1] for part in clinical_val_parts], axis=0)
+                train_idx = get_fold_indices(clin_ids, fold, "train")
+                test_idx = get_fold_indices(clin_ids, fold, "test")
+
+                if len(train_idx) > 0:
+                    clinical_train_parts.append((X_clin[train_idx], y_clin[train_idx]))
+                    clinical_train_ids.extend(clin_ids[train_idx].tolist())
+
+                loaders["ood"][split_name] = _make_loader(
+                    X_clin[test_idx],
+                    y_clin[test_idx],
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    shuffle=False,
+                    seed=seed + 10 + idx,
+                    preprocessor=preprocessor,
+                    expected_n_classes=n_classes,
+                    class_filter=clinical_sparse_ids,
+                    class_map=class_map,
+                    inverse_class_map=inverse_class_map,
+                    sample_ids=clin_ids[test_idx],
+                    label_validation=_clinical_label_validation(stage),
+                    valid_label_ids=_valid_label_ids(stage, clinical_sparse_ids),
+                )
+
+            if not clinical_train_parts:
+                raise RuntimeError(
+                    f"Patient CV fold {fold_index} produced no clinical training spectra"
+                )
+
+            X_clin_tr = np.concatenate([part[0] for part in clinical_train_parts], axis=0)
+            y_clin_tr = np.concatenate([part[1] for part in clinical_train_parts], axis=0)
+
+            clinical_val_parts = []
+            clinical_val_ids = []
+            for loader in loaders["ood"].values():
+                clinical_val_parts.append((loader.dataset.X, loader.dataset.y))
+                clinical_val_ids.extend(loader.dataset.sample_ids.tolist())
+
+            if not clinical_val_parts:
+                raise RuntimeError(
+                    f"Patient CV fold {fold_index} produced no clinical evaluation spectra"
+                )
+
+            X_clin_val = np.concatenate([part[0] for part in clinical_val_parts], axis=0)
+            y_clin_val = np.concatenate([part[1] for part in clinical_val_parts], axis=0)
+
+        else:
+            clinical_train_parts = []
+            clinical_val_parts = []
+            clinical_train_ids = []
+            clinical_val_ids = []
+
+            for idx, split_name in enumerate(registry.ood_split_names()):
+                X_clin, y_clin, clin_ids = _load_shared_split(
+                    registry,
+                    split_name,
+                    clinical_sparse_ids,
+                    stage=stage,
+                )
+                (
+                    X_pool,
+                    X_eval,
+                    y_pool,
+                    y_eval,
+                    ids_pool,
+                    ids_eval,
+                ) = _contiguous_split(
+                    X_clin,
+                    y_clin,
+                    clin_ids,
+                    test_fraction=clinical_eval_fraction,
+                )
+
+                val_relative = clinical_val_fraction / max(1e-8, (1.0 - clinical_eval_fraction))
+                val_relative = min(max(val_relative, 0.0), 0.5)
+                (
+                    X_clin_tr,
+                    X_clin_val,
+                    y_clin_tr,
+                    y_clin_val,
+                    ids_clin_tr,
+                    ids_clin_val,
+                ) = _contiguous_split(
+                    X_pool,
+                    y_pool,
+                    ids_pool,
+                    test_fraction=val_relative,
+                )
+
+                clinical_train_parts.append((X_clin_tr, y_clin_tr))
+                clinical_val_parts.append((X_clin_val, y_clin_val))
+                clinical_train_ids.extend(ids_clin_tr.tolist())
+                clinical_val_ids.extend(ids_clin_val.tolist())
+
+                loaders["ood"][split_name] = _make_loader(
+                    X_eval,
+                    y_eval,
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    shuffle=False,
+                    seed=seed + 10 + idx,
+                    preprocessor=preprocessor,
+                    expected_n_classes=n_classes,
+                    class_filter=clinical_sparse_ids,
+                    class_map=class_map,
+                    inverse_class_map=inverse_class_map,
+                    sample_ids=ids_eval,
+                    label_validation=_clinical_label_validation(stage),
+                    valid_label_ids=_valid_label_ids(stage, clinical_sparse_ids),
+                )
+
+            X_clin_tr = np.concatenate([part[0] for part in clinical_train_parts], axis=0)
+            y_clin_tr = np.concatenate([part[1] for part in clinical_train_parts], axis=0)
+            X_clin_val = np.concatenate([part[0] for part in clinical_val_parts], axis=0)
+            y_clin_val = np.concatenate([part[1] for part in clinical_val_parts], axis=0)
+
         clinical_eval_ids = [
             sample_id
             for loader in loaders["ood"].values()
             for sample_id in loader.dataset.sample_ids.tolist()
         ]
         _assert_disjoint("clinical_train", clinical_train_ids, "clinical_eval", clinical_eval_ids)
-        _assert_disjoint("clinical_val", clinical_val_ids, "clinical_eval", clinical_eval_ids)
+        if split_mode != PATIENT_CV:
+            _assert_disjoint("clinical_val", clinical_val_ids, "clinical_eval", clinical_eval_ids)
 
         # Train loader
         loaders["clinical_train"] = _make_loader(
@@ -296,24 +395,25 @@ def build_all_loaders(
             valid_label_ids=_valid_label_ids(stage, clinical_sparse_ids),
         )
 
-        # Validation loader
-        loaders["clinical_val"] = _make_loader(
-            X_clin_val,
-            y_clin_val,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            shuffle=False,
-            seed=seed + 6,
-            preprocessor=preprocessor,
-            expected_n_classes=n_classes,
-            class_filter=clinical_sparse_ids,
-            class_map=class_map,
-            inverse_class_map=inverse_class_map,
-            sample_ids=np.asarray(clinical_val_ids),
-            label_validation=_clinical_label_validation(stage),
-            valid_label_ids=_valid_label_ids(stage, clinical_sparse_ids),
-        )
-        loaders["val"] = loaders["clinical_val"]
+        if split_mode != PATIENT_CV:
+            # Validation loader
+            loaders["clinical_val"] = _make_loader(
+                X_clin_val,
+                y_clin_val,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                shuffle=False,
+                seed=seed + 6,
+                preprocessor=preprocessor,
+                expected_n_classes=n_classes,
+                class_filter=clinical_sparse_ids,
+                class_map=class_map,
+                inverse_class_map=inverse_class_map,
+                sample_ids=np.asarray(clinical_val_ids),
+                label_validation=_clinical_label_validation(stage),
+                valid_label_ids=_valid_label_ids(stage, clinical_sparse_ids),
+            )
+            loaders["val"] = loaders["clinical_val"]
 
     if _finetune_split_enabled(stage, cfg):
         X_ft, y_ft, ft_ids = _load_shared_split(registry, "finetune", clinical_sparse_ids, stage=stage)
@@ -734,9 +834,14 @@ def _load_shared_split(
         # Clinical data: already in global treatment-space
         mask = np.isin(y, clinical_sparse_ids)
 
-        sample_ids = np.asarray(
-            [f"{split_name}:{idx}" for idx in np.flatnonzero(mask)]
-        )
+        if split_name in ("2018clinical", "2019clinical"):
+            from metadata.patient_ids import generate_patient_ids
+            patient_ids = generate_patient_ids(y, split_name)
+            sample_ids = patient_ids[mask]
+        else:
+            sample_ids = np.asarray(
+                [f"{split_name}:{idx}" for idx in np.flatnonzero(mask)]
+            )
 
         X_filtered, y_compact = filter_and_remap_classes(
             X,

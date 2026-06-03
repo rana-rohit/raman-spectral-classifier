@@ -302,6 +302,98 @@ class _ReferenceOnlyRegistry:
         return []
 
 
+class _PatientCVRegistry:
+    def __init__(self) -> None:
+        rng = np.random.default_rng(3)
+        clinical_y = np.concatenate(
+            [np.full(2000, label, dtype=np.int64) for label in [0, 2, 3, 5, 6]]
+        )
+        self.arrays = {
+            "reference": (
+                rng.normal(size=(300, 32)).astype(np.float32),
+                np.repeat(np.arange(30, dtype=np.int64), 10),
+            ),
+            "finetune": (
+                rng.normal(size=(300, 32)).astype(np.float32),
+                np.repeat(np.arange(30, dtype=np.int64), 10),
+            ),
+            "test": (
+                rng.normal(size=(300, 32)).astype(np.float32),
+                np.repeat(np.arange(30, dtype=np.int64), 10),
+            ),
+            "2018clinical": (
+                rng.normal(size=(len(clinical_y), 32)).astype(np.float32),
+                clinical_y,
+            ),
+        }
+        self.cfg = {
+            "splits": {
+                "reference": {"label_space": "isolate_space"},
+                "finetune": {"label_space": "isolate_space"},
+                "test": {"label_space": "isolate_space"},
+                "2018clinical": {"label_space": "sparse_global_treatment_space"},
+            }
+        }
+
+    def get_arrays(self, split_name, allow_holdout=False):
+        return self.arrays[split_name]
+
+    def ood_split_names(self):
+        return ["2018clinical"]
+
+
+def test_patient_cv_loader_uses_patient_disjoint_clinical_split_and_source_validation():
+    registry = _PatientCVRegistry()
+    preprocessor = SpectralPreprocessor([]).fit(registry.arrays["reference"][0])
+    cfg = {
+        "split_mode": "patient_cv",
+        "validation": {
+            "val_fraction": 0.2,
+            "random_seed": 42,
+            "clinical_val_fraction": 0.2,
+            "clinical_eval_fraction": 0.2,
+            "patient_cv": {"n_folds": 5},
+        },
+        "task": {
+            "stage": "transfer_5class",
+            "label_space": "sparse_global_treatment_space",
+            "clinical_sparse_global_ids": [0, 2, 3, 5, 6],
+        },
+        "training": {
+            "split_mode": "patient_cv",
+            "batch_size": 64,
+            "num_workers": 0,
+        },
+    }
+
+    loaders = build_all_loaders(
+        registry,
+        preprocessor,
+        augmentation=None,
+        cfg=cfg,
+        clinical_sparse_ids=[0, 2, 3, 5, 6],
+        n_classes=5,
+        fold_index=0,
+    )
+
+    assert loaders["val"] is loaders["source_val"]
+    assert "clinical_train" in loaders
+    assert "clinical_val" not in loaders
+    assert set(loaders["ood"]) == {"2018clinical"}
+
+    clinical_train_patients = set(loaders["clinical_train"].dataset.sample_ids.tolist())
+    clinical_test_patients = set(loaders["ood"]["2018clinical"].dataset.sample_ids.tolist())
+    assert clinical_train_patients.isdisjoint(clinical_test_patients)
+    assert len(clinical_train_patients) == 20
+    assert len(clinical_test_patients) == 5
+    assert len(loaders["clinical_train"].dataset) == 8000
+    assert len(loaders["ood"]["2018clinical"].dataset) == 2000
+
+    train_ids = [str(sample_id) for sample_id in loaders["train"].dataset.sample_ids.tolist()]
+    assert any(sample_id.startswith("finetune:") for sample_id in train_ids)
+    assert sorted(np.unique(loaders["clinical_train"].dataset.y).tolist()) == [0, 1, 2, 3, 4]
+
+
 def test_iid_reference_mode_uses_reference_only_group_aware_splits():
     registry = _ReferenceOnlyRegistry()
     preprocessor = SpectralPreprocessor([]).fit(registry.arrays["reference"][0])

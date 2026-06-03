@@ -172,6 +172,7 @@ def test_cnn_transformer_two_stage_pipeline():
             "dropout": 0.1,
             "contrastive": True,
             "projection_dim": 64,
+            "in_channels": 1,
         },
         "augmentation": {
             "enabled": True,

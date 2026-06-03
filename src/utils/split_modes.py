@@ -13,7 +13,8 @@ from typing import Any, Mapping, MutableMapping
 
 HOLDOUT = "holdout"
 IID_REFERENCE = "iid_reference"
-VALID_SPLIT_MODES = {HOLDOUT, IID_REFERENCE}
+PATIENT_CV = "patient_cv"
+VALID_SPLIT_MODES = {HOLDOUT, IID_REFERENCE, PATIENT_CV}
 
 
 @dataclass(frozen=True)

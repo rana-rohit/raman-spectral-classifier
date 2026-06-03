@@ -61,6 +61,8 @@ def compute_metrics(
     if logits.numel() == 0 or targets.numel() == 0:
         metrics = {
             "accuracy": 0.0,
+            "precision_macro": 0.0,
+            "recall_macro": 0.0,
             "f1_macro": 0.0,
             "mcc": 0.0,
             "roc_auc": 0.0,
@@ -113,6 +115,8 @@ def compute_metrics(
 
     metrics = {
         "accuracy":  float(accuracy),
+        "precision_macro": float(_macro_precision(y, preds, present_classes)),
+        "recall_macro": float(_macro_recall(y, preds, present_classes)),
         "f1_macro":  float(macro_f1),
         "mcc":       float(mcc),
     }
@@ -210,6 +214,24 @@ def _macro_f1(y_true, y_pred, classes) -> float:
                 f1 = 2 * prec * rec / (prec + rec)
         f1s.append(f1)
     return float(np.mean(f1s))
+
+
+def _macro_precision(y_true, y_pred, classes) -> float:
+    precisions = []
+    for cls in classes:
+        tp = ((y_pred == cls) & (y_true == cls)).sum()
+        fp = ((y_pred == cls) & (y_true != cls)).sum()
+        precisions.append(0.0 if tp + fp == 0 else tp / (tp + fp))
+    return float(np.mean(precisions))
+
+
+def _macro_recall(y_true, y_pred, classes) -> float:
+    recalls = []
+    for cls in classes:
+        tp = ((y_pred == cls) & (y_true == cls)).sum()
+        fn = ((y_pred != cls) & (y_true == cls)).sum()
+        recalls.append(0.0 if tp + fn == 0 else tp / (tp + fn))
+    return float(np.mean(recalls))
 
 
 def _per_class_f1(y_true, y_pred, classes) -> Dict[int, float]:
@@ -345,3 +367,56 @@ def confidence_vote_predictions(
         np.asarray(group_preds),
         np.asarray(group_targets),
     )
+
+
+def patient_vote_predictions(
+    probabilities: np.ndarray,
+    targets: np.ndarray,
+    patient_ids: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """
+    Aggregate spectrum probabilities into patient-level predictions using probability voting.
+
+    Parameters
+    ----------
+    probabilities : np.ndarray of shape (N, C)
+        Spectrum-level class probabilities (after softmax).
+    targets : np.ndarray of shape (N,)
+        Spectrum-level ground-truth labels.
+    patient_ids : np.ndarray of shape (N,)
+        Spectrum-level patient IDs.
+
+    Returns
+    -------
+    patient_preds : np.ndarray of shape (P,)
+        Voted class prediction for each unique patient.
+    patient_targets : np.ndarray of shape (P,)
+        True label for each unique patient.
+    unique_pids : list of str
+        The unique patient IDs in the order they were processed.
+    """
+    probabilities = np.asarray(probabilities)
+    targets = np.asarray(targets)
+    patient_ids = np.asarray(patient_ids)
+
+    unique_pids = sorted(list(set(patient_ids.tolist())))
+    patient_preds = []
+    patient_targets = []
+
+    for pid in unique_pids:
+        mask = patient_ids == pid
+        patient_probs = probabilities[mask]
+        patient_targets_local = targets[mask]
+
+        # Average probabilities across all spectra for this patient
+        mean_probs = patient_probs.mean(axis=0)
+        voted_pred = np.argmax(mean_probs)
+
+        # Verify target consistency
+        unique_targets = np.unique(patient_targets_local)
+        assert len(unique_targets) == 1, f"Patient {pid} contains mixed labels: {unique_targets}"
+        
+        patient_preds.append(voted_pred)
+        patient_targets.append(unique_targets[0])
+
+    return np.array(patient_preds), np.array(patient_targets), unique_pids

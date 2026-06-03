@@ -40,6 +40,7 @@ def test_two_stage_contrastive_pipeline():
             "dropout": 0.1,
             "contrastive": True,
             "projection_dim": 64,
+            "in_channels": 1,
         },
         "augmentation": {
             "enabled": True,

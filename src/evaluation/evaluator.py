@@ -59,6 +59,7 @@ class SplitEvaluationArtifact:
     metrics: Dict[str, float]
     confusion_matrix: np.ndarray
     present_classes: List[int]
+    patient_ids: Optional[np.ndarray] = None
 
 
 class ModelEvaluator:
@@ -188,9 +189,45 @@ class ModelEvaluator:
 
         group_preds = None
         group_targets = None
+        group_name = None
+        patient_ids_for_artifact = None
 
-        if spectra_per_group is not None:
+        if "clinical" in split_name and hasattr(loader.dataset, "sample_ids"):
+            sample_ids_arr = np.asarray(loader.dataset.sample_ids)
+            if len(sample_ids_arr) > 0 and any("_p" in str(sid) for sid in sample_ids_arr[:5]):
+                from src.evaluation.metrics import patient_vote_predictions
+                
+                targets_np = eval_targets.cpu().numpy()
+                group_preds, group_targets, unique_pids = patient_vote_predictions(
+                    probabilities=probabilities,
+                    targets=targets_np,
+                    patient_ids=sample_ids_arr,
+                )
+                patient_ids_for_artifact = sample_ids_arr
+                
+                group_results = {
+                    "accuracy": accuracy_score(group_targets, group_preds),
+                    "f1_macro": f1_score(
+                        group_targets,
+                        group_preds,
+                        average="macro",
+                    ),
+                    "mcc": matthews_corrcoef(
+                        group_targets,
+                        group_preds,
+                    ),
+                }
 
+                group_metrics = {
+                    k: float(v) if isinstance(v, np.floating) else v
+                    for k, v in group_results.items()
+                }
+                group_metrics["n_groups"] = int(len(group_targets))
+                group_metrics["predictions"] = group_preds.tolist()
+                group_metrics["targets"] = group_targets.tolist()
+                group_name = "patient"
+
+        if group_name is None and spectra_per_group is not None:
             preds_np = predictions
             targets_np = eval_targets.cpu().numpy()
 
@@ -445,6 +482,7 @@ class ModelEvaluator:
             metrics=metrics,
             confusion_matrix=cm,
             present_classes=[int(x) for x in present_classes],
+            patient_ids=patient_ids_for_artifact,
         )
 
         return metrics
@@ -571,6 +609,30 @@ class ModelEvaluator:
             "n_a_wins": int(n_ab),
             "n_b_wins": int(n_ba),
         }
+
+
+    def save_detailed_predictions(self, path: str) -> None:
+        """Save detailed spectrum-level predictions, probabilities, and patient IDs for aggregation."""
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        export = {}
+        for split_name, artifact in self.artifacts.items():
+            if "clinical" in split_name or split_name in ("test", "clinical_val"):
+                patient_ids = []
+                if hasattr(artifact, "patient_ids") and artifact.patient_ids is not None:
+                    patient_ids = list(artifact.patient_ids)
+
+                export[split_name] = {
+                    "logits": artifact.logits.tolist(),
+                    "probabilities": artifact.probabilities.tolist(),
+                    "predictions": artifact.predictions.tolist(),
+                    "targets": artifact.targets.tolist(),
+                    "patient_ids": patient_ids if patient_ids else None,
+                    "grouped_predictions": artifact.grouped_predictions.tolist() if artifact.grouped_predictions is not None else None,
+                    "grouped_targets": artifact.grouped_targets.tolist() if artifact.grouped_targets is not None else None,
+                }
+        with open(path, "w") as f:
+            json.dump(export, f, indent=2)
+        print(f"  Detailed predictions saved to {path}")
 
     def save(self, path: str) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
