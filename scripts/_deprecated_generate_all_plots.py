@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from matplotlib import cm
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -149,26 +150,42 @@ def plot_confusion(split: str, targets: np.ndarray, preds: np.ndarray, labels: L
             cm_plot = cm.astype(float)
             row_sums = cm_plot.sum(axis=1, keepdims=True)
             row_sums[row_sums == 0] = 1
-            cm_plot = cm_plot / row_sums
+            cm_plot = (cm_plot / row_sums) * 100
+
+            annot = np.where(
+                np.round(cm_plot) == 0,
+                "",
+                np.round(cm_plot).astype(int).astype(str)
+            )
+
         else:
             cm_plot = cm
-        fig, ax = plt.subplots(figsize=(10, 9))
+            annot = np.where(
+                cm_plot == 0,
+                "",
+                cm_plot.astype(int).astype(str)
+            )
+        fig, ax = plt.subplots(figsize=(11, 9))
         sns.heatmap(
             cm_plot,
             ax=ax,
             cmap="Blues",
-            annot=True,
-            fmt=".0f" if not normalize else ".2f",
+            annot=annot,
+            annot_kws={"size": 12},
+            fmt="",
             cbar=True,
             square=True,
             xticklabels=labels,
             yticklabels=labels,
+            vmin=0 if normalize else None,
+            vmax=100 if normalize else None,
         )
         ax.set_xlabel("Predicted")
         ax.set_ylabel("True")
-        n_title = "Normalized" if normalize else "Raw"
+        n_title = "Row-Normalized (%)" if normalize else "Raw Counts"
         ax.set_title(f"{title} — {split} ({n_title})")
         base = out_dir / f"confusion_matrix_{split}_{'normalized' if normalize else 'raw'}.png"
+        plt.tight_layout()
         _save_figure(fig, base, dpi)
 
 
@@ -182,26 +199,43 @@ def plot_grouped_confusion(split: str, group_targets: List[int], group_preds: Li
             cm_plot = cm.astype(float)
             row_sums = cm_plot.sum(axis=1, keepdims=True)
             row_sums[row_sums == 0] = 1
-            cm_plot = cm_plot / row_sums
+            cm_plot = (cm_plot / row_sums) * 100
+
+            annot = np.where(
+                np.round(cm_plot) == 0,
+                "",
+                np.round(cm_plot).astype(int).astype(str)
+            )
+
         else:
             cm_plot = cm
-        fig, ax = plt.subplots(figsize=(10, 9))
+
+            annot = np.where(
+                cm_plot == 0,
+                "",
+                cm_plot.astype(int).astype(str)
+            )
+        fig, ax = plt.subplots(figsize=(11, 9))
         sns.heatmap(
             cm_plot,
             ax=ax,
             cmap="Greens",
-            annot=True,
-            fmt=".0f" if not normalize else ".2f",
+            annot=annot,
+            annot_kws={"size": 12},
+            fmt="",
             cbar=True,
             square=True,
             xticklabels=labels,
             yticklabels=labels,
+            vmin=0 if normalize else None,
+            vmax=100 if normalize else None,
         )
         ax.set_xlabel("Predicted")
         ax.set_ylabel("True")
-        n_title = "Normalized" if normalize else "Raw"
+        n_title = "Row-Normalized (%)" if normalize else "Raw Counts"
         ax.set_title(f"{title} — {split} (Grouped, {n_title})")
         base = out_dir / f"grouped_confusion_{split}_{'normalized' if normalize else 'raw'}.png"
+        plt.tight_layout()
         _save_figure(fig, base, dpi)
 
 
@@ -221,6 +255,7 @@ def plot_roc_pr(split: str, probs: np.ndarray, targets: np.ndarray, labels: List
     ax.set_ylabel("True Positive Rate")
     ax.set_title(f"ROC — {title} — {split}")
     ax.legend(fontsize=8, loc="lower right")
+    plt.tight_layout()
     _save_figure(fig, out_dir / f"roc_curve_{split}.png", dpi)
 
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -233,6 +268,7 @@ def plot_roc_pr(split: str, probs: np.ndarray, targets: np.ndarray, labels: List
     ax.set_ylabel("Precision")
     ax.set_title(f"Precision-Recall — {title} — {split}")
     ax.legend(fontsize=8, loc="lower left")
+    plt.tight_layout()
     _save_figure(fig, out_dir / f"pr_curve_{split}.png", dpi)
 
 
@@ -254,6 +290,7 @@ def plot_per_class(split: str, targets: np.ndarray, preds: np.ndarray, labels: L
     ax.set_ylabel("Score")
     ax.set_title(f"Per-Class Performance — {title} — {split}")
     ax.legend()
+    plt.tight_layout()
     _save_figure(fig, out_dir / f"per_class_{split}.png", dpi)
 
 
@@ -288,6 +325,7 @@ def plot_grouped_vs_spectrum(results: dict, title: str, out_dir: Path, dpi: int)
     ax.set_ylabel("Accuracy")
     ax.set_title(f"Grouped vs Spectrum Accuracy — {title}")
     ax.legend()
+    plt.tight_layout()
     _save_figure(fig, out_dir / "grouped_vs_spectrum_accuracy.png", dpi)
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -298,6 +336,7 @@ def plot_grouped_vs_spectrum(results: dict, title: str, out_dir: Path, dpi: int)
     ax.set_ylabel("F1 Macro")
     ax.set_title(f"Grouped vs Spectrum F1 — {title}")
     ax.legend()
+    plt.tight_layout()
     _save_figure(fig, out_dir / "grouped_vs_spectrum_f1.png", dpi)
 
 
@@ -318,6 +357,7 @@ def plot_stage_comparison(stage_summaries: List[Dict], out_dir: Path, dpi: int) 
     ax.set_ylabel("Score")
     ax.set_title("Stage Comparison (Test Split)")
     ax.legend()
+    plt.tight_layout()
     _save_figure(fig, out_dir / "stage_comparison.png", dpi)
 
 
@@ -339,6 +379,7 @@ def plot_embeddings(emb_dir: Path, split: str, labels: List[str], title: str, ou
     ax.set_xticks([])
     ax.set_yticks([])
     ax.legend(fontsize=7, ncol=2)
+    plt.tight_layout()
     _save_figure(fig, out_dir / f"tsne_{split}.png", dpi)
 
     try:
@@ -358,6 +399,7 @@ def plot_embeddings(emb_dir: Path, split: str, labels: List[str], title: str, ou
         ax.set_xticks([])
         ax.set_yticks([])
         ax.legend(fontsize=7, ncol=2)
+        plt.tight_layout()
         _save_figure(fig, out_dir / f"umap_{split}.png", dpi)
     except Exception:
         print("[generate_all_plots] UMAP not available; skipping UMAP plot")
@@ -508,48 +550,14 @@ def run_all_plots(exp_dir: str, dpi: int = 500, no_staging: bool = False, no_emb
 
 def main() -> None:
     args = parse_args()
-    exp_dir = Path(args.exp_dir)
-    if not exp_dir.exists():
-        raise FileNotFoundError(f"Experiment directory not found: {exp_dir}")
 
-    cfg = _load_config_any(exp_dir)
-    model_name = cfg.get("model", {}).get("name", exp_dir.name)
+    run_all_plots(
+        args.exp_dir,
+        dpi=args.dpi,
+        no_staging=args.no_staging,
+        no_embeddings=args.no_embeddings,
+    )
 
-    eval_paths = _find_eval_results(exp_dir)
-    if not eval_paths:
-        raise FileNotFoundError("No *_eval_results.json found in experiment directory")
 
-    staging_dir = None
-    if not args.no_staging:
-        staging_dir = tempfile.mkdtemp(prefix="plot_staging_")
-        print(f"[generate_all_plots] Using staging directory: {staging_dir}")
-
-    base_dir = Path(staging_dir) if staging_dir else exp_dir
-
-    plots_dir = base_dir / "plots"
-    reports_dir = base_dir / "reports"
-    tables_dir = base_dir / "tables"
-
-    # Plot subfolders
-    confusion_dir = plots_dir / "confusion"
-    grouped_dir = plots_dir / "grouped"
-    roc_dir = plots_dir / "roc"
-    comparison_dir = plots_dir / "comparison"
-    per_class_dir = plots_dir / "per_class"
-    summaries_dir = plots_dir / "summaries"
-    embeddings_dir = plots_dir / "embeddings"
-
-    for d in [plots_dir, reports_dir, tables_dir, confusion_dir, grouped_dir, roc_dir, comparison_dir, per_class_dir, summaries_dir, embeddings_dir]:
-        _ensure_dir(d)
-
-    stages = []
-    all_splits = set()
-    stage_summaries = []
-
-    pred_dir = exp_dir / "predictions"
-    emb_dir = exp_dir / "embeddings"
-
-    for eval_path in eval_paths:
-        stage = _stage_from_path(eval_path)
-        run_all_plots(args.exp_dir, dpi=args.dpi, no_staging=args.no_staging, no_embeddings=args.no_embeddings)
+if __name__ == "__main__":
     main()
