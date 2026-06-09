@@ -1334,6 +1334,36 @@ def process_aggregated_cv_results(
     for split_name, split_data in aggregate.get("splits", {}).items():
         _add_metric_row(rows, "aggregated", split_name, "Spectrum", split_data.get("spectrum_metrics", {}), split_data.get("spectrum_metrics", {}).get("n_samples"))
         _add_metric_row(rows, "aggregated", split_name, "Patient", split_data.get("patient_metrics", {}), split_data.get("patient_metrics", {}).get("n_patients"))
+        
+        # --------------------------------------------------
+        # Grouped vs Spectrum comparison
+        # --------------------------------------------------
+
+        grouped_path = (
+            subdirs["grouped"]
+            / f"clinical_cv_grouped_vs_spectrum_{split_name}.png"
+        )
+        
+        print(f"[DEBUG] Creating grouped plot: {grouped_path}")
+
+        plot_grouped_vs_spectrum(
+            {
+                "splits": {
+                    split_name: {
+                        "metrics": split_data.get("spectrum_metrics", {}),
+                        "group_metrics": split_data.get("patient_metrics", {}),
+                    }
+                }
+            },
+            f"Aggregated {_split_display(split_name)}",
+            grouped_path,
+            dpi,
+        )
+        
+        print(f"[DEBUG] Exists after plotting: {grouped_path.exists()}")
+        
+        if grouped_path.exists():
+            figures.append(str(grouped_path.relative_to(out_root)))
 
         for level, cm_key, stem in [
             ("Spectrum", "spectrum_confusion_matrix", "spectrum"),
