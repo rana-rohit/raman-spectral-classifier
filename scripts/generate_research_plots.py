@@ -1561,7 +1561,7 @@ def plot_publication_panel(
     row_sums = cm_plot.sum(axis=1, keepdims=True)
     row_sums[row_sums == 0] = 1
     cm_plot = np.rint((cm_plot / row_sums) * 100).astype(int)
-    cm_annot = np.array([[str(int(v)) for v in row] for row in cm_plot])
+    cm_annot = np.array([[str(int(v)) if v > 0 else "" for v in row] for row in cm_plot])
 
     cmap_blues = LinearSegmentedColormap.from_list(
         "research_blues",
