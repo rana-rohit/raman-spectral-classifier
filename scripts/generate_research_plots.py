@@ -304,7 +304,7 @@ def plot_confusion_matrix(
     annot = not large
     if annot:
         if normalize:
-            annot_data = np.array([[str(int(v)) for v in row] for row in cm_plot])
+            annot_data = np.array([[str(int(v)) if v > 0 else "" for v in row] for row in cm_plot])
         else:
             annot_data = np.array([["" if int(v) == 0 else str(int(v)) for v in row] for row in cm_plot])
     else:
