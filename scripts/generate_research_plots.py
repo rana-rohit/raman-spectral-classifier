@@ -526,8 +526,17 @@ def plot_grouped_vs_spectrum(
     splits, spec_acc, grp_acc, spec_f1, grp_f1 = [], [], [], [], []
 
     for split_name, data in results.get("splits", {}).items():
-        metrics = data.get("metrics", {})
-        group_metrics = data.get("group_metrics", {})
+        metrics = (
+            data.get("metrics")
+            or data.get("spectrum_metrics")
+            or {}
+        )
+
+        group_metrics = (
+            data.get("group_metrics")
+            or data.get("patient_metrics")
+            or {}
+        )
         if not group_metrics or "accuracy" not in group_metrics:
             continue
         splits.append(_split_display(split_name))
