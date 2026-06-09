@@ -2109,6 +2109,12 @@ def generate_research_plots(
 
     # ---- Learning curves ----
     metrics_json = exp_path / "metrics.json"
+
+    if not metrics_json.exists() and fold_dirs:
+        candidate = fold_dirs[0] / "metrics.json"
+        if candidate.exists():
+            metrics_json = candidate
+
     if metrics_json.exists():
         plot_learning_curves(
             metrics_json,
