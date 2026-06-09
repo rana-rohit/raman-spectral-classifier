@@ -523,7 +523,10 @@ def plot_grouped_vs_spectrum(
     Double-bar chart: spectrum-level vs patient/group-level accuracy and F1.
     Shows the gain from majority voting aggregation.
     """
-    splits, spec_acc, grp_acc, spec_f1, grp_f1 = [], [], [], [], []
+    splits = []
+    spec_acc, grp_acc = [], []
+    spec_f1, grp_f1 = [], []
+    spec_mcc, grp_mcc = [], []
 
     for split_name, data in results.get("splits", {}).items():
         metrics = (
@@ -544,60 +547,77 @@ def plot_grouped_vs_spectrum(
         grp_acc.append(group_metrics.get("accuracy", 0.0))
         spec_f1.append(metrics.get("f1_macro", 0.0))
         grp_f1.append(group_metrics.get("f1_macro", 0.0))
+        spec_mcc.append(metrics.get("mcc", 0.0))
+        grp_mcc.append(group_metrics.get("mcc", 0.0))
 
     if not splits:
         return
 
-    x = np.arange(len(splits))
-    width = 0.32
+    metric_names = ["Accuracy", "Macro F1", "MCC"]
+    
+    if not spec_acc:
+        return
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=True)
+    spectrum_vals = [
+        np.mean(spec_acc),
+        np.mean(spec_f1),
+        np.mean(spec_mcc),
+    ]
 
-    # Accuracy panel
-    ax = axes[0]
-    bars1 = ax.bar(x - width / 2, spec_acc, width, label="Spectrum-level",
-                   color=PALETTE["primary"], alpha=0.85, edgecolor="white")
-    bars2 = ax.bar(x + width / 2, grp_acc, width, label="Patient/Group-level",
-                   color=PALETTE["accent"], alpha=0.85, edgecolor="white")
+    patient_vals = [
+        np.mean(grp_acc),
+        np.mean(grp_f1),
+        np.mean(grp_mcc),
+    ]
+
+    x = np.arange(len(metric_names))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    bars1 = ax.bar(
+        x - width/2,
+        spectrum_vals,
+        width,
+        label="Spectrum-level",
+        color=PALETTE["primary"]
+    )
+
+    bars2 = ax.bar(
+        x + width/2,
+        patient_vals,
+        width,
+        label="Patient-level",
+        color=PALETTE["accent"]
+    )
+    
+    for bar in list(bars1) + list(bars2):
+        h = bar.get_height()
+
+        ax.text(
+            bar.get_x() + bar.get_width()/2,
+            h + 0.01,
+            f"{h*100:.1f}%",
+            ha="center",
+            fontsize=9,
+        )
+
     ax.set_xticks(x)
-    ax.set_xticklabels(splits, rotation=20, ha="right")
-    ax.set_ylabel("Accuracy")
-    ax.set_title("Accuracy", fontweight="bold")
-    ax.legend(loc="upper left", fontsize=8)
-    ax.set_ylim(0, 1.05)
+    ax.set_xticklabels(metric_names)
+    ymin = min(
+        min(spectrum_vals),
+        min(patient_vals)
+    )
 
-    # Annotate gain
-    for i in range(len(splits)):
-        gain = grp_acc[i] - spec_acc[i]
-        if abs(gain) > 0.001:
-            sign = "+" if gain > 0 else ""
-            ax.annotate(f"{sign}{gain:.1%}",
-                       xy=(x[i] + width / 2, grp_acc[i]),
-                       xytext=(0, 5), textcoords="offset points",
-                       ha="center", fontsize=7, color=PALETTE["dark"])
+    ax.set_ylim(max(0, ymin - 0.1), 1.02)
+    ax.set_ylabel("Score")
+    ax.set_title(
+        f"Patient vs Spectrum Performance\n{title}",
+        pad=15
+    )
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
 
-    # F1 panel
-    ax = axes[1]
-    ax.bar(x - width / 2, spec_f1, width, label="Spectrum-level",
-           color=PALETTE["primary"], alpha=0.85, edgecolor="white")
-    ax.bar(x + width / 2, grp_f1, width, label="Patient/Group-level",
-           color=PALETTE["accent"], alpha=0.85, edgecolor="white")
-    ax.set_xticks(x)
-    ax.set_xticklabels(splits, rotation=20, ha="right")
-    ax.set_title("Macro F1", fontweight="bold")
-    ax.legend(loc="upper left", fontsize=8)
-
-    for i in range(len(splits)):
-        gain = grp_f1[i] - spec_f1[i]
-        if abs(gain) > 0.001:
-            sign = "+" if gain > 0 else ""
-            ax.annotate(f"{sign}{gain:.1%}",
-                       xy=(x[i] + width / 2, grp_f1[i]),
-                       xytext=(0, 5), textcoords="offset points",
-                       ha="center", fontsize=7, color=PALETTE["dark"])
-
-    fig.suptitle(f"Grouped vs Spectrum Analysis — {title}", fontsize=13, fontweight="bold", y=1.02)
-    fig.tight_layout()
     _save_fig(fig, out_path, dpi)
 
 
