@@ -45,6 +45,11 @@ from sklearn.metrics import (
     precision_recall_curve,
     average_precision_score,
     classification_report,
+    accuracy_score,
+    f1_score,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
 )
 from sklearn.preprocessing import label_binarize
 
@@ -90,6 +95,7 @@ SPLIT_DISPLAY = {
     "train":         "Training",
     "2018clinical":  "Clinical 2018 (OOD)",
     "2019clinical":  "Clinical 2019 (OOD)",
+    "clinical_all":   "Clinical All (OOD)",
 }
 
 
@@ -117,6 +123,9 @@ def _apply_global_style():
         "grid.linewidth":     0.5,
         "savefig.bbox":       "tight",
         "savefig.pad_inches": 0.15,
+        "savefig.dpi":        500,
+        "pdf.fonttype":       42,
+        "ps.fonttype":        42,
     })
     sns.set_style("whitegrid", {
         "grid.color":     PALETTE["grid"],
@@ -249,6 +258,10 @@ def _ensure_dir(path: Path) -> None:
 def _save_fig(fig, path: Path, dpi: int) -> None:
     """Save figure as PNG + PDF, then close."""
     _ensure_dir(path.parent)
+    try:
+        fig.tight_layout()
+    except Exception:
+        pass
     fig.savefig(str(path), dpi=dpi, bbox_inches="tight", facecolor="white")
     pdf_path = path.with_suffix(".pdf")
     fig.savefig(str(pdf_path), dpi=min(dpi, 300), bbox_inches="tight", facecolor="white")
@@ -280,7 +293,7 @@ def plot_confusion_matrix(
         cm_plot = cm.astype(float)
         row_sums = cm_plot.sum(axis=1, keepdims=True)
         row_sums[row_sums == 0] = 1
-        cm_plot = cm_plot / row_sums
+        cm_plot = np.rint((cm_plot / row_sums) * 100).astype(int)
     else:
         cm_plot = cm
 
@@ -289,7 +302,13 @@ def plot_confusion_matrix(
     fig_w = max(10, n * 0.5) if large else 10
     fig_h = max(9, n * 0.45) if large else 9
     annot = not large
-    fmt = ".2f" if normalize else ".0f"
+    if annot:
+        if normalize:
+            annot_data = np.array([[str(int(v)) for v in row] for row in cm_plot])
+        else:
+            annot_data = np.array([["" if int(v) == 0 else str(int(v)) for v in row] for row in cm_plot])
+    else:
+        annot_data = False
 
     # Custom blue colormap with better contrast
     cmap = LinearSegmentedColormap.from_list(
@@ -302,15 +321,17 @@ def plot_confusion_matrix(
         cm_plot,
         ax=ax,
         cmap=cmap,
-        annot=annot,
-        fmt=fmt if annot else "",
+        annot=annot_data,
+        fmt="",
         cbar=True,
+        vmin=0 if normalize else None,
+        vmax=100 if normalize else None,
         square=True,
         linewidths=0.3 if not large else 0.1,
         linecolor="#DDDDDD",
         xticklabels=labels,
         yticklabels=labels,
-        annot_kws={"size": max(7, 11 - n // 5)} if annot else {},
+        annot_kws={"size": max(9, 13 - n // 5), "weight": "bold"} if annot else {},
     )
 
     ax.set_xlabel("Predicted", fontweight="bold")
@@ -423,7 +444,11 @@ def plot_roc_clean(
     - Skips entirely if binary (< 2 classes).
     """
     n_classes = len(labels)
-    if n_classes < 2:
+    if n_classes < 2 or probs is None or len(targets) == 0:
+        return
+    if probs.ndim != 2 or probs.shape[1] < n_classes:
+        return
+    if len(np.unique(targets)) < 2:
         return
 
     y_bin = label_binarize(targets, classes=list(range(n_classes)))
@@ -433,11 +458,15 @@ def plot_roc_clean(
     fig, ax = plt.subplots(figsize=(8, 7))
 
     # Micro-average
-    fpr_micro, tpr_micro, _ = roc_curve(y_bin.ravel(), probs.ravel())
-    auc_micro = auc(fpr_micro, tpr_micro)
-    ax.plot(fpr_micro, tpr_micro,
-            color=PALETTE["primary"], linewidth=2.5,
-            label=f"Micro-average (AUC = {auc_micro:.3f})")
+    try:
+        fpr_micro, tpr_micro, _ = roc_curve(y_bin.ravel(), probs[:, :n_classes].ravel())
+        auc_micro = auc(fpr_micro, tpr_micro)
+        ax.plot(fpr_micro, tpr_micro,
+                color=PALETTE["primary"], linewidth=2.5,
+                label=f"Micro-average (AUC = {auc_micro:.3f})")
+    except Exception:
+        plt.close(fig)
+        return
 
     # Per-class AUCs
     class_aucs = []
@@ -715,6 +744,10 @@ def plot_model_comparison(
     mccs  = [m.get("mcc", 0) for m in model_data]
 
     metrics_dict = {"Accuracy": accs, "Macro F1": f1s, "MCC": mccs}
+    if any("patient_accuracy" in m for m in model_data):
+        metrics_dict["Patient Acc."] = [m.get("patient_accuracy", 0) for m in model_data]
+    if any("patient_f1_macro" in m for m in model_data):
+        metrics_dict["Patient F1"] = [m.get("patient_f1_macro", 0) for m in model_data]
     metric_names = list(metrics_dict.keys())
 
     fig, ax = plt.subplots(figsize=(max(8, len(names) * 1.5), 5))
@@ -722,12 +755,12 @@ def plot_model_comparison(
     x = np.arange(len(names))
     total_width = 0.7
     bar_width = total_width / len(metric_names)
-    colors = [PALETTE["primary"], PALETTE["secondary"], PALETTE["accent"]]
+    colors = [PALETTE["primary"], PALETTE["secondary"], PALETTE["accent"], PALETTE["highlight"], PALETTE["muted"]]
 
     for idx, (mname, values) in enumerate(metrics_dict.items()):
         offset = (idx - len(metric_names) / 2 + 0.5) * bar_width
         bars = ax.bar(x + offset, values, bar_width,
-                     label=mname, color=colors[idx], alpha=0.85, edgecolor="white")
+                     label=mname, color=colors[idx % len(colors)], alpha=0.85, edgecolor="white")
         # Annotate
         for bar, val in zip(bars, values):
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
@@ -934,6 +967,509 @@ def write_summary_md(
 
 
 # ============================================================
+# PATIENT-CV AND AGGREGATED RESULT SUPPORT
+# ============================================================
+
+METRIC_KEYS = ["accuracy", "f1_macro", "mcc", "precision_macro", "recall_macro"]
+METRIC_DISPLAY = {
+    "accuracy": "Accuracy",
+    "f1_macro": "Macro-F1",
+    "mcc": "MCC",
+    "precision_macro": "Precision",
+    "recall_macro": "Recall",
+}
+
+
+def _load_json(path: Path) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _fold_sort_key(path: Path) -> Tuple[int, str]:
+    digits = "".join(ch for ch in path.name if ch.isdigit())
+    return (int(digits) if digits else 999, path.name)
+
+
+def _discover_fold_dirs(exp_dir: Path) -> List[Path]:
+    fold_dirs = [
+        d for d in exp_dir.iterdir()
+        if d.is_dir() and (d.name.startswith("fold_") or "_fold" in d.name)
+    ]
+    return sorted(fold_dirs, key=_fold_sort_key)
+
+
+def _find_aggregated_results(exp_dir: Path) -> Optional[Path]:
+    candidates = [
+        exp_dir / "aggregated_cv_results.json",
+        exp_dir / "analysis" / "aggregated_cv_results.json",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    nested = sorted(exp_dir.rglob("aggregated_cv_results.json"))
+    return nested[0] if nested else None
+
+
+def _metric_value(metrics: dict, key: str) -> Optional[float]:
+    aliases = {
+        "precision_macro": ["precision_macro", "precision"],
+        "recall_macro": ["recall_macro", "recall"],
+        "f1_macro": ["f1_macro", "macro_f1"],
+    }
+    for candidate in aliases.get(key, [key]):
+        value = metrics.get(candidate)
+        if isinstance(value, (int, float)) and not np.isnan(value):
+            return float(value)
+    return None
+
+
+def _compute_metrics_from_labels(targets: np.ndarray, preds: np.ndarray) -> Dict[str, float]:
+    if len(targets) == 0 or len(preds) == 0:
+        return {}
+    return {
+        "accuracy": float(accuracy_score(targets, preds)),
+        "precision_macro": float(precision_score(targets, preds, average="macro", zero_division=0)),
+        "recall_macro": float(recall_score(targets, preds, average="macro", zero_division=0)),
+        "f1_macro": float(f1_score(targets, preds, average="macro", zero_division=0)),
+        "mcc": float(matthews_corrcoef(targets, preds)),
+    }
+
+
+def _patient_vote_local(
+    probabilities: np.ndarray,
+    targets: np.ndarray,
+    patient_ids: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    if probabilities.size == 0 or len(targets) == 0 or len(patient_ids) != len(targets):
+        return np.array([]), np.array([])
+    preds, tgts = [], []
+    for pid in sorted(set(patient_ids.tolist())):
+        mask = patient_ids == pid
+        pid_targets = targets[mask]
+        if len(pid_targets) == 0 or len(np.unique(pid_targets)) != 1:
+            continue
+        preds.append(int(np.argmax(probabilities[mask].mean(axis=0))))
+        tgts.append(int(pid_targets[0]))
+    return np.asarray(preds), np.asarray(tgts)
+
+
+def _metrics_from_detailed_split(split_data: dict) -> Tuple[Dict[str, float], Dict[str, float]]:
+    targets = np.asarray(split_data.get("targets") or [])
+    preds = np.asarray(split_data.get("predictions") or [])
+    spectrum_metrics = _compute_metrics_from_labels(targets, preds)
+
+    grouped_preds = split_data.get("grouped_predictions")
+    grouped_targets = split_data.get("grouped_targets")
+    if grouped_preds is not None and grouped_targets is not None:
+        patient_metrics = _compute_metrics_from_labels(np.asarray(grouped_targets), np.asarray(grouped_preds))
+    else:
+        probs = np.asarray(split_data.get("probabilities") or [])
+        pids = split_data.get("patient_ids")
+        if pids is None:
+            patient_metrics = {}
+        else:
+            patient_preds, patient_targets = _patient_vote_local(probs, targets, np.asarray(pids))
+            patient_metrics = _compute_metrics_from_labels(patient_targets, patient_preds)
+    return spectrum_metrics, patient_metrics
+
+
+def _add_metric_row(rows: List[Dict], fold: str, split: str, level: str, metrics: dict, n_value: Optional[int] = None) -> None:
+    row = {"fold": fold, "split": split, "level": level}
+    if n_value is not None:
+        row["n"] = int(n_value)
+    for key in METRIC_KEYS:
+        value = _metric_value(metrics, key)
+        if value is not None:
+            row[key] = value
+    if any(key in row for key in METRIC_KEYS):
+        rows.append(row)
+
+
+def collect_fold_metric_rows(fold_dirs: List[Path]) -> List[Dict]:
+    rows: List[Dict] = []
+    for fold_dir in fold_dirs:
+        eval_files = sorted(fold_dir.glob("*_eval_results.json"))
+        detailed_path = fold_dir / "detailed_predictions.json"
+        detailed = _load_json(detailed_path) if detailed_path.exists() else {}
+
+        if eval_files:
+            data = _load_json(eval_files[0])
+            for split_name, split_data in data.get("splits", {}).items():
+                _add_metric_row(
+                    rows,
+                    fold_dir.name,
+                    split_name,
+                    "Spectrum",
+                    split_data.get("metrics", {}),
+                    split_data.get("n_samples"),
+                )
+                group_metrics = split_data.get("group_metrics", {})
+                if group_metrics:
+                    if "precision_macro" not in group_metrics and "targets" in group_metrics and "predictions" in group_metrics:
+                        computed = _compute_metrics_from_labels(
+                            np.asarray(group_metrics["targets"]),
+                            np.asarray(group_metrics["predictions"]),
+                        )
+                        group_metrics = {**group_metrics, **computed}
+                    _add_metric_row(
+                        rows,
+                        fold_dir.name,
+                        split_name,
+                        "Patient",
+                        group_metrics,
+                        group_metrics.get("n_groups"),
+                    )
+
+        for split_name, split_data in detailed.items():
+            spectrum_metrics, patient_metrics = _metrics_from_detailed_split(split_data)
+            known = {(r["fold"], r["split"], r["level"]) for r in rows}
+            if (fold_dir.name, split_name, "Spectrum") not in known:
+                _add_metric_row(rows, fold_dir.name, split_name, "Spectrum", spectrum_metrics, len(split_data.get("targets") or []))
+            if patient_metrics and (fold_dir.name, split_name, "Patient") not in known:
+                n_patients = len(set(split_data.get("patient_ids") or [])) if split_data.get("patient_ids") else None
+                _add_metric_row(rows, fold_dir.name, split_name, "Patient", patient_metrics, n_patients)
+    return rows
+
+
+def _write_rows_csv(rows: List[Dict], out_path: Path) -> None:
+    if not rows:
+        return
+    _ensure_dir(out_path.parent)
+    fieldnames = list(dict.fromkeys(k for row in rows for k in row.keys()))
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def compute_cross_fold_stats(rows: List[Dict]) -> List[Dict]:
+    stats_rows: List[Dict] = []
+    groups = sorted({(r["split"], r["level"]) for r in rows})
+    for split, level in groups:
+        subset = [r for r in rows if r["split"] == split and r["level"] == level]
+        for metric in METRIC_KEYS:
+            values = np.asarray([r[metric] for r in subset if metric in r], dtype=float)
+            if values.size == 0:
+                continue
+            stats_rows.append({
+                "split": split,
+                "level": level,
+                "metric": metric,
+                "mean": float(values.mean()),
+                "std": float(values.std(ddof=1)) if values.size > 1 else 0.0,
+                "min": float(values.min()),
+                "max": float(values.max()),
+                "n_folds": int(values.size),
+                "formatted": _format_mean_std(metric, float(values.mean()), float(values.std(ddof=1)) if values.size > 1 else 0.0),
+            })
+    return stats_rows
+
+
+def _format_mean_std(metric: str, mean: float, std: float) -> str:
+    if metric == "mcc":
+        return f"{mean:.2f} +/- {std:.2f}"
+    return f"{mean * 100:.1f} +/- {std * 100:.1f}"
+
+
+def plot_fold_metric_comparison(rows: List[Dict], metric: str, level: str, out_path: Path, dpi: int) -> None:
+    subset = [r for r in rows if r.get("level") == level and metric in r]
+    if not subset:
+        return
+    folds = sorted({r["fold"] for r in subset}, key=lambda x: _fold_sort_key(Path(x)))
+    splits = sorted({r["split"] for r in subset})
+    x = np.arange(len(folds))
+
+    fig, ax = plt.subplots(figsize=(max(8, len(folds) * 1.2), 5))
+    for idx, split in enumerate(splits):
+        values = []
+        for fold in folds:
+            match = next((r for r in subset if r["fold"] == fold and r["split"] == split), None)
+            values.append(match.get(metric, np.nan) if match else np.nan)
+        ax.plot(
+            x,
+            values,
+            marker="o",
+            linewidth=2.0,
+            markersize=7,
+            color=MODEL_COLORS[idx % len(MODEL_COLORS)],
+            label=_split_display(split),
+        )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(folds, rotation=0)
+    ax.set_ylabel(METRIC_DISPLAY[metric])
+    ax.set_title(f"Fold-wise {level}-level {METRIC_DISPLAY[metric]}", pad=12)
+    ax.set_ylim(-0.05 if metric == "mcc" else 0, 1.05)
+    ax.legend(loc="best", fontsize=8)
+    _save_fig(fig, out_path, dpi)
+
+
+def plot_cross_fold_statistics(stats_rows: List[Dict], out_path: Path, dpi: int) -> None:
+    if not stats_rows:
+        return
+    preferred_split = next(
+        (split for split in ["clinical_all", "test", "2018clinical", "2019clinical"]
+         if any(r["split"] == split for r in stats_rows)),
+        stats_rows[0]["split"],
+    )
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), sharey=False)
+    for ax, level in zip(axes, ["Spectrum", "Patient"]):
+        subset = [r for r in stats_rows if r["split"] == preferred_split and r["level"] == level]
+        if not subset:
+            ax.axis("off")
+            ax.set_title(f"{level}-level unavailable")
+            continue
+        values = [_metric_value({"value": r["mean"]}, "value") for r in subset]
+        errors = [r["std"] for r in subset]
+        labels = [METRIC_DISPLAY[r["metric"]] for r in subset]
+        x = np.arange(len(labels))
+        ax.bar(x, values, yerr=errors, capsize=4, color=PALETTE["primary"] if level == "Spectrum" else PALETTE["accent"], alpha=0.88, edgecolor="white")
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=20, ha="right")
+        ax.set_ylim(-0.05 if any(r["metric"] == "mcc" for r in subset) else 0, 1.08)
+        ax.set_ylabel("Mean score")
+        ax.set_title(f"{level}-level ({_split_display(preferred_split)})", fontweight="bold")
+        for i, r in enumerate(subset):
+            ax.text(i, r["mean"] + r["std"] + 0.02, _format_mean_std(r["metric"], r["mean"], r["std"]), ha="center", va="bottom", fontsize=8)
+    fig.suptitle("Cross-fold Mean +/- SD", fontsize=14, fontweight="bold", y=1.03)
+    _save_fig(fig, out_path, dpi)
+
+
+def write_cross_fold_report(rows: List[Dict], stats_rows: List[Dict], out_path: Path) -> None:
+    _ensure_dir(out_path.parent)
+    lines = ["# Patient-CV Cross-Fold Summary", ""]
+    if not rows:
+        lines.append("No fold-level metrics were available.")
+    else:
+        lines.append(f"Folds detected: {len(sorted({r['fold'] for r in rows}))}")
+        lines.append("")
+        lines.append("## Mean +/- SD")
+        lines.append("")
+        for row in stats_rows:
+            label = f"{row['level']} {_split_display(row['split'])} {METRIC_DISPLAY[row['metric']]}"
+            lines.append(f"- {label}: **{row['formatted']}** (min {row['min']:.4f}, max {row['max']:.4f})")
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def plot_confusion_matrix_from_matrix(
+    cm: np.ndarray,
+    labels: List[str],
+    title: str,
+    out_path: Path,
+    dpi: int,
+    normalize: bool,
+) -> None:
+    targets, preds = [], []
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            count = int(cm[i, j])
+            if count > 0:
+                targets.extend([i] * count)
+                preds.extend([j] * count)
+    if not targets:
+        return
+    plot_confusion_matrix(np.asarray(targets), np.asarray(preds), labels, title, out_path, dpi, normalize=normalize)
+
+
+def _n_classes_from_aggregate(aggregate: dict) -> int:
+    for split_data in aggregate.get("splits", {}).values():
+        for key in ["spectrum_confusion_matrix", "patient_confusion_matrix"]:
+            cm = split_data.get(key)
+            if cm:
+                return len(cm)
+    return 5
+
+
+def _bundle_from_detailed(fold_dirs: List[Path], split: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    probs_list, targets_list, preds_list, pid_list = [], [], [], []
+    for fold_dir in fold_dirs:
+        detailed_path = fold_dir / "detailed_predictions.json"
+        if not detailed_path.exists():
+            continue
+        detailed = _load_json(detailed_path)
+        split_names = [split]
+        if split == "clinical_all":
+            split_names = [name for name in detailed.keys() if "clinical" in name]
+        for split_name in split_names:
+            data = detailed.get(split_name)
+            if not data:
+                continue
+            if data.get("probabilities") is None or data.get("targets") is None:
+                continue
+            probs_list.append(np.asarray(data["probabilities"]))
+            targets_list.append(np.asarray(data["targets"]))
+            preds_list.append(np.asarray(data.get("predictions") or np.asarray(data["probabilities"]).argmax(axis=-1)))
+            pids = data.get("patient_ids")
+            if pids is not None:
+                pid_list.append(np.asarray(pids))
+    if not probs_list:
+        return None
+    probs = np.concatenate(probs_list, axis=0)
+    targets = np.concatenate(targets_list, axis=0)
+    preds = np.concatenate(preds_list, axis=0)
+    pids = np.concatenate(pid_list, axis=0) if pid_list else np.array([])
+    return probs, targets, preds, pids
+
+
+def process_aggregated_cv_results(
+    aggregate_path: Path,
+    fold_dirs: List[Path],
+    labels: List[str],
+    subdirs: Dict[str, Path],
+    out_root: Path,
+    dpi: int,
+) -> List[str]:
+    figures: List[str] = []
+    aggregate = _load_json(aggregate_path)
+    rows = []
+    for split_name, split_data in aggregate.get("splits", {}).items():
+        _add_metric_row(rows, "aggregated", split_name, "Spectrum", split_data.get("spectrum_metrics", {}), split_data.get("spectrum_metrics", {}).get("n_samples"))
+        _add_metric_row(rows, "aggregated", split_name, "Patient", split_data.get("patient_metrics", {}), split_data.get("patient_metrics", {}).get("n_patients"))
+
+        for level, cm_key, stem in [
+            ("Spectrum", "spectrum_confusion_matrix", "spectrum"),
+            ("Patient", "patient_confusion_matrix", "patient"),
+        ]:
+            cm = np.asarray(split_data.get(cm_key) or [])
+            if cm.size == 0:
+                continue
+            for normalize, tag in [(False, "raw"), (True, "normalized")]:
+                path = subdirs["confusion"] / f"clinical_cv_{split_name}_{stem}_{tag}.png"
+                plot_confusion_matrix_from_matrix(
+                    cm,
+                    labels[: cm.shape[0]],
+                    f"Aggregated {_split_display(split_name)} {level}-level",
+                    path,
+                    dpi,
+                    normalize=normalize,
+                )
+                if path.exists():
+                    figures.append(str(path.relative_to(out_root)))
+
+        bundle = _bundle_from_detailed(fold_dirs, split_name)
+        if bundle is not None:
+            probs, targets, preds, pids = bundle
+            roc_path = subdirs["roc"] / f"clinical_cv_roc_{split_name}.png"
+            plot_roc_clean(probs, targets, labels[: probs.shape[1]], f"ROC - Aggregated {_split_display(split_name)}", roc_path, dpi)
+            if roc_path.exists():
+                figures.append(str(roc_path.relative_to(out_root)))
+            if split_name == "clinical_all" and len(pids) == len(targets):
+                patient_preds, patient_targets = _patient_vote_local(probs, targets, pids)
+                for normalize, tag in [(False, "raw"), (True, "normalized")]:
+                    path = subdirs["confusion"] / f"clinical_all_patient_from_probabilities_{tag}.png"
+                    plot_confusion_matrix(patient_targets, patient_preds, labels[: probs.shape[1]], "Clinical All Patient-level", path, dpi, normalize=normalize)
+                    if path.exists():
+                        figures.append(str(path.relative_to(out_root)))
+
+    csv_path = subdirs["summaries"] / "aggregated_cv_metrics.csv"
+    _write_rows_csv(rows, csv_path)
+    if csv_path.exists():
+        figures.append(str(csv_path.relative_to(out_root)))
+
+    report_path = subdirs["summaries"] / "clinical_all_summary.md"
+    write_clinical_all_summary(aggregate, report_path)
+    if report_path.exists():
+        figures.append(str(report_path.relative_to(out_root)))
+    return figures
+
+
+def write_clinical_all_summary(aggregate: dict, out_path: Path) -> None:
+    _ensure_dir(out_path.parent)
+    lines = ["# Aggregated Clinical CV Summary", ""]
+    split_data = aggregate.get("splits", {}).get("clinical_all")
+    if not split_data:
+        lines.append("`clinical_all` was not present in aggregated CV results.")
+    else:
+        for level, key in [("Spectrum", "spectrum_metrics"), ("Patient", "patient_metrics")]:
+            metrics = split_data.get(key, {})
+            lines.append(f"## {level}-level clinical_all")
+            for metric in METRIC_KEYS:
+                value = _metric_value(metrics, metric)
+                if value is not None:
+                    lines.append(f"- {METRIC_DISPLAY[metric]}: **{value:.4f}**")
+            lines.append("")
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_domain_shift_outputs(metric_rows: List[Dict], subdirs: Dict[str, Path], out_root: Path, dpi: int) -> List[str]:
+    figures: List[str] = []
+    splits = {r["split"] for r in metric_rows}
+    required = {"test", "2018clinical", "2019clinical", "clinical_all"}
+    if not required.issubset(splits):
+        return figures
+
+    rows = [r for r in metric_rows if r["split"] in required and r["level"] in ("Spectrum", "Patient")]
+    csv_path = subdirs["ood"] / "domain_shift_summary.csv"
+    _write_rows_csv(rows, csv_path)
+    if csv_path.exists():
+        figures.append(str(csv_path.relative_to(out_root)))
+
+    levels = [level for level in ["Spectrum", "Patient"] if any(r["level"] == level for r in rows)]
+    fig, axes = plt.subplots(1, len(levels), figsize=(7 * len(levels), 5), squeeze=False)
+    split_order = ["test", "2018clinical", "2019clinical", "clinical_all"]
+    for ax, level in zip(axes[0], levels):
+        level_rows = [r for r in rows if r["level"] == level]
+        x = np.arange(len(split_order))
+        width = 0.25
+        for idx, metric in enumerate(["accuracy", "f1_macro", "mcc"]):
+            values = []
+            for split in split_order:
+                match = next((r for r in level_rows if r["split"] == split), None)
+                values.append(match.get(metric, np.nan) if match else np.nan)
+            ax.bar(x + (idx - 1) * width, values, width, label=METRIC_DISPLAY[metric], color=MODEL_COLORS[idx], alpha=0.88, edgecolor="white")
+        ax.set_xticks(x)
+        ax.set_xticklabels([_split_display(s) for s in split_order], rotation=20, ha="right")
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_ylabel("Score")
+        ax.set_title(f"{level}-level domain generalization", fontweight="bold")
+        ax.legend(fontsize=8)
+    fig.suptitle("Stage 3 In-domain vs Clinical Domain Shift", fontsize=14, fontweight="bold", y=1.03)
+    plot_path = subdirs["ood"] / "stage3_domain_shift_comparison.png"
+    _save_fig(fig, plot_path, dpi)
+    if plot_path.exists():
+        figures.append(str(plot_path.relative_to(out_root)))
+
+    report_path = subdirs["ood"] / "domain_shift_interpretation.md"
+    lines = ["# Stage 3 Domain Generalization Interpretation", ""]
+    for level in levels:
+        test_row = next((r for r in rows if r["level"] == level and r["split"] == "test"), None)
+        clinical_row = next((r for r in rows if r["level"] == level and r["split"] == "clinical_all"), None)
+        if not test_row or not clinical_row:
+            continue
+        lines.append(f"## {level}-level")
+        for metric in ["accuracy", "f1_macro", "mcc"]:
+            if metric in test_row and metric in clinical_row:
+                gap = test_row[metric] - clinical_row[metric]
+                lines.append(f"- {METRIC_DISPLAY[metric]} clinical degradation: **{gap:.4f}**")
+        lines.append("")
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    figures.append(str(report_path.relative_to(out_root)))
+    return figures
+
+
+def collect_aggregate_metric_rows(aggregate: dict) -> List[Dict]:
+    rows: List[Dict] = []
+    for split_name, split_data in aggregate.get("splits", {}).items():
+        _add_metric_row(
+            rows,
+            "aggregated",
+            split_name,
+            "Spectrum",
+            split_data.get("spectrum_metrics", {}),
+            split_data.get("spectrum_metrics", {}).get("n_samples"),
+        )
+        _add_metric_row(
+            rows,
+            "aggregated",
+            split_name,
+            "Patient",
+            split_data.get("patient_metrics", {}),
+            split_data.get("patient_metrics", {}).get("n_patients"),
+        )
+    return rows
+
+
+# ============================================================
 # FIGURE 10: PUBLICATION COMPOSITE PANEL
 # ============================================================
 
@@ -965,7 +1501,8 @@ def plot_publication_panel(
     cm_plot = cm.astype(float)
     row_sums = cm_plot.sum(axis=1, keepdims=True)
     row_sums[row_sums == 0] = 1
-    cm_plot = cm_plot / row_sums
+    cm_plot = np.rint((cm_plot / row_sums) * 100).astype(int)
+    cm_annot = np.array([[str(int(v)) for v in row] for row in cm_plot])
 
     cmap_blues = LinearSegmentedColormap.from_list(
         "research_blues",
@@ -975,15 +1512,17 @@ def plot_publication_panel(
         cm_plot,
         ax=ax_cm,
         cmap=cmap_blues,
-        annot=n <= 10,
-        fmt=".2f" if n <= 10 else "",
+        annot=cm_annot if n <= 10 else False,
+        fmt="",
         cbar=True,
+        vmin=0,
+        vmax=100,
         square=True,
         linewidths=0.3 if n <= 10 else 0.1,
         linecolor="#DDDDDD",
         xticklabels=labels,
         yticklabels=labels,
-        annot_kws={"size": max(7, 10 - n // 5)} if n <= 10 else {},
+        annot_kws={"size": max(9, 13 - n // 5), "weight": "bold"} if n <= 10 else {},
     )
     ax_cm.set_xlabel("Predicted", fontweight="bold")
     ax_cm.set_ylabel("True", fontweight="bold")
@@ -1042,21 +1581,25 @@ def plot_publication_panel(
     y_bin = label_binarize(targets, classes=list(range(n)))
     if y_bin.ndim == 1:
         y_bin = np.column_stack([1 - y_bin, y_bin])
-    
-    fpr_micro, tpr_micro, _ = roc_curve(y_bin.ravel(), probs.ravel())
-    auc_micro = auc(fpr_micro, tpr_micro)
-    ax_roc.plot(fpr_micro, tpr_micro,
-                color=PALETTE["primary"], linewidth=2.0,
-                label=f"Micro-avg (AUC = {auc_micro:.2f})")
+    roc_available = probs is not None and probs.ndim == 2 and probs.shape[1] >= n and len(np.unique(targets)) >= 2
+    if roc_available:
+        fpr_micro, tpr_micro, _ = roc_curve(y_bin.ravel(), probs[:, :n].ravel())
+        auc_micro = auc(fpr_micro, tpr_micro)
+        ax_roc.plot(fpr_micro, tpr_micro,
+                    color=PALETTE["primary"], linewidth=2.0,
+                    label=f"Micro-avg (AUC = {auc_micro:.2f})")
+    else:
+        ax_roc.text(0.5, 0.5, "ROC unavailable", ha="center", va="center", fontsize=12)
 
     class_aucs = []
-    for i in range(n):
-        try:
-            fpr_i, tpr_i, _ = roc_curve(y_bin[:, i], probs[:, i])
-            auc_i = auc(fpr_i, tpr_i)
-            class_aucs.append((i, auc_i, fpr_i, tpr_i))
-        except Exception:
-            pass
+    if roc_available:
+        for i in range(n):
+            try:
+                fpr_i, tpr_i, _ = roc_curve(y_bin[:, i], probs[:, i])
+                auc_i = auc(fpr_i, tpr_i)
+                class_aucs.append((i, auc_i, fpr_i, tpr_i))
+            except Exception:
+                pass
 
     if class_aucs:
         macro_auc = np.mean([a[1] for a in class_aucs])
@@ -1082,20 +1625,24 @@ def plot_publication_panel(
     # PANEL D: Precision-Recall Curves
     # ----------------------------------------------------
     ax_pr = fig.add_subplot(gs[1, 1])
-    precision_micro, recall_micro, _ = precision_recall_curve(y_bin.ravel(), probs.ravel())
-    ap_micro = average_precision_score(y_bin, probs, average="micro")
-    ax_pr.plot(recall_micro, precision_micro,
-               color=PALETTE["secondary"], linewidth=2.0,
-               label=f"Micro-avg (AP = {ap_micro:.2f})")
+    if roc_available:
+        precision_micro, recall_micro, _ = precision_recall_curve(y_bin.ravel(), probs[:, :n].ravel())
+        ap_micro = average_precision_score(y_bin, probs[:, :n], average="micro")
+        ax_pr.plot(recall_micro, precision_micro,
+                   color=PALETTE["secondary"], linewidth=2.0,
+                   label=f"Micro-avg (AP = {ap_micro:.2f})")
+    else:
+        ax_pr.text(0.5, 0.5, "PR unavailable", ha="center", va="center", fontsize=12)
 
     class_aps = []
-    for i in range(n):
-        try:
-            p_i, r_i, _ = precision_recall_curve(y_bin[:, i], probs[:, i])
-            ap_i = average_precision_score(y_bin[:, i], probs[:, i])
-            class_aps.append((i, ap_i, r_i, p_i))
-        except Exception:
-            pass
+    if roc_available:
+        for i in range(n):
+            try:
+                p_i, r_i, _ = precision_recall_curve(y_bin[:, i], probs[:, i])
+                ap_i = average_precision_score(y_bin[:, i], probs[:, i])
+                class_aps.append((i, ap_i, r_i, p_i))
+            except Exception:
+                pass
 
     if class_aps:
         macro_ap = np.mean([a[1] for a in class_aps])
@@ -1127,9 +1674,10 @@ def plot_publication_panel(
 def _discover_sibling_experiments(exp_dir: Path) -> List[Dict]:
     """
     Scan sibling directories for comparable experiments.
-    Returns list of {name, accuracy, f1_macro, mcc} dicts.
+    Supports standard experiments and patient-CV aggregate parents.
     """
-    parent = exp_dir.parent
+    own_experiment = exp_dir.parent if exp_dir.name == "analysis" else exp_dir
+    parent = exp_dir.parent.parent if exp_dir.name == "analysis" else exp_dir.parent
     if not parent.exists():
         return []
 
@@ -1137,25 +1685,67 @@ def _discover_sibling_experiments(exp_dir: Path) -> List[Dict]:
     for sibling in parent.iterdir():
         if not sibling.is_dir():
             continue
-        eval_files = list(sibling.glob("*_eval_results.json"))
-        if not eval_files:
+        if sibling.resolve() in {exp_dir.resolve(), own_experiment.resolve()} or sibling.name == "analysis":
+            continue
+        if sibling.name.startswith("fold_") or "_fold" in sibling.name:
             continue
         try:
-            with open(eval_files[0], "r") as f:
-                data = json.load(f)
-            model = data.get("model", sibling.name)
-            test_metrics = data.get("splits", {}).get("test", {}).get("metrics", {})
-            if not test_metrics:
-                # Try summary
-                test_metrics = data.get("summary", {}).get("test", {})
+            aggregate_path = _find_aggregated_results(sibling)
+            if aggregate_path is not None:
+                aggregate = _load_json(aggregate_path)
+                split_data = (
+                    aggregate.get("splits", {}).get("clinical_all")
+                    or aggregate.get("splits", {}).get("test")
+                    or next(iter(aggregate.get("splits", {}).values()), {})
+                )
+                spec = split_data.get("spectrum_metrics", {})
+                pat = split_data.get("patient_metrics", {})
+                if spec:
+                    row = {
+                        "name": _load_config(sibling).get("model", {}).get("name", sibling.name),
+                        "dir": str(sibling),
+                        "accuracy": spec.get("accuracy", 0),
+                        "f1_macro": spec.get("f1_macro", 0),
+                        "mcc": spec.get("mcc", 0),
+                    }
+                    if pat:
+                        row.update({
+                            "patient_accuracy": pat.get("accuracy", 0),
+                            "patient_f1_macro": pat.get("f1_macro", 0),
+                            "patient_mcc": pat.get("mcc", 0),
+                        })
+                    siblings.append(row)
+                    continue
+
+            eval_files = list(sibling.glob("*_eval_results.json"))
+            if not eval_files:
+                eval_files = [p for p in sibling.rglob("*_eval_results.json") if "research_plots" not in str(p)]
+            if not eval_files:
+                continue
+            data = _load_json(eval_files[0])
+            model = data.get("model", _load_config(sibling).get("model", {}).get("name", sibling.name))
+            split_data = (
+                data.get("splits", {}).get("clinical_all")
+                or data.get("splits", {}).get("test")
+                or next(iter(data.get("splits", {}).values()), {})
+            )
+            test_metrics = split_data.get("metrics", {}) or data.get("summary", {}).get("test", {})
+            group_metrics = split_data.get("group_metrics", {})
             if test_metrics:
-                siblings.append({
+                row = {
                     "name": model,
                     "dir": str(sibling),
                     "accuracy": test_metrics.get("accuracy", 0),
                     "f1_macro": test_metrics.get("f1_macro", 0),
                     "mcc": test_metrics.get("mcc", 0),
-                })
+                }
+                if group_metrics:
+                    row.update({
+                        "patient_accuracy": group_metrics.get("accuracy", 0),
+                        "patient_f1_macro": group_metrics.get("f1_macro", 0),
+                        "patient_mcc": group_metrics.get("mcc", 0),
+                    })
+                siblings.append(row)
         except Exception:
             continue
 
@@ -1207,6 +1797,11 @@ def generate_research_plots(
     print(f"{'='*60}")
 
     cfg = _load_config(exp_path)
+    fold_dirs = _discover_fold_dirs(exp_path)
+    fold_names = {d.name for d in fold_dirs}
+    aggregate_path = _find_aggregated_results(exp_path)
+    if not cfg and fold_dirs:
+        cfg = _load_config(fold_dirs[0])
     model_name = cfg.get("model", {}).get("name", exp_path.name)
     stage = cfg.get("task", {}).get("stage", "unknown")
 
@@ -1231,6 +1826,7 @@ def generate_research_plots(
         "summaries":    out_root / "summaries",
         "panels":       out_root / "publication_panels",
         "learning":     out_root / "learning_curves",
+        "crossfold":    out_root / "cross_fold",
     }
     for d in subdirs.values():
         _ensure_dir(d)
@@ -1238,6 +1834,8 @@ def generate_research_plots(
     figures_generated = []
     pred_dir = exp_path / "predictions"
     emb_dir  = exp_path / "embeddings"
+    domain_metric_rows: List[Dict] = []
+    labels_for_aggregate: Optional[List[str]] = None
 
     # --------------------------------------------------------
     # Process each evaluation result file
@@ -1264,63 +1862,78 @@ def generate_research_plots(
             n_classes = len(cm) if cm else 5
 
         labels = _resolve_labels(cfg, n_classes)
-
-        # Metrics CSV
-        csv_path = subdirs["summaries"] / f"metrics_{eval_stage}.csv"
-        write_metrics_csv(results, csv_path)
-        figures_generated.append(str(csv_path.relative_to(out_root)))
+        if labels_for_aggregate is None:
+            labels_for_aggregate = labels
 
         # ---- Per-split figures ----
         splits = list(results.get("splits", {}).keys())
+        artifact_root = eval_path.parent if eval_path.parent != exp_path else exp_path
+        artifact_prefix = f"{artifact_root.name}_" if artifact_root.name in fold_names else ""
+        pred_dir_loop = artifact_root / "predictions"
+        emb_dir_loop = artifact_root / "embeddings"
+
+        # Metrics CSV
+        csv_path = subdirs["summaries"] / f"{artifact_prefix}metrics_{eval_stage}.csv"
+        write_metrics_csv(results, csv_path)
+        if csv_path.exists():
+            figures_generated.append(str(csv_path.relative_to(out_root)))
+
         for split in splits:
             split_data = results["splits"][split]
+            _add_metric_row(domain_metric_rows, artifact_root.name, split, "Spectrum", split_data.get("metrics", {}), split_data.get("n_samples"))
+            if split_data.get("group_metrics"):
+                _add_metric_row(domain_metric_rows, artifact_root.name, split, "Patient", split_data.get("group_metrics", {}), split_data.get("group_metrics", {}).get("n_groups"))
 
             # Try loading prediction arrays
-            preds_bundle = _load_predictions(pred_dir, split)
+            preds_bundle = _load_predictions(pred_dir_loop, split)
             if preds_bundle is not None:
                 logits, probs, targets = preds_bundle
                 preds = probs.argmax(axis=-1)
 
                 # Confusion matrices (normalized + raw)
                 for norm, tag in [(True, "normalized"), (False, "raw")]:
-                    cm_path = subdirs["confusion"] / f"confusion_{split}_{tag}.png"
+                    cm_path = subdirs["confusion"] / f"{artifact_prefix}confusion_{split}_{tag}.png"
                     plot_confusion_matrix(
                         targets, preds, labels,
                         f"{stage_display} — {_split_display(split)}",
                         cm_path, dpi, normalize=norm,
                     )
-                    figures_generated.append(str(cm_path.relative_to(out_root)))
-                    print(f"    [OK] Confusion matrix ({split}, {tag})")
+                    if cm_path.exists():
+                        figures_generated.append(str(cm_path.relative_to(out_root)))
+                        print(f"    [OK] Confusion matrix ({artifact_prefix}{split}, {tag})")
 
                 # Per-class failure heatmap
-                hm_path = subdirs["class"] / f"failure_heatmap_{split}.png"
+                hm_path = subdirs["class"] / f"{artifact_prefix}failure_heatmap_{split}.png"
                 plot_failure_heatmap(
                     targets, preds, labels,
                     f"{stage_display} — {_split_display(split)}",
                     hm_path, dpi,
                 )
-                figures_generated.append(str(hm_path.relative_to(out_root)))
-                print(f"    [OK] Failure heatmap ({split})")
+                if hm_path.exists():
+                    figures_generated.append(str(hm_path.relative_to(out_root)))
+                    print(f"    [OK] Failure heatmap ({artifact_prefix}{split})")
 
                 # Clean ROC
-                roc_path = subdirs["roc"] / f"roc_{split}.png"
+                roc_path = subdirs["roc"] / f"{artifact_prefix}roc_{split}.png"
                 plot_roc_clean(
                     probs, targets, labels,
                     f"ROC — {stage_display} — {_split_display(split)}",
                     roc_path, dpi,
                 )
-                figures_generated.append(str(roc_path.relative_to(out_root)))
-                print(f"    [OK] ROC curve ({split})")
+                if roc_path.exists():
+                    figures_generated.append(str(roc_path.relative_to(out_root)))
+                    print(f"    [OK] ROC curve ({artifact_prefix}{split})")
 
                 # Publication panel composite
-                panel_path = subdirs["panels"] / f"publication_panel_{split}.png"
+                panel_path = subdirs["panels"] / f"{artifact_prefix}publication_panel_{split}.png"
                 plot_publication_panel(
                     targets, preds, probs, labels,
                     f"Composite Analysis — {stage_display} — {_split_display(split)}",
                     panel_path, dpi,
                 )
-                figures_generated.append(str(panel_path.relative_to(out_root)))
-                print(f"    [OK] Publication panel ({split})")
+                if panel_path.exists():
+                    figures_generated.append(str(panel_path.relative_to(out_root)))
+                    print(f"    [OK] Publication panel ({artifact_prefix}{split})")
 
             # Grouped confusion from eval results
             group_metrics = split_data.get("group_metrics", {})
@@ -1329,46 +1942,50 @@ def generate_research_plots(
                 g_tgts = np.array(group_metrics["targets"])
                 g_preds = np.array(group_metrics["predictions"])
                 if len(g_tgts) > 0:
-                    gcm_path = subdirs["confusion"] / f"grouped_confusion_{split}_normalized.png"
+                    gcm_path = subdirs["confusion"] / f"{artifact_prefix}grouped_confusion_{split}_normalized.png"
                     plot_confusion_matrix(
                         g_tgts, g_preds, group_labels,
                         f"{stage_display} — {_split_display(split)} (Grouped)",
                         gcm_path, dpi, normalize=True,
                     )
-                    figures_generated.append(str(gcm_path.relative_to(out_root)))
-                    print(f"    [OK] Grouped confusion matrix ({split})")
+                    if gcm_path.exists():
+                        figures_generated.append(str(gcm_path.relative_to(out_root)))
+                        print(f"    [OK] Grouped confusion matrix ({artifact_prefix}{split})")
 
             # Embeddings (optional)
             if embeddings:
-                emb_data = _load_embeddings(emb_dir, split)
+                emb_data = _load_embeddings(emb_dir_loop, split)
                 if emb_data is not None:
                     features, emb_targets = emb_data
-                    tsne_path = subdirs["embeddings"] / f"tsne_{split}.png"
+                    tsne_path = subdirs["embeddings"] / f"{artifact_prefix}tsne_{split}.png"
                     plot_embedding_tsne(
                         features, emb_targets, labels,
                         f"{stage_display} — {_split_display(split)}",
                         tsne_path, dpi,
                     )
-                    figures_generated.append(str(tsne_path.relative_to(out_root)))
-                    print(f"    [OK] t-SNE embedding ({split})")
+                    if tsne_path.exists():
+                        figures_generated.append(str(tsne_path.relative_to(out_root)))
+                        print(f"    [OK] t-SNE embedding ({artifact_prefix}{split})")
 
         # ---- Cross-split figures ----
 
         # Grouped vs Spectrum
-        grp_path = subdirs["grouped"] / f"grouped_vs_spectrum_{eval_stage}.png"
+        grp_path = subdirs["grouped"] / f"{artifact_prefix}grouped_vs_spectrum_{eval_stage}.png"
         plot_grouped_vs_spectrum(results, stage_display, grp_path, dpi)
-        figures_generated.append(str(grp_path.relative_to(out_root)))
-        print(f"    [OK] Grouped vs Spectrum")
+        if grp_path.exists():
+            figures_generated.append(str(grp_path.relative_to(out_root)))
+            print(f"    [OK] Grouped vs Spectrum")
 
         # OOD Degradation
-        ood_path = subdirs["ood"] / f"ood_degradation_{eval_stage}.png"
+        ood_path = subdirs["ood"] / f"{artifact_prefix}ood_degradation_{eval_stage}.png"
         plot_ood_degradation(results, stage_display, ood_path, dpi)
-        figures_generated.append(str(ood_path.relative_to(out_root)))
-        print(f"    [OK] OOD Degradation")
+        if ood_path.exists():
+            figures_generated.append(str(ood_path.relative_to(out_root)))
+            print(f"    [OK] OOD Degradation")
 
         # Collect stage summary for stage-transition plot
         test_metrics = results.get("splits", {}).get("test", {}).get("metrics", {})
-        if test_metrics:
+        if test_metrics and artifact_root == exp_path:
             stage_summaries.append({
                 "stage": eval_stage,
                 "display": stage_display,
@@ -1380,16 +1997,76 @@ def generate_research_plots(
     if len(stage_summaries) >= 2:
         trans_path = subdirs["stages"] / "stage_transition.png"
         plot_stage_transition(stage_summaries, trans_path, dpi)
-        figures_generated.append(str(trans_path.relative_to(out_root)))
-        print(f"\n    [OK] Stage transition comparison")
+        if trans_path.exists():
+            figures_generated.append(str(trans_path.relative_to(out_root)))
+            print(f"\n    [OK] Stage transition comparison")
+
+    # ---- Patient-CV fold-wise analysis ----
+    if fold_dirs:
+        print(f"\n  Patient-CV detected: {len(fold_dirs)} folds")
+        fold_metric_rows = collect_fold_metric_rows(fold_dirs)
+        domain_metric_rows.extend(fold_metric_rows)
+
+        fold_csv = subdirs["crossfold"] / "fold_metrics_summary.csv"
+        _write_rows_csv(fold_metric_rows, fold_csv)
+        if fold_csv.exists():
+            figures_generated.append(str(fold_csv.relative_to(out_root)))
+
+        stats_rows = compute_cross_fold_stats(fold_metric_rows)
+        stats_csv = subdirs["crossfold"] / "cross_fold_statistics.csv"
+        _write_rows_csv(stats_rows, stats_csv)
+        if stats_csv.exists():
+            figures_generated.append(str(stats_csv.relative_to(out_root)))
+
+        for metric, stem in [("accuracy", "accuracy"), ("f1_macro", "macro_f1"), ("mcc", "mcc")]:
+            for level, level_stem in [("Spectrum", "spectrum"), ("Patient", "patient")]:
+                path = subdirs["crossfold"] / f"fold_{level_stem}_{stem}_comparison.png"
+                plot_fold_metric_comparison(fold_metric_rows, metric, level, path, dpi)
+                if path.exists():
+                    figures_generated.append(str(path.relative_to(out_root)))
+                    print(f"    [OK] Fold {level.lower()} {METRIC_DISPLAY[metric]} comparison")
+
+        stats_plot = subdirs["crossfold"] / "cross_fold_mean_std.png"
+        plot_cross_fold_statistics(stats_rows, stats_plot, dpi)
+        if stats_plot.exists():
+            figures_generated.append(str(stats_plot.relative_to(out_root)))
+
+        report_path = subdirs["crossfold"] / "cross_fold_summary.md"
+        write_cross_fold_report(fold_metric_rows, stats_rows, report_path)
+        if report_path.exists():
+            figures_generated.append(str(report_path.relative_to(out_root)))
+
+    # ---- Aggregated CV / clinical_all outputs ----
+    if aggregate_path is not None:
+        aggregate = _load_json(aggregate_path)
+        if labels_for_aggregate is None:
+            labels_for_aggregate = _resolve_labels(cfg, _n_classes_from_aggregate(aggregate))
+        aggregate_rows = collect_aggregate_metric_rows(aggregate)
+        domain_metric_rows = [r for r in domain_metric_rows if r.get("fold") != "aggregated"] + aggregate_rows
+        figures_generated.extend(process_aggregated_cv_results(
+            aggregate_path,
+            fold_dirs,
+            labels_for_aggregate,
+            subdirs,
+            out_root,
+            dpi,
+        ))
+        print(f"    [OK] Aggregated CV outputs")
+
+    # ---- Stage-3 domain generalization outputs ----
+    domain_figs = write_domain_shift_outputs(domain_metric_rows, subdirs, out_root, dpi)
+    if domain_figs:
+        figures_generated.extend(domain_figs)
+        print(f"    [OK] Stage 3 domain-shift analysis")
 
     # ---- Model comparison (sibling discovery) ----
     siblings = _discover_sibling_experiments(exp_path)
     if len(siblings) >= 2:
         comp_path = subdirs["models"] / "model_comparison_test.png"
         plot_model_comparison(siblings, "test", comp_path, dpi)
-        figures_generated.append(str(comp_path.relative_to(out_root)))
-        print(f"    [OK] Model comparison ({len(siblings)} architectures)")
+        if comp_path.exists():
+            figures_generated.append(str(comp_path.relative_to(out_root)))
+            print(f"    [OK] Model comparison ({len(siblings)} architectures)")
 
     # ---- Learning curves ----
     metrics_json = exp_path / "metrics.json"
@@ -1400,8 +2077,9 @@ def generate_research_plots(
             subdirs["learning"],
             dpi,
         )
-        figures_generated.append("learning_curves/learning_curves.png")
-        print(f"    [OK] Learning curves")
+        if (subdirs["learning"] / "learning_curves.png").exists():
+            figures_generated.append("learning_curves/learning_curves.png")
+            print(f"    [OK] Learning curves")
 
     # ---- Summary report ----
     summary_path = subdirs["summaries"] / "visualization_report.md"

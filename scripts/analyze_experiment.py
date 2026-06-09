@@ -40,6 +40,10 @@ class DiscoveryResult:
     checkpoints: List[Path]
     has_predictions: bool
     has_embeddings: bool
+    has_patient_cv: bool
+    fold_dirs: List[Path]
+    aggregate_results: Optional[Path]
+    has_clinical_all: bool
     available_splits: List[str]
 
 
@@ -75,11 +79,24 @@ class CheckpointResolver:
 
 class ArtifactExporter:
     @staticmethod
+    def _copy_optional_file(source_dir: Path, dest_dir: Path, name: str) -> None:
+        source = source_dir / name
+        if source.exists():
+            shutil.copy2(source, dest_dir / name)
+
+    @staticmethod
+    def _copy_optional_tree(source_dir: Path, dest_dir: Path, name: str) -> None:
+        source = source_dir / name
+        if source.exists():
+            shutil.copytree(source, dest_dir / name, dirs_exist_ok=True)
+
+    @staticmethod
     def copy_inputs(
         exp_dir: Path,
         analysis_dir: Path,
         eval_results: List[Path],
         synthetic_config: Optional[Dict] = None,
+        fold_dirs: Optional[List[Path]] = None,
     ) -> None:
         analysis_dir.mkdir(parents=True, exist_ok=True)
         for subdir in ["predictions", "embeddings"]:
@@ -95,6 +112,11 @@ class ArtifactExporter:
             if source.exists():
                 shutil.copy2(source, analysis_dir / source.name)
 
+        for artifact_name in ["aggregated_cv_results.json", "detailed_predictions.json"]:
+            source = exp_dir / artifact_name
+            if source.exists():
+                shutil.copy2(source, analysis_dir / artifact_name)
+
         if synthetic_config is not None and not (analysis_dir / "config.json").exists():
             (analysis_dir / "config.json").write_text(json.dumps(synthetic_config, indent=2), encoding="utf-8")
 
@@ -104,6 +126,22 @@ class ArtifactExporter:
             source = exp_dir / cm_dir
             if source.exists():
                 shutil.copytree(source, analysis_dir / cm_dir, dirs_exist_ok=True)
+
+        for fold_dir in fold_dirs or []:
+            dest = analysis_dir / fold_dir.name
+            dest.mkdir(parents=True, exist_ok=True)
+            for name in [
+                "config.yaml",
+                "config.json",
+                "metrics.json",
+                "summary.json",
+                "detailed_predictions.json",
+            ]:
+                ArtifactExporter._copy_optional_file(fold_dir, dest, name)
+            for path in sorted(fold_dir.glob("*_eval_results.json")):
+                shutil.copy2(path, dest / path.name)
+            for subdir in ["predictions", "embeddings", "confusion_matrices"]:
+                ArtifactExporter._copy_optional_tree(fold_dir, dest, subdir)
 
     @staticmethod
     def trim_temporary_inputs(analysis_dir: Path) -> None:
@@ -135,19 +173,24 @@ class ReportGenerator:
         lines.append(f"- Checkpoints: {len(discovery.checkpoints)}")
         lines.append(f"- Predictions present: {discovery.has_predictions}")
         lines.append(f"- Embeddings present: {discovery.has_embeddings}")
+        lines.append(f"- Patient-CV detected: {discovery.has_patient_cv}")
+        if discovery.fold_dirs:
+            lines.append(f"- CV folds: {', '.join(p.name for p in discovery.fold_dirs)}")
+        lines.append(f"- Aggregated CV results: {discovery.aggregate_results.name if discovery.aggregate_results else 'none'}")
+        lines.append(f"- clinical_all present: {discovery.has_clinical_all}")
         lines.append(f"- Splits: {', '.join(discovery.available_splits) if discovery.available_splits else 'none'}")
         lines.append("")
         lines.append("## Key metrics")
         for split_name, split_data in results.get("splits", {}).items():
-            metrics = split_data.get("metrics", {})
-            group_metrics = split_data.get("group_metrics", {})
+            metrics = split_data.get("metrics", split_data.get("spectrum_metrics", {}))
+            group_metrics = split_data.get("group_metrics", split_data.get("patient_metrics", {}))
             lines.append(f"### {split_name}")
             lines.append(f"- Accuracy: {metrics.get('accuracy', 'n/a')}")
             lines.append(f"- Macro F1: {metrics.get('f1_macro', 'n/a')}")
             lines.append(f"- MCC: {metrics.get('mcc', 'n/a')}")
             if group_metrics:
-                lines.append(f"- Grouped Accuracy: {group_metrics.get('accuracy', 'n/a')}")
-                lines.append(f"- Grouped Macro F1: {group_metrics.get('f1_macro', 'n/a')}")
+                lines.append(f"- Patient/Grouped Accuracy: {group_metrics.get('accuracy', 'n/a')}")
+                lines.append(f"- Patient/Grouped Macro F1: {group_metrics.get('f1_macro', 'n/a')}")
         lines.append("")
         lines.append("## Output package")
         lines.append(f"- Analysis directory: {analysis_dir}")
@@ -156,6 +199,7 @@ class ReportGenerator:
         lines.append("- Reports: analysis/reports/")
         lines.append("- Embeddings: analysis/embeddings/")
         lines.append("- Comparisons: analysis/comparisons/")
+        lines.append("- Cross-fold outputs: analysis/research_plots/cross_fold/")
         lines.append("")
         lines.append("## Notes")
         lines.append("This run used the audited single-pass evaluation pipeline and staged exports.")
@@ -182,9 +226,22 @@ class ExperimentAnalysisRunner:
     def discover(self) -> DiscoveryResult:
         config = ConfigLoader.load_optional(self.exp_dir)
         eval_results = sorted(self.exp_dir.glob("*_eval_results.json"))
+        fold_dirs = sorted([
+            d for d in self.exp_dir.iterdir()
+            if d.is_dir() and (d.name.startswith("fold_") or "_fold" in d.name)
+        ])
+        has_patient_cv = bool(fold_dirs)
+        if not eval_results and has_patient_cv:
+            eval_results = sorted(path for fold in fold_dirs for path in fold.glob("*_eval_results.json"))
         checkpoints = CheckpointResolver.discover(self.exp_dir)
+        if not checkpoints and has_patient_cv:
+            checkpoints = [ckpt for fold in fold_dirs for ckpt in CheckpointResolver.discover(fold)]
         has_predictions = (self.exp_dir / "predictions").exists()
         has_embeddings = (self.exp_dir / "embeddings").exists()
+        aggregate_results = self.exp_dir / "aggregated_cv_results.json"
+        if not aggregate_results.exists():
+            aggregate_results = None
+        has_clinical_all = False
         available_splits = []
 
         model_name = self.exp_dir.name
@@ -195,6 +252,12 @@ class ExperimentAnalysisRunner:
             stage = config.get("task", {}).get("stage", stage)
             semantic_space = config.get("model", {}).get("semantic_space", semantic_space)
 
+        if config is None and has_patient_cv:
+            for fold_dir in fold_dirs:
+                config = ConfigLoader.load_optional(fold_dir)
+                if config is not None:
+                    break
+
         if eval_results:
             stage = _stage_from_eval_file(eval_results[0])
             with open(eval_results[0], "r", encoding="utf-8") as f:
@@ -204,6 +267,7 @@ class ExperimentAnalysisRunner:
             if first_split is not None:
                 semantic_space = data.get("splits", {}).get(first_split, {}).get("semantic_space", semantic_space)
             available_splits = list(data.get("splits", {}).keys())
+            has_clinical_all = "clinical_all" in available_splits
 
             # Synthesize a minimal config for legacy experiments without a saved
             # config file so the plotting pipeline can still infer labels.
@@ -226,6 +290,13 @@ class ExperimentAnalysisRunner:
                 }
                 config = self.synthetic_config
 
+        if aggregate_results is not None:
+            with open(aggregate_results, "r", encoding="utf-8") as f:
+                aggregate_data = json.load(f)
+            aggregate_splits = list(aggregate_data.get("splits", {}).keys())
+            has_clinical_all = has_clinical_all or "clinical_all" in aggregate_splits
+            available_splits = list(dict.fromkeys(available_splits + aggregate_splits))
+
         if config is None:
             config = {}
 
@@ -240,11 +311,32 @@ class ExperimentAnalysisRunner:
             checkpoints=checkpoints,
             has_predictions=has_predictions,
             has_embeddings=has_embeddings,
+            has_patient_cv=has_patient_cv,
+            fold_dirs=fold_dirs,
+            aggregate_results=aggregate_results,
+            has_clinical_all=has_clinical_all,
             available_splits=available_splits,
         )
         return self.discovery
 
     def evaluate(self) -> Dict:
+        if self.discovery is not None and self.discovery.has_patient_cv:
+            print("[AnalysisRunner] Patient-CV parent detected; packaging fold and aggregate artifacts without re-evaluation.")
+            if self.discovery.aggregate_results is not None:
+                with open(self.discovery.aggregate_results, "r", encoding="utf-8") as f:
+                    aggregate = json.load(f)
+                self.results = {
+                    "model": self.discovery.model_name,
+                    "split_mode": "patient_cv",
+                    "splits": aggregate.get("splits", {}),
+                }
+                return self.results
+            if self.discovery.eval_results:
+                with open(self.discovery.eval_results[0], "r", encoding="utf-8") as f:
+                    self.results = json.load(f)
+                return self.results
+            raise FileNotFoundError("Patient-CV experiment has no fold evaluation JSONs or aggregated_cv_results.json.")
+
         if ConfigLoader.load_optional(self.exp_dir) is None:
             print("[AnalysisRunner] No config file found; packaging existing artifacts without re-evaluation.")
             if self.discovery is not None and self.discovery.eval_results:
@@ -273,6 +365,7 @@ class ExperimentAnalysisRunner:
             self.analysis_dir,
             self.discovery.eval_results,
             synthetic_config=self.synthetic_config,
+            fold_dirs=self.discovery.fold_dirs,
         )
 
     def generate_analysis_package(self) -> None:
