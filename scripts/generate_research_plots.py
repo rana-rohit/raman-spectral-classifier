@@ -455,7 +455,7 @@ def plot_roc_clean(
     if y_bin.ndim == 1:
         y_bin = np.column_stack([1 - y_bin, y_bin])
 
-    fig, ax = plt.subplots(figsize=(8, 7))
+    fig, ax = plt.subplots(figsize=(12, 8))
 
     # Micro-average
     try:
@@ -891,29 +891,53 @@ def plot_embedding_tsne(
 ) -> None:
     """t-SNE 2D projection of latent embeddings."""
     from sklearn.manifold import TSNE
+    from sklearn.metrics import silhouette_score
 
     perplexity = min(30, max(5, len(features) // 10))
     tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, n_iter=1000)
     coords = tsne.fit_transform(features)
+    sil_score = None
+
+    try:
+        sil_score = silhouette_score(features, targets)
+    except Exception:
+        pass
 
     n = len(labels)
     palette = sns.color_palette("husl", n)
 
-    fig, ax = plt.subplots(figsize=(8, 7))
+    fig, ax = plt.subplots(figsize=(12, 8))
     for i, label in enumerate(labels):
         mask = targets == i
         if mask.sum() == 0:
             continue
         ax.scatter(coords[mask, 0], coords[mask, 1],
-                  s=8, label=label, alpha=0.7, color=palette[i])
+                  s=12, label=label, alpha=0.7, color=palette[i])
 
-    ax.set_title(f"t-SNE — {title}", pad=12)
+    if sil_score is not None:
+        ax.set_title(
+            f"t-SNE — {title}\nSilhouette Score = {sil_score:.3f}",
+            pad=12,
+        )
+    else:
+        ax.set_title(
+            f"t-SNE — {title}",
+            pad=12,
+        )
     ax.set_xticks([])
     ax.set_yticks([])
 
-    # Smart legend placement
-    ncol = max(1, n // 8)
-    ax.legend(fontsize=7, ncol=ncol, loc="best", markerscale=2)
+    # Legend outside plot
+    ncol = min(3, max(1, n // 10))
+
+    ax.legend(
+        fontsize=7,
+        ncol=ncol,
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left",
+        borderaxespad=0,
+        markerscale=2,
+    )
 
     _save_fig(fig, out_path, dpi)
 
