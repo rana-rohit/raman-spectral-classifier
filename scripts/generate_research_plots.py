@@ -927,18 +927,17 @@ def plot_embedding_tsne(
     ax.set_xticks([])
     ax.set_yticks([])
 
-    # Legend outside plot
-    ncol = min(3, max(1, n // 10))
-
+    # Legend below plot
+    ncol = min(5, max(3, n // 6))
     ax.legend(
         fontsize=7,
         ncol=ncol,
-        bbox_to_anchor=(1.02, 1),
-        loc="upper left",
-        borderaxespad=0,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.08),
+        frameon=True,
         markerscale=2,
     )
-
+    fig.subplots_adjust(bottom=0.22)
     _save_fig(fig, out_path, dpi)
 
 
