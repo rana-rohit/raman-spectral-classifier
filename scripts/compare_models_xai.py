@@ -902,6 +902,7 @@ def plot_consensus_bar_chart(
     consensus_peaks: list[dict],
     save_path: Path,
     n_models: int,
+    n_patients: int,
     dpi: int = 300,
 ) -> None:
     """
@@ -916,12 +917,15 @@ def plot_consensus_bar_chart(
     if not filtered:
         filtered = consensus_peaks[:20]
 
-    # Sort by wavenumber for display
-    filtered.sort(key=lambda x: x["wavenumber"])
+    # Sort by consensus strength
+    filtered.sort(
+        key=lambda x: (x["frequency"], x["wavenumber"]),
+        reverse=True,
+    )
 
     wavenumbers = [p["wavenumber"] for p in filtered]
     frequencies = [p["frequency"] for p in filtered]
-    labels = [f"{wn:.0f}" for wn in wavenumbers]
+    labels = [f"{wn:.0f} cm⁻¹" for wn in wavenumbers]
 
     # Color gradient based on frequency
     colors = []
@@ -949,7 +953,7 @@ def plot_consensus_bar_chart(
     ax.set_xlabel("Peak Position (cm⁻¹)", fontsize=12, fontweight="bold")
     ax.set_ylabel("Number of Models", fontsize=12, fontweight="bold")
     ax.set_title(
-        "Consensus Raman Peak Frequency Across Deep Learning Architectures",
+        f"Consensus Raman Peaks Across {n_patients} Patients and {n_models} Models",
         fontsize=13,
         fontweight="bold",
         pad=12,
@@ -962,13 +966,15 @@ def plot_consensus_bar_chart(
     ax.legend(loc="upper right", fontsize=9, framealpha=0.9)
 
     # Add frequency labels on bars
-    for bar, freq in zip(bars, frequencies):
+    for bar, wn, freq in zip(bars, wavenumbers, frequencies):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + 0.08,
             f"{freq}/{n_models}",
-            ha="center", va="bottom",
-            fontsize=7, fontweight="bold",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
         )
 
     fig.tight_layout()
@@ -1312,7 +1318,7 @@ def main() -> None:
             writer.writerow([
                 f"{peak['wavenumber']:.1f}",
                 f"{peak['frequency']}/{peak['n_models']}",
-                ", ".join(peak["models"]),
+                ", ".join(sorted(peak["models"])),
             ])
     print(f"\n[OUTPUT 3] Saved: {csv_path}")
 
@@ -1324,6 +1330,7 @@ def main() -> None:
         consensus_peaks=consensus,
         save_path=chart_path,
         n_models=len(STAGE3_EXPERIMENT_NAMES),
+        n_patients=len(selected_patients),
     )
     print(f"[OUTPUT 4] Saved: {chart_path}")
 
