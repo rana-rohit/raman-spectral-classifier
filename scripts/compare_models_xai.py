@@ -499,7 +499,18 @@ def load_model_and_explainer(
         - src.xai.predict_wrapper.build_predict_fn
         - src.xai.lime_explainer.SpectralLimeExplainer
     """
-    cfg = load_config(str(exp_dir / "config.yaml"))
+    fold_dirs = sorted(exp_dir.glob("fold_*"))
+
+    if not fold_dirs:
+        raise FileNotFoundError(
+            f"No fold directories found in {exp_dir}"
+        )
+
+    model_dir = fold_dirs[0]
+
+    print(f"  Using fold directory: {model_dir.name}")
+
+    cfg = load_config(str(model_dir / "config.yaml"))
 
     # Configure for Stage 3 transfer
     task_cfg = cfg["task"]
@@ -511,7 +522,7 @@ def load_model_and_explainer(
     # Build and load model
     model_name = cfg["model"]["name"]
     model = get_model(model_name, cfg)
-    checkpoint = load_best_model(str(exp_dir), model)
+    checkpoint = load_best_model(str(model_dir), model)
 
     # Verify checkpoint stage
     ckpt_stage = checkpoint.get("config", {}).get("task", {}).get("stage")
@@ -1095,7 +1106,16 @@ def main() -> None:
 
     # Load config from the first experiment to get preprocessing settings
     first_exp = experiments[STAGE3_EXPERIMENT_NAMES[0]]
-    cfg = load_config(str(first_exp / "config.yaml"))
+    config_candidates = sorted(first_exp.rglob("config.yaml"))
+
+    if not config_candidates:
+        raise FileNotFoundError(
+            f"No config.yaml found under {first_exp}"
+        )
+
+    cfg = load_config(str(config_candidates[0]))
+
+    print(f"  Using config: {config_candidates[0]}")
 
     # Load reference data
     registry = DataRegistry(data_root="data/raw", cfg=cfg)
