@@ -11,22 +11,7 @@ Works for all stages:
 Works for all splits:
     - IID:     test (reference domain)
     - OOD:     2018clinical, 2019clinical
-
-Usage:
-    python scripts/lime_explain.py --exp-dir experiments/resnet1d_YYYYMMDD \\
-                                   --split test \\
-                                   --per-class 3
-
-    python scripts/lime_explain.py --exp-dir experiments/transfer_run \\
-                                   --split 2018clinical \\
-                                   --per-class 2 \\
-                                   --n-samples 1000
-
-IMPORTANT:
-    This script does NOT modify any existing training, model, dataloader,
-    or evaluation code. It operates purely in read-only inference mode.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -37,7 +22,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-# Ensure project root is on the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.data.preprocessing import SpectralPreprocessor
@@ -61,7 +45,7 @@ from src.xai.xai_visualization import (
 # ================================================================
 
 def _resolve_class_names(cfg: dict, n_classes: int) -> list[str]:
-    """Resolve human-readable class names based on stage."""
+
     stage = cfg.get("task", {}).get("stage", "unknown")
 
     if stage == "pretrain_30class":
@@ -344,7 +328,7 @@ def main() -> None:
     all_explanations_by_class: dict[int, list] = {i: [] for i in range(n_classes)}
 
     unique_labels = np.unique(y_split)
-    # Shuffle indices for diversity
+
     indices = rng.permutation(len(X_split))
 
     for idx in indices:
@@ -368,7 +352,6 @@ def main() -> None:
             label=label,
         )
 
-        # Save individual explanation plot
         safe_name = (
             class_names[label]
             .replace(" ", "_")
@@ -388,14 +371,10 @@ def main() -> None:
         all_explanations_by_class[label].append(explanation)
         class_counts[label] += 1
 
-        # Check if we have enough for all classes
         target_classes = set(unique_labels.tolist()) & set(class_counts.keys())
         if all(class_counts.get(c, 0) >= args.per_class for c in target_classes):
             break
 
-    # --------------------------------------------------------
-    # Generate per-class comparison plots
-    # --------------------------------------------------------
     print("\n[LIME] Generating comparison plots...")
     for label, explanations in all_explanations_by_class.items():
         if len(explanations) < 2:

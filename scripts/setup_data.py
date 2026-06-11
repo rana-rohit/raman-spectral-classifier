@@ -103,7 +103,6 @@ def main():
     print("  Spectral Classifier - Data Pipeline Bootstrap")
     print("=" * 60)
 
-    # ---- Load configs ----
     cfg = load_config(
         "configs/data/splits.yaml",
         "configs/data/preprocessing.yaml",
@@ -117,7 +116,6 @@ def main():
         split_mode=args.split_mode,
     )
 
-    # ---- Task semantics ----
     task_cfg = cfg["task"]
 
     stage = task_cfg["stage"]
@@ -128,7 +126,6 @@ def main():
         [],
     )
 
-    # ---- Build registry and load active splits ----
     print("\n[1/5] Loading semantically active splits from disk...")
     print(f"      Split Mode: {split_mode}")
 
@@ -192,12 +189,10 @@ def main():
     if clinical_sparse_ids is not None:
         print(f"      sparse IDs     : {clinical_sparse_ids}")
 
-    # ---- Fit preprocessor on reference ONLY ----
     print("\n[2/5] Fitting preprocessor on reference split...")
 
     X_ref, _ = registry.get_arrays("reference")
 
-    # Always fit preprocessor on FULL reference set
     preprocessor = SpectralPreprocessor.from_config(
         cfg["preprocessing"]
     )
@@ -215,7 +210,6 @@ def main():
         f"std={X_ref_clean.std():.4f}"
     )
 
-    # ---- Verify transforms on other splits ----
     print("\n[3/5] Verifying transforms across all splits...")
 
     for split_name in active_splits:
@@ -235,7 +229,6 @@ def main():
             f"proc_std={X_proc.std():.4f}"
         )
 
-    # ---- Build augmentation pipeline ----
     print("\n[4/5] Building augmentation pipeline...")
 
     augmentation = AugmentationPipeline.from_config(
@@ -259,7 +252,6 @@ def main():
 
         print(f"      Apply probability: {augmentation.p}")
 
-    # ---- Build all DataLoaders and smoke-test ----
     print(
         "\n[5/5] Building DataLoaders and "
         "smoke-testing batch shapes..."

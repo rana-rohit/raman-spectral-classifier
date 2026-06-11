@@ -154,6 +154,7 @@ def _resolve_labels(cfg: dict, n_classes: int) -> List[str]:
 
     if stage == "pretrain_30class":
         try:
+            # pyrefly: ignore [missing-import]
             from metadata.ontology import ISOLATES
             return [ISOLATES[i]["strain"] for i in range(n_classes)]
         except Exception:

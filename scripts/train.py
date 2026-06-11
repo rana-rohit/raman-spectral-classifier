@@ -62,7 +62,7 @@ def parse_args():
 
 
 def canonicalize_runtime_config(cfg: dict, args) -> dict:
-    """Resolve explicit feature flags into one saved, reproducible config."""
+
     cfg["seed"] = int(args.seed)
     train_cfg = cfg.setdefault("training", {})
     model_cfg = cfg.setdefault("model", {})
@@ -188,7 +188,6 @@ def main():
     cfg = apply_overrides(dict(cfg), args.override)
     cfg = canonicalize_runtime_config(cfg, args)
 
-    # TASK CONFIGURATION
     task_cfg = cfg["task"]
 
     task_name = task_cfg["name"]
@@ -314,10 +313,6 @@ def main():
         registry.load_all()
 
     X_ref, y_ref = registry.get_arrays("reference")
-
-    # Always fit preprocessor on the FULL reference set.
-    # The pretrained backbone learned under this normalization.
-    # Filtering before fitting creates a statistical mismatch.
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
     preprocessor.fit(X_ref)
 
@@ -397,7 +392,6 @@ def main():
         # ----------------------------------------------------
         # PHASE 1: Pure Supervised Contrastive Pretraining
         # ----------------------------------------------------
-        # Disable classifier head influence
         classifier_module = None
         if hasattr(model, "classifier"):
             classifier_module = model.classifier
@@ -423,7 +417,6 @@ def main():
         
         trainable_modules = ["backbone", "projection_head"]
         
-        # Prepare Phase 1 config: pure supervised contrastive loss, classification loss disabled
         p1_cfg = copy.deepcopy(cfg)
         p1_cfg["training"]["supcon"]["enabled"] = True
         p1_cfg["training"]["supcon"]["weight"] = 1.0
@@ -441,7 +434,6 @@ def main():
             trainable_params=trainable_params
         )
         
-        # Separate Phase 1 experiment directory so checkpoints don't collide
         p1_exp_dir = os.path.join(exp_dir, "phase1")
         trainer_p1 = build_trainer(
             model=model,
@@ -453,7 +445,6 @@ def main():
         trainer_p1.is_pure_supcon = True
         trainer_p1.fit()
         
-        # At the end of Phase 1, copy the best representation checkpoint to distinct names
         best_p1_ckpt_path = resolve_best_checkpoint_path(p1_exp_dir)
         os.makedirs(os.path.join(exp_dir, "checkpoints"), exist_ok=True)
         best_rep_path = os.path.join(exp_dir, "checkpoints", "best_representation_model.pt")
@@ -462,7 +453,6 @@ def main():
         shutil.copy2(best_p1_ckpt_path, best_rep_path)
         shutil.copy2(best_p1_ckpt_path, best_supcon_path)
         
-        # Also copy to root exp_dir
         shutil.copy2(best_p1_ckpt_path, os.path.join(exp_dir, "best_representation_model.pt"))
         shutil.copy2(best_p1_ckpt_path, os.path.join(exp_dir, "best_supcon_encoder.pt"))
         
@@ -473,13 +463,11 @@ def main():
         # ----------------------------------------------------
         # PHASE 2: Linear Evaluation / Classifier Training
         # ----------------------------------------------------
-        # Re-initialize model to ensure independent classifier initialization
+
         model = get_model(args.model, cfg)
         
-        # Load the pretrained representation weights (encoder + projection head)
         load_encoder_only(best_rep_path, model)
         
-        # Freeze encoder weights explicitly: requires_grad = False
         classifier_module = None
         if hasattr(model, "classifier"):
             classifier_module = model.classifier
@@ -495,7 +483,6 @@ def main():
                 p.requires_grad = True
             trainable_modules.append("classifier")
             
-        # Bypass or disable the projection head
         model.bypass_projection = True
         
         frozen_params = sum(p.numel() for p in model.parameters() if not p.requires_grad)
@@ -505,7 +492,6 @@ def main():
         if hasattr(model, "domain_classifier") and model.domain_classifier is not None:
             frozen_modules.append("domain_classifier")
             
-        # Prepare Phase 2 config: classification only, contrastive bypassed
         p2_cfg = copy.deepcopy(cfg)
         p2_cfg["training"]["supcon"]["enabled"] = True
         p2_cfg["training"]["supcon"]["weight"] = 0.0
@@ -522,7 +508,6 @@ def main():
             trainable_params=trainable_params
         )
         
-        # Build Phase 2 trainer and train ONLY the classifier
         trainer_p2 = build_trainer(
             model=model,
             loaders=loaders,
@@ -532,11 +517,9 @@ def main():
         )
         trainer_p2.fit()
         
-        # Load the best classifier checkpoint from Phase 2 for downstream evaluation
         load_best_model(exp_dir, model)
         
     else:
-        # Standard joint or non-contrastive training pipeline
         apply_freeze_backbone_policy(model, cfg)
         trainer = build_trainer(
             model=model,

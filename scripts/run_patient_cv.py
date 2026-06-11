@@ -37,7 +37,6 @@ def main():
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     base_name = args.exp_name or f"{args.model}_s3_patient_cv_{timestamp}"
     
-    # We want to keep the folds organized in a single parent directory
     parent_exp_dir = Path(args.exp_dir) / base_name
     parent_exp_dir.mkdir(parents=True, exist_ok=True)
     
