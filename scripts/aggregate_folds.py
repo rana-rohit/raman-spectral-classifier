@@ -222,13 +222,7 @@ def main():
     for fd in fold_data:
         all_splits.update(fd.keys())
     
-    preferred_splits = [
-        "test",
-        "2018clinical",
-        "2019clinical",
-        "clinical_val",
-    ]
-    clinical_splits = sorted([s for s in preferred_splits if s in all_splits])
+    clinical_splits = sorted([s for s in all_splits if "clinical" in s or s == "clinical_val"])
     if not clinical_splits:
         print("No clinical splits found in predictions. Using all splits.")
         clinical_splits = sorted(list(all_splits))
@@ -265,9 +259,7 @@ def main():
                 "fold_name": fold_dirs[fd_idx].name,
             }
             records.append(record)
-
-            if split_name in {"2018clinical", "2019clinical", "clinical_val"}:
-                clinical_all_records.append(record)
+            clinical_all_records.append(record)
 
         if not records:
             print(f"No data found for split {split_name} across folds.")
