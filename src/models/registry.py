@@ -14,16 +14,14 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import torch.nn as nn
-import torch
 
 from src.models.cnn import CNN1D
+from src.models.cnn_transformer import CNNTransformer
+from src.models.inception1d import Inception1D
 from src.models.multitask import MultiHeadSpectralModel
 from src.models.resnet1d import ResNet1D
-from src.models.inception1d import Inception1D
 from src.models.tcn import TCN1D
 from src.models.transformer import SpectralTransformer
-from src.models.cnn_transformer import CNNTransformer
-
 
 MODEL_REGISTRY = {
     "cnn": CNN1D,
@@ -44,9 +42,7 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
 
     model_cls = MODEL_REGISTRY[name]
     model_cfg = cfg.get("model", {})
-    clinical_sparse_ids = (
-        cfg.get("task", {}).get("clinical_sparse_global_ids", [])
-    )
+    clinical_sparse_ids = cfg.get("task", {}).get("clinical_sparse_global_ids", [])
     stage = cfg.get("task", {}).get("stage", "transfer_5class")
 
     n_classes = int(
@@ -55,7 +51,7 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
             len(clinical_sparse_ids) or 5,
         )
     )
-    
+
     # --------------------------------------------------------
     # Transfer-learning semantic integrity
     #
@@ -111,7 +107,7 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
         "semantic_space",
         None,
     )
-   
+
     # --------------------------------------------------------
     # Optional ontology-aware auxiliary head
     #
@@ -123,11 +119,7 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
         aux_cfg = cfg.get("multitask", {}).get("auxiliary_shared_head", {})
     if aux_cfg.get("enabled", False):
         clinical_sparse_ids_aux = aux_cfg.get(
-            "classes",
-            cfg.get("task", {}).get(
-                "clinical_sparse_global_ids",
-                []
-            )
+            "classes", cfg.get("task", {}).get("clinical_sparse_global_ids", [])
         )
         model = MultiHeadSpectralModel(
             backbone=model,
@@ -163,9 +155,9 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
             nn.Linear(model.embedding_dim, projection_dim),
         )
         model.contrastive = True
-        
+
         orig_forward = model.forward
-        
+
         def contrastive_forward(self, *args, **kwargs):
             out = orig_forward(*args, **kwargs)
             if getattr(self, "bypass_projection", False):
@@ -174,20 +166,24 @@ def get_model(name: str, cfg: Dict[str, Any]) -> nn.Module:
                 features = out.get("features")
                 if features is not None:
                     proj = self.projection_head(features)
-                    out["projection_features"] = nn.functional.normalize(proj, p=2, dim=-1)
+                    out["projection_features"] = nn.functional.normalize(
+                        proj, p=2, dim=-1
+                    )
             return out
-            
+
         import functools
         import inspect
         import types
-        
+
         functools.update_wrapper(contrastive_forward, orig_forward)
-        
+
         # Build signature that includes 'self' prepended so it is correctly stripped when bound
         orig_sig = inspect.signature(orig_forward)
-        params = [inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)] + list(orig_sig.parameters.values())
+        params = [
+            inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        ] + list(orig_sig.parameters.values())
         contrastive_forward.__signature__ = inspect.Signature(params)
-        
+
         model.forward = types.MethodType(contrastive_forward, model)
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

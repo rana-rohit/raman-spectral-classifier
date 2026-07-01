@@ -14,24 +14,22 @@ This script does NOT touch the test or clinical splits for training -
 it only inspects their shapes and confirms loading works.
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import argparse
 
-from src.utils.seed import set_seed
-from src.data.registry import DataRegistry
-from src.data.preprocessing import SpectralPreprocessor
 from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
+from src.data.preprocessing import SpectralPreprocessor
+from src.data.registry import DataRegistry
 from src.utils.config import apply_overrides, load_config
-from src.utils.split_modes import (
-    IID_REFERENCE,
-    canonicalize_split_mode_config,
-    resolve_split_mode,
-)
+from src.utils.seed import set_seed
+from src.utils.split_modes import (IID_REFERENCE,
+                                   canonicalize_split_mode_config,
+                                   resolve_split_mode)
 
 
 def parse_args():
@@ -72,27 +70,21 @@ def _active_registry_splits(cfg: dict, registry: DataRegistry) -> list[str]:
     if split_mode != IID_REFERENCE:
         active.append("test")
 
-    include_finetune = (
-        cfg.get("training", {})
-        .get("finetune", {})
-        .get("enabled", False)
-        or cfg.get("data", {}).get("include_finetune_split", False)
-    )
+    include_finetune = cfg.get("training", {}).get("finetune", {}).get(
+        "enabled", False
+    ) or cfg.get("data", {}).get("include_finetune_split", False)
     if include_finetune:
         active.append("finetune")
 
     if stage == "transfer_5class":
         active.extend(registry.ood_split_names())
-    elif (
-        stage == "pretrain_treatment_8class"
-        and cfg.get("evaluation", {}).get("clinical_ood", {}).get("enabled", False)
-    ):
+    elif stage == "pretrain_treatment_8class" and cfg.get("evaluation", {}).get(
+        "clinical_ood", {}
+    ).get("enabled", False):
         active.extend(registry.ood_split_names())
 
     return [
-        split_name
-        for split_name in active
-        if split_name in registry.available_splits()
+        split_name for split_name in active if split_name in registry.available_splits()
     ]
 
 
@@ -153,9 +145,7 @@ def main():
 
     else:
 
-        raise ValueError(
-            f"Unknown setup_data stage: {stage}"
-        )
+        raise ValueError(f"Unknown setup_data stage: {stage}")
 
     # --------------------------------------------------------
     # Semantic-space integrity checks
@@ -171,14 +161,10 @@ def main():
 
     elif stage == "transfer_5class":
 
-        assert (
-            label_space
-            == "sparse_global_treatment_space"
-        )
+        assert label_space == "sparse_global_treatment_space"
 
         assert len(clinical_sparse_ids) == 5, (
-            "transfer_5class must use verified sparse "
-            "global treatment IDs"
+            "transfer_5class must use verified sparse " "global treatment IDs"
         )
 
     print("\n  Semantic configuration")
@@ -193,17 +179,12 @@ def main():
 
     X_ref, _ = registry.get_arrays("reference")
 
-    preprocessor = SpectralPreprocessor.from_config(
-        cfg["preprocessing"]
-    )
+    preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
 
     X_ref_clean = preprocessor.fit_transform(X_ref)
 
     print(f"      {preprocessor}")
-    print(
-        f"      Reference: raw  mean={X_ref.mean():.4f}  "
-        f"std={X_ref.std():.4f}"
-    )
+    print(f"      Reference: raw  mean={X_ref.mean():.4f}  " f"std={X_ref.std():.4f}")
 
     print(
         f"      Reference: proc mean={X_ref_clean.mean():.4f}  "
@@ -231,9 +212,7 @@ def main():
 
     print("\n[4/5] Building augmentation pipeline...")
 
-    augmentation = AugmentationPipeline.from_config(
-        cfg["augmentation"]
-    )
+    augmentation = AugmentationPipeline.from_config(cfg["augmentation"])
 
     if len(augmentation.steps) == 0 or augmentation.p == 0:
         augmentation = None
@@ -245,17 +224,11 @@ def main():
 
     else:
 
-        print(
-            f"      Steps: "
-            f"{[type(s).__name__ for s in augmentation.steps]}"
-        )
+        print(f"      Steps: " f"{[type(s).__name__ for s in augmentation.steps]}")
 
         print(f"      Apply probability: {augmentation.p}")
 
-    print(
-        "\n[5/5] Building DataLoaders and "
-        "smoke-testing batch shapes..."
-    )
+    print("\n[5/5] Building DataLoaders and " "smoke-testing batch shapes...")
 
     cfg["batch_size"] = 256
     cfg["num_workers"] = 0
@@ -270,6 +243,7 @@ def main():
     )
 
     from src.utils.logging import print_split_provenance
+
     print_split_provenance(loaders, cfg, context="setup")
 
     for name, loader in loaders.items():
@@ -280,9 +254,7 @@ def main():
 
                 x_batch, y_batch = next(iter(ood_loader))
 
-                classes = sorted(
-                    set(ood_loader.dataset.y.tolist())
-                )
+                classes = sorted(set(ood_loader.dataset.y.tolist()))
 
                 print(
                     f"      OOD {ood_name:>14s}: "
@@ -300,9 +272,7 @@ def main():
                     assert hasattr(
                         ood_loader.dataset,
                         "inverse_class_map",
-                    ), (
-                        f"{ood_name} missing inverse_class_map"
-                    )
+                    ), f"{ood_name} missing inverse_class_map"
 
                 elif stage == "pretrain_treatment_8class":
 
@@ -315,24 +285,18 @@ def main():
                 if not actual_classes.issubset(expected_classes):
 
                     raise ValueError(
-                        f"OOD split {ood_name} "
-                        f"has invalid classes: {classes}"
+                        f"OOD split {ood_name} " f"has invalid classes: {classes}"
                     )
 
                 if len(actual_classes) < len(expected_classes):
 
-                    print(
-                        f"[WARN] OOD split {ood_name} "
-                        f"missing classes: {classes}"
-                    )
+                    print(f"[WARN] OOD split {ood_name} " f"missing classes: {classes}")
 
         else:
 
             x_batch, y_batch = next(iter(loader))
 
-            classes = sorted(
-                set(loader.dataset.y.tolist())
-            )
+            classes = sorted(set(loader.dataset.y.tolist()))
 
             print(
                 f"      {name:>20s}: "
@@ -357,17 +321,11 @@ def main():
 
             if not actual_classes.issubset(expected_classes):
 
-                raise ValueError(
-                    f"Loader {name} "
-                    f"has invalid classes: {classes}"
-                )
+                raise ValueError(f"Loader {name} " f"has invalid classes: {classes}")
 
             if len(actual_classes) < len(expected_classes):
 
-                print(
-                    f"[WARN] Loader {name} "
-                    f"missing some classes: {classes}"
-                )
+                print(f"[WARN] Loader {name} " f"missing some classes: {classes}")
 
     print("\n[OK] Data pipeline verified. Ready to train.\n")
 

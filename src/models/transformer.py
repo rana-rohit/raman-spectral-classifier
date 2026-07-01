@@ -46,7 +46,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe.unsqueeze(0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.pe[:, :x.size(1), :]
+        x = x + self.pe[:, : x.size(1), :]
         return self.dropout(x)
 
 
@@ -110,9 +110,9 @@ class SpectralTransformer(nn.Module):
     ) -> None:
         super().__init__()
 
-        assert signal_length % patch_size == 0, (
-            f"signal_length ({signal_length}) must be divisible by patch_size ({patch_size})"
-        )
+        assert (
+            signal_length % patch_size == 0
+        ), f"signal_length ({signal_length}) must be divisible by patch_size ({patch_size})"
         self.n_patches = signal_length // patch_size
         self.d_model = d_model
         self.n_layers = n_layers
@@ -127,7 +127,9 @@ class SpectralTransformer(nn.Module):
             self.pos_embedding = nn.Embedding(seq_len, d_model)
             self.pos_dropout = nn.Dropout(dropout)
         else:
-            self.pos_enc = PositionalEncoding(d_model, max_len=seq_len + 10, dropout=dropout)
+            self.pos_enc = PositionalEncoding(
+                d_model, max_len=seq_len + 10, dropout=dropout
+            )
 
         self.layers = nn.ModuleList(
             [

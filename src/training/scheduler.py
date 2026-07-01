@@ -8,13 +8,10 @@ Learning rate schedulers.
 """
 
 import math
+
 import torch
-from torch.optim.lr_scheduler import (
-    CosineAnnealingLR,
-    StepLR,
-    ReduceLROnPlateau,
-    _LRScheduler,
-)
+from torch.optim.lr_scheduler import (CosineAnnealingLR, ReduceLROnPlateau,
+                                      StepLR, _LRScheduler)
 
 
 class WarmupCosineScheduler(_LRScheduler):
@@ -33,8 +30,8 @@ class WarmupCosineScheduler(_LRScheduler):
         last_epoch: int = -1,
     ) -> None:
         self.warmup_epochs = warmup_epochs
-        self.total_epochs  = total_epochs
-        self.eta_min       = eta_min
+        self.total_epochs = total_epochs
+        self.eta_min = eta_min
         super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
@@ -79,7 +76,7 @@ def get_scheduler(name: str, optimizer, cfg: dict):
     elif name == "plateau":
         return ReduceLROnPlateau(
             optimizer,
-            mode="max",                    # We track val accuracy
+            mode="max",  # We track val accuracy
             patience=cfg.get("patience", 5),
             factor=cfg.get("factor", 0.5),
             verbose=True,

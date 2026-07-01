@@ -16,15 +16,12 @@ build DataLoaders — that remains in dataloader.py.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict
 
 import numpy as np
 
-from metadata.patient_ids import (
-    generate_patient_ids,
-    get_unique_patients,
-    patient_to_label,
-)
+from metadata.patient_ids import (generate_patient_ids, get_unique_patients,
+                                  patient_to_label)
 
 
 @dataclass

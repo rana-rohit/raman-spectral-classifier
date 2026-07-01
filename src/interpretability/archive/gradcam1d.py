@@ -59,12 +59,8 @@ class GradCAM1D:
         def save_gradient(module, grad_in, grad_out):
             self._gradients = grad_out[0].detach()
 
-        self._hooks.append(
-            feature_extractor.register_forward_hook(save_activation)
-        )
-        self._hooks.append(
-            feature_extractor.register_full_backward_hook(save_gradient)
-        )
+        self._hooks.append(feature_extractor.register_forward_hook(save_activation))
+        self._hooks.append(feature_extractor.register_full_backward_hook(save_gradient))
 
     def _remove_hooks(self) -> None:
         for h in self._hooks:
@@ -116,7 +112,7 @@ class GradCAM1D:
         score.backward()
 
         # Grad-CAM computation
-        gradients  = self._gradients   # (1, C, T)
+        gradients = self._gradients  # (1, C, T)
         activations = self._activations  # (1, C, T)
 
         if gradients is None or activations is None:
@@ -129,8 +125,8 @@ class GradCAM1D:
         weights = gradients.mean(dim=-1, keepdim=True)  # (1, C, 1)
 
         # Weighted combination of activation maps
-        cam = (weights * activations).sum(dim=1)          # (1, T)
-        cam = F.relu(cam)                                 # Keep only positive influence
+        cam = (weights * activations).sum(dim=1)  # (1, T)
+        cam = F.relu(cam)  # Keep only positive influence
 
         # Normalise to [0, 1]
         cam_min = cam.min()
@@ -141,12 +137,17 @@ class GradCAM1D:
             cam = torch.zeros_like(cam)
 
         # Upsample to original signal length
-        cam = F.interpolate(
-            cam.unsqueeze(0),                              # (1, 1, T)
-            size=signal_length,
-            mode="linear",
-            align_corners=False,
-        ).squeeze().detach().numpy()                       # (L,)
+        cam = (
+            F.interpolate(
+                cam.unsqueeze(0),  # (1, 1, T)
+                size=signal_length,
+                mode="linear",
+                align_corners=False,
+            )
+            .squeeze()
+            .detach()
+            .numpy()
+        )  # (L,)
 
         self._remove_hooks()
         return cam
@@ -163,7 +164,7 @@ class GradCAM1D:
         cams = []
         for i in range(len(X)):
             tc = target_classes[i] if target_classes is not None else None
-            cam = self.compute(X[i:i+1], target_class=tc, signal_length=X.shape[-1])
+            cam = self.compute(X[i : i + 1], target_class=tc, signal_length=X.shape[-1])
             cams.append(cam)
         return np.stack(cams, axis=0)
 

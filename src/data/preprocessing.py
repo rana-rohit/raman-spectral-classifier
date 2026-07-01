@@ -22,14 +22,12 @@ Usage:
 
 from __future__ import annotations
 
-import numpy as np
-from scipy.signal import savgol_filter
 from typing import List, Optional
 
+import numpy as np
+from scipy.signal import savgol_filter
 
-# ============================================================ #
-#  Individual transforms
-# ============================================================ #
+# --- Individual transforms ---
 
 class PerSampleMeanSubtraction:
     """
@@ -190,10 +188,6 @@ class ClipTransform:
         return self.fit(X).transform(X)
 
 
-# ============================================================ #
-#  Pipeline
-# ============================================================ #
-
 # Registry of available transforms
 _TRANSFORM_REGISTRY = {
     "per_sample_mean_subtraction": PerSampleMeanSubtraction,
@@ -246,15 +240,9 @@ class SpectralPreprocessor:
         for t in self.transforms:
             X = t.transform(X)
 
-        # Step 1: normalize
         X_norm = per_sample_normalize(X)
-
-        # Step 2: derivative
         X_deriv = compute_first_derivative(X_norm)
-
-        # Step 3: stack channels
         X = np.stack([X_norm, X_deriv], axis=1)  # (N, 2, L)
-
         return X
 
     def fit_transform(self, X: np.ndarray) -> np.ndarray:
@@ -275,29 +263,3 @@ class SpectralPreprocessor:
         steps = " -> ".join(type(t).__name__ for t in self.transforms)
         return f"SpectralPreprocessor([{steps}])"
     
-class BaselineCorrection:
-    """Asymmetric least squares baseline subtraction."""
-    def __init__(self, lam: float = 1e4, p: float = 0.01, n_iter: int = 10):
-        self.lam = lam
-        self.p = p
-        self.n_iter = n_iter
-
-    def fit(self, X): return self
-
-    def transform(self, X: np.ndarray) -> np.ndarray:
-        from scipy import sparse
-        from scipy.sparse.linalg import spsolve
-        out = np.empty_like(X)
-        L = X.shape[1]
-        D = sparse.diags([1, -2, 1], [0, 1, 2], shape=(L-2, L)).toarray()
-        D = self.lam * D.T @ D
-        for i, sig in enumerate(X):
-            w = np.ones(L)
-            for _ in range(self.n_iter):
-                W = sparse.diags(w)
-                Z = spsolve(W + D, w * sig)
-                w = self.p * (sig > Z) + (1 - self.p) * (sig <= Z)
-            out[i] = sig - Z
-        return out
-
-    def fit_transform(self, X): return self.fit(X).transform(X)

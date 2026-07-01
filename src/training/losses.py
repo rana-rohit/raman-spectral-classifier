@@ -31,8 +31,7 @@ class LabelSmoothingCrossEntropy(nn.Module):
         log_probs = F.log_softmax(logits, dim=-1)
         with torch.no_grad():
             smooth_targets = torch.full_like(
-                log_probs,
-                self.smoothing / max(1, (n_classes - 1))
+                log_probs, self.smoothing / max(1, (n_classes - 1))
             )
             smooth_targets.scatter_(-1, targets.unsqueeze(-1), 1.0 - self.smoothing)
 
@@ -50,6 +49,7 @@ class LabelSmoothingCrossEntropy(nn.Module):
         if self.reduction == "sum":
             return loss.sum()
         return loss
+
 
 def coral_loss(source, target):
     """
@@ -73,7 +73,8 @@ def coral_loss(source, target):
     # Frobenius norm
     loss = torch.mean((cov_s - cov_t) ** 2)
     return loss
-    
+
+
 class FocalLoss(nn.Module):
     def __init__(
         self,
@@ -99,6 +100,7 @@ class FocalLoss(nn.Module):
         if self.reduction == "sum":
             return focal.sum()
         return focal
+
 
 class SupConLoss(nn.Module):
     """
@@ -149,20 +151,21 @@ class SupConLoss(nn.Module):
 
         exp_logits = torch.exp(sim_matrix) * logits_mask
 
-        log_prob = sim_matrix - torch.log(
-            exp_logits.sum(dim=1, keepdim=True) + 1e-8
-        )
-        
+        log_prob = sim_matrix - torch.log(exp_logits.sum(dim=1, keepdim=True) + 1e-8)
+
         # Only compute average over samples that have at least one positive pair in the batch
         mask_pos_count = mask.sum(dim=1)
         pos_mask = mask_pos_count > 0
         if pos_mask.sum() == 0:
             return features.new_tensor(0.0, requires_grad=True)
-            
-        mean_log_prob_pos = (mask * log_prob).sum(dim=1)[pos_mask] / mask_pos_count[pos_mask]
+
+        mean_log_prob_pos = (mask * log_prob).sum(dim=1)[pos_mask] / mask_pos_count[
+            pos_mask
+        ]
         loss = -mean_log_prob_pos.mean()
 
         return loss
+
 
 def consistency_loss(
     logits_a: torch.Tensor,

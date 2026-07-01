@@ -18,7 +18,9 @@ def _is_cbam_key(key: str) -> bool:
     return ".cbam." in key
 
 
-def _warn_cbam_partial_load(missing_keys: list[str], unexpected_keys: list[str]) -> None:
+def _warn_cbam_partial_load(
+    missing_keys: list[str], unexpected_keys: list[str]
+) -> None:
     print("\n[Checkpoint] WARNING: Partial CBAM checkpoint load.")
     if missing_keys:
         print(
@@ -39,7 +41,7 @@ def resolve_pretrained_checkpoint(cfg: Dict, task_cfg: Dict, stage: str) -> tupl
     1. pretrained_checkpoint
     2. pretrained_experiment
     3. legacy fallback (pretrained_exp_dir)
-    
+
     Returns:
         tuple containing (checkpoint_path, source_type, experiment_name)
     """
@@ -47,11 +49,11 @@ def resolve_pretrained_checkpoint(cfg: Dict, task_cfg: Dict, stage: str) -> tupl
     explicit_ckpt = train_cfg.get("pretrained_checkpoint")
     explicit_exp = train_cfg.get("pretrained_experiment")
     legacy_dir = task_cfg.get("pretrained_exp_dir")
-    
+
     source_type = ""
     exp_name = "N/A"
     ckpt_path = ""
-    
+
     if explicit_ckpt:
         source_type = "explicit_checkpoint"
         ckpt_path = str(explicit_ckpt)
@@ -63,7 +65,11 @@ def resolve_pretrained_checkpoint(cfg: Dict, task_cfg: Dict, stage: str) -> tupl
         source_type = "experiment_name"
         exp_name = str(explicit_exp)
         # resolve the experiment directory, usually under experiments/ unless it's an absolute path
-        exp_dir = exp_name if os.path.isabs(exp_name) else os.path.join("experiments", exp_name)
+        exp_dir = (
+            exp_name
+            if os.path.isabs(exp_name)
+            else os.path.join("experiments", exp_name)
+        )
         if not os.path.isdir(exp_dir):
             raise FileNotFoundError(
                 f"Requested pretrained_experiment='{exp_name}' but directory '{exp_dir}' was not found."
@@ -96,6 +102,7 @@ def resolve_pretrained_checkpoint(cfg: Dict, task_cfg: Dict, stage: str) -> tupl
     print("======================")
 
     return ckpt_path, source_type, exp_name
+
 
 def load_backbone_weights(
     path: str,
@@ -145,13 +152,13 @@ def load_backbone_weights(
     model.load_state_dict(current_state)
 
     missing_cbam_keys = [
-        key for key in current_state
-        if _is_cbam_key(key) and key not in filtered_state
+        key for key in current_state if _is_cbam_key(key) and key not in filtered_state
     ]
     if missing_cbam_keys:
         _warn_cbam_partial_load(missing_cbam_keys, [])
 
     return checkpoint
+
 
 def save_checkpoint(
     path: str,
@@ -169,23 +176,20 @@ def save_checkpoint(
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     checkpoint = {
-        "epoch":           epoch,
-        "model_state":     model.state_dict(),
+        "epoch": epoch,
+        "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
-        "metrics":         metrics,
-        "best_metric_name": config.get("training", {}).get("monitor_metric", "f1_macro"),
-        "config":          config,
-        "n_parameters": sum(
-            p.numel() for p in model.parameters()
-            if p.requires_grad
+        "metrics": metrics,
+        "best_metric_name": config.get("training", {}).get(
+            "monitor_metric", "f1_macro"
         ),
+        "config": config,
+        "n_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
         "stage": config.get("task", {}).get("stage"),
         "label_space": config.get(
             "task",
             {},
-        ).get(
-            "label_space"
-        ),
+        ).get("label_space"),
         "ontology_version": config.get(
             "ontology_version",
             "unknown",
@@ -241,7 +245,7 @@ def load_checkpoint(
     Returns the full checkpoint dict so caller can access metrics/config.
     """
     checkpoint = torch.load(path, map_location=device, weights_only=False)
-    
+
     if "semantic_space" in checkpoint:
         checkpoint_space = checkpoint["semantic_space"]
         model_space = getattr(
@@ -259,10 +263,10 @@ def load_checkpoint(
                 "Checkpoint semantic space mismatch: "
                 f"{checkpoint_space} vs {model_space}"
             )
-            
+
     checkpoint_state = checkpoint["model_state"]
     model_state = model.state_dict()
-    
+
     # Assert embedding dimension and n_classes match precisely if strict
     for key, param in model_state.items():
         if key in checkpoint_state:
@@ -271,20 +275,14 @@ def load_checkpoint(
                 f"checkpoint={checkpoint_state[key].shape}, "
                 f"model={param.shape}"
             )
-    
+
     if "n_classes" in checkpoint:
         assert checkpoint["n_classes"] == model.classifier[-1].out_features, (
             f"Checkpoint n_classes={checkpoint['n_classes']} "
             f"!= model n_classes={model.classifier[-1].out_features}"
         )
-    missing_keys = [
-        key for key in model_state
-        if key not in checkpoint_state
-    ]
-    unexpected_keys = [
-        key for key in checkpoint_state
-        if key not in model_state
-    ]
+    missing_keys = [key for key in model_state if key not in checkpoint_state]
+    unexpected_keys = [key for key in checkpoint_state if key not in model_state]
     has_key_mismatch = bool(missing_keys or unexpected_keys)
 
     if has_key_mismatch and all(
@@ -301,10 +299,15 @@ def load_checkpoint(
         try:
             model.load_state_dict(checkpoint_state)
         except RuntimeError as e:
-            print("\n[Checkpoint] WARNING: strict load failed, attempting non-strict load.\n", e)
+            print(
+                "\n[Checkpoint] WARNING: strict load failed, attempting non-strict load.\n",
+                e,
+            )
             model.load_state_dict(checkpoint_state, strict=False)
             if optimizer is not None and "optimizer_state" in checkpoint:
-                print("[Checkpoint] WARNING: Loaded model with non-strict state; optimizer state may be incompatible.")
+                print(
+                    "[Checkpoint] WARNING: Loaded model with non-strict state; optimizer state may be incompatible."
+                )
         if optimizer is not None and "optimizer_state" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state"])
     return checkpoint
@@ -330,49 +333,52 @@ def load_encoder_only(
     Ensures classifier initializes independently.
     """
     path_obj = Path(path)
-    checkpoint_path = str(path_obj) if path_obj.is_file() else resolve_best_checkpoint_path(path)
-    
+    checkpoint_path = (
+        str(path_obj) if path_obj.is_file() else resolve_best_checkpoint_path(path)
+    )
+
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     pretrained_state = checkpoint["model_state"]
     current_state = model.state_dict()
-    
+
     loaded_keys = []
     skipped_keys = []
     shape_mismatch_keys = []
-    
+
     filtered_state = {}
     for key, value in pretrained_state.items():
         # Skip classifier layers to ensure independent initialization
         if key.startswith("classifier") or "classifier" in key:
             skipped_keys.append(key)
             continue
-            
+
         if key not in current_state:
             skipped_keys.append(key)
             continue
-            
+
         if current_state[key].shape != value.shape:
             shape_mismatch_keys.append((key, value.shape, current_state[key].shape))
             continue
-            
+
         filtered_state[key] = value
         loaded_keys.append(key)
-        
+
     current_state.update(filtered_state)
     model.load_state_dict(current_state)
 
     missing_cbam_keys = [
-        key for key in current_state
-        if _is_cbam_key(key) and key not in filtered_state
+        key for key in current_state if _is_cbam_key(key) and key not in filtered_state
     ]
     if missing_cbam_keys:
         _warn_cbam_partial_load(missing_cbam_keys, [])
-    
+
     print(f"\n[Checkpoint] Loaded encoder weights from: {checkpoint_path}")
     print(f"[Checkpoint] Loaded keys count:   {len(loaded_keys)}")
-    print(f"[Checkpoint] Skipped keys count:  {len(skipped_keys)} (including classifier head)")
+    print(
+        f"[Checkpoint] Skipped keys count:  {len(skipped_keys)} (including classifier head)"
+    )
     if shape_mismatch_keys:
         print(f"[Checkpoint] Shape mismatch keys: {shape_mismatch_keys}")
     print()
-    
+
     return checkpoint

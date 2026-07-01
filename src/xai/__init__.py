@@ -5,12 +5,14 @@ Project-wide explainability (XAI) interface.
 Exposes saliency methods, prediction wrappers, LIME explainers, and visualizations.
 """
 
-from src.xai.saliency import compute_saliency, compute_smoothgrad
 from src.xai.predict_wrapper import SpectralPredictWrapper, build_predict_fn
-from src.xai.xai_visualization import plot_lime_explanation, plot_lime_comparison
+from src.xai.saliency import compute_saliency, compute_smoothgrad
+from src.xai.xai_visualization import (plot_lime_comparison,
+                                       plot_lime_explanation)
 
 try:
-    from src.xai.lime_explainer import SpectralLimeExplainer, SpectralLimeExplanation
+    from src.xai.lime_explainer import (SpectralLimeExplainer,
+                                        SpectralLimeExplanation)
 except ImportError:
     SpectralLimeExplainer = None
     SpectralLimeExplanation = None

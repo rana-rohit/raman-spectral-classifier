@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import confusion_matrix
-
 
 # --------------------------------------------------------
 # Generate publication-style confusion matrix heatmaps.
@@ -49,11 +49,7 @@ def save_confusion_matrix_figure(
     predictions = np.asarray(predictions)
 
     cm = confusion_matrix(
-        targets,
-        predictions,
-        labels=np.unique(
-            np.concatenate([targets, predictions])
-        )
+        targets, predictions, labels=np.unique(np.concatenate([targets, predictions]))
     )
 
     if normalize:
@@ -62,9 +58,7 @@ def save_confusion_matrix_figure(
         row_sums[row_sums == 0] = 1
         cm = cm / row_sums
 
-    fig, ax = plt.subplots(
-        figsize=(10, 9)
-    )
+    fig, ax = plt.subplots(figsize=(10, 9))
     fig.patch.set_facecolor("white")
 
     im = ax.imshow(
@@ -72,7 +66,7 @@ def save_confusion_matrix_figure(
         interpolation="nearest",
         cmap="Blues",
     )
-    
+
     ax.set_xticks(
         np.arange(-0.5, len(class_labels), 1),
         minor=True,
@@ -144,11 +138,7 @@ def save_confusion_matrix_figure(
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
 
-            value = (
-                f"{cm[i, j]*100:.0f}"
-                if normalize
-                else str(int(cm[i, j]))
-            )
+            value = f"{cm[i, j]*100:.0f}" if normalize else str(int(cm[i, j]))
             if cm[i, j] == 0:
                 continue
             ax.text(

@@ -62,7 +62,9 @@ class InceptionBlock(nn.Module):
         self.use_residual = use_residual
         if use_residual:
             if in_channels != out_channels:
-                self.shortcut = nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=False)
+                self.shortcut = nn.Conv1d(
+                    in_channels, out_channels, kernel_size=1, bias=False
+                )
             else:
                 self.shortcut = nn.Identity()
         else:
@@ -181,7 +183,9 @@ class Inception1D(nn.Module):
     def _init_weights(self) -> None:
         for module in self.modules():
             if isinstance(module, nn.Conv1d):
-                nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+                nn.init.kaiming_normal_(
+                    module.weight, mode="fan_out", nonlinearity="relu"
+                )
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
             elif isinstance(module, nn.BatchNorm1d):

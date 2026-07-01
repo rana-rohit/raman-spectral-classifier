@@ -20,8 +20,6 @@ IMPORTANT:
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -102,9 +100,9 @@ class SpectralPredictWrapper:
 
         for start in range(0, n_samples, self.batch_size):
             end = min(start + self.batch_size, n_samples)
-            batch = torch.from_numpy(
-                X_processed[start:end].astype(np.float32)
-            ).to(self.device)
+            batch = torch.from_numpy(X_processed[start:end].astype(np.float32)).to(
+                self.device
+            )
 
             outputs = self.model(batch)
 

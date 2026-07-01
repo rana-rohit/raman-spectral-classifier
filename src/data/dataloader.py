@@ -15,21 +15,13 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.data.preprocessing import SpectralPreprocessor
 from src.data.dataset import SpectralDataset
+from src.data.preprocessing import SpectralPreprocessor
 from src.data.registry import DataRegistry
-from src.utils.split_modes import (
-    HOLDOUT,
-    IID_REFERENCE,
-    PATIENT_CV,
-    resolve_iid_reference_split_config,
-    resolve_split_mode,
-)
-from src.utils.class_subset import (
-    class_maps,
-    filter_and_remap_classes,
-)
-
+from src.utils.class_subset import class_maps, filter_and_remap_classes
+from src.utils.split_modes import (HOLDOUT, IID_REFERENCE, PATIENT_CV,
+                                   resolve_iid_reference_split_config,
+                                   resolve_split_mode)
 
 
 def build_all_loaders(
@@ -73,7 +65,6 @@ def build_all_loaders(
     if train_views not in (1, 2):
         raise ValueError("train_views must be 1 or 2")
 
-    source_batch_size = batch_size
     # Clinical train loader uses the same batch size as source by default.
     clinical_train_batch_size = batch_size
 
@@ -219,7 +210,8 @@ def build_all_loaders(
     loaders["ood"] = {}
     if clinical_enabled:
         if split_mode == PATIENT_CV:
-            from src.data.patient_cv import build_patient_folds, get_fold_indices
+            from src.data.patient_cv import (build_patient_folds,
+                                             get_fold_indices)
 
             patient_cv_cfg = cfg.get("validation", {}).get("patient_cv", {})
             n_patient_folds = int(patient_cv_cfg.get("n_folds", 5))

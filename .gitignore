@@ -37,3 +37,16 @@ Thumbs.db
 
 # Colab-specific
 *.ipynb_checkpoints/
+# Missing Entries added for Release
+logs/
+wandb/
+runs/
+tensorboard/
+experiments/*/checkpoints/
+*.pt
+*.pth
+temp_figures/
+.DS_Store
+.vscode/
+.idea/
+

@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, MutableMapping
 
-
 HOLDOUT = "holdout"
 IID_REFERENCE = "iid_reference"
 PATIENT_CV = "patient_cv"
@@ -68,7 +67,9 @@ def canonicalize_split_mode_config(
     return mode
 
 
-def resolve_iid_reference_split_config(cfg: Mapping[str, Any]) -> IIDReferenceSplitConfig:
+def resolve_iid_reference_split_config(
+    cfg: Mapping[str, Any],
+) -> IIDReferenceSplitConfig:
     """Resolve group-aware IID reference split settings."""
     validation_cfg = cfg.get("validation", {}) or {}
     iid_cfg = validation_cfg.get("iid_reference", {}) or {}

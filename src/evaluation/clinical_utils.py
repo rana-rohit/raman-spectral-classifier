@@ -6,7 +6,6 @@ import torch
 
 from src.utils.class_subset import prepare_subset_eval_logits
 
-
 DEFAULT_CLINICAL_CLASSES = (0, 2, 3, 5, 6)
 
 

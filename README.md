@@ -1,119 +1,105 @@
-# Raman Spectral Classification System
+# Explainable AI Framework for Raman Spectroscopy-Based Antimicrobial Treatment Classification
 
-This repository implements a modular, research-grade deep learning pipeline for 1D spectral classification with PyTorch. It is designed to support rapid experimentation, robust evaluation, and advanced domain adaptation to achieve high accuracy on both reference datasets and out-of-distribution (OOD) clinical Raman spectral data.
+## Project Title
+Development of an Explainable AI Framework for Raman Spectroscopy-Based Antimicrobial Treatment Classification Using Three-Stage Transfer Learning
 
-## Current Architecture
+## Research Motivation & Problem Statement
+Raman spectroscopy offers rapid, label-free bacterial identification. However, analyzing raw Raman spectra is complex due to biological variance, instrument noise, and domain shifts between laboratory and clinical settings. This project provides a reproducible and interpretable deep learning pipeline. It solves the domain-shift problem using a **Three-Stage Transfer Learning** approach, ultimately mapping isolate-level reference spectra to clinical treatment categories.
 
-The core pipeline is heavily optimized for both speed and generalization across clinical domains. It features a robust multi-stage transfer learning setup:
+## Pipeline Overview
+The repository implements the exact methodology described in the final research paper:
 
-- **Multi-Stage Training Pipeline**:
-  - **Stage 1**: Isolate-space pretraining on large reference datasets.
-  - **Stage 2**: Treatment-space semantic alignment and compact transfer-space finetuning.
-  - **Stage 3**: Clinical domain transfer utilizing Domain-Adversarial Neural Networks (DANN) and CORAL loss.
-- **Advanced Deep Architectures**:
-  - `resnet1d`: Deep residual network with depthwise separable convolutions, scaling kernel sizes, and **optional Squeeze-and-Excitation (SE) attention** (configurable via `use_se: true` switch).
-  - `cnn`: Baseline 1D convolutional network.
-  - `hybrid`: Convolutional stem with a transformer encoder.
-  - `transformer`: Attention-based sequence model.
-- **Dynamic Model Registry**: Automatic injection of `signal_length`, `n_classes`, `in_channels` (with derivative-aware channel logic), and `semantic_space` handling.
-- **Multitask Capabilities**: Ontology-aware auxiliary heads mapping sparse clinical IDs for multi-objective transfer learning.
-- **Fast Data Loading**: Direct `.npy` array loading eliminates the I/O bottleneck of per-file CSV reading.
-- **Robust Preprocessing**: Configurable SNV, baseline correction (ALS), Savitzky-Golay smoothing, and standard scaling.
-- **On-the-fly Augmentation**: Gaussian noise, intensity scaling, wavenumber shifting, and baseline drift injection.
-- **YAML-driven Configuration**: Complete control over data splits, preprocessing, augmentations, and model architectures via modular YAML files.
-- **FastAPI Inference**: Built-in production-ready REST API for model serving.
+1. **Robust Preprocessing Pipeline**:
+   - Savitzky-Golay Smoothing
+   - Standard Normal Variate (SNV) Normalization
+   - First Derivative Computation
+   - Clip Transform
+2. **Three-Stage Transfer Learning**:
+   - **Stage 1**: 30 Isolate Classification (Pre-training on Reference Data)
+   - **Stage 2**: 8 Treatment Groups (Semantic Alignment)
+   - **Stage 3**: Clinical Transfer Learning (5 Treatment Classes)
+3. **Robust Evaluation**:
+   - Patient-Level Probabilistic Voting (Achieving 100% Patient-Level Accuracy)
+4. **Explainable AI (XAI)**:
+   - LIME-based Explainability
+   - Consensus Raman Peak Analysis to extract biologically meaningful spectral features.
 
-## Dataset Handling
+> *[Architecture Diagram Placeholder]*
 
-Due to file size limits, the dataset (large `.npy` files) is **not** included in this repository. 
+## Repository Structure
+```text
+raman-spectral-classifier/
+├── configs/            # YAML configurations for stages and models
+├── data/               # Raw and processed datasets (Not included in Git)
+├── docs/               # Detailed documentation for components
+├── scripts/            # Public-facing execution scripts
+│   ├── archive/        # Archived exploratory scripts
+├── src/                # Core library source code
+└── README.md           # This file
+```
 
-**Expected Folder Structure:**
-Before running any training scripts, ensure your dataset is placed at `data/raw/`.
-
-## Quick Start
-
-1. **Install dependencies:**
+## Installation
+1. Clone the repository:
+```bash
+git clone https://github.com/rana-rohit/raman-spectral-classifier.git
+cd raman-spectral-classifier
+```
+2. Create a virtual environment and install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. **Train a model:**
-You can train a model by specifying the architecture (`cnn`, `resnet1d`, `hybrid`, `transformer`). The script automatically loads configs from the `configs/` directory, trains the model, evaluates it, and runs the finetuning/domain adaptation phase.
+## Dataset
+Due to size constraints, the raw `.npy` and `.csv` datasets are not hosted in this repository. Ensure your raw datasets are placed at `data/raw/`. 
 
+To prepare and validate your data:
 ```bash
-python scripts/train.py --model resnet1d
+python scripts/setup_data.py
 ```
-*Note: Use `--override training.batch_size=64` to easily override specific configuration parameters.*
 
-3. **Evaluate a trained model:**
+## Official Workflow
+The official execution order to reproduce the paper's results is:
+
+1. **Data Setup:**
 ```bash
-python scripts/evaluate.py --exp-dir experiments/resnet1d_YYYYMMDD_HHMMSS
+python scripts/setup_data.py
 ```
-
-4. **Compare multiple models:**
+2. **Train the Model (Stage 1 to 3 with TCN):**
 ```bash
-python scripts/evaluate.py --compare experiments/run1 experiments/run2 --split test
+python scripts/train.py --model tcn
 ```
-
-## Running the API
-
-You can serve a trained model locally using the included FastAPI backend.
-
+3. **Evaluate the Model:**
 ```bash
-# Set the environment variable to your trained experiment directory
-export RAMAN_EXPERIMENT_DIR=experiments/resnet1d_YYYYMMDD_HHMMSS
-
-# Run the API
-uvicorn app.api:app --host 0.0.0.0 --port 8000
+python scripts/evaluate.py --exp-dir experiments/tcn_...
 ```
-Then, visit `http://localhost:8000/docs` to test the `/predict` endpoint via the Swagger UI.
-
-## Project Structure
-
-```text
-.
-├── app/                  # FastAPI backend for inference
-├── configs/              # YAML configuration files
-│   ├── data/             # Splits, preprocessing, and augmentation configs
-│   ├── model/            # Architecture-specific hyperparameters
-│   └── training/         # Base training config, optimizer, losses, etc.
-├── data/
-│   └── raw/              # .npy files go here
-├── experiments/          # Output directory for training logs and artifacts
-├── notebooks/            # Jupyter notebooks for data exploration and analysis
-├── scripts/              # Executable entry points
-│   ├── train.py          # Main training and finetuning script
-│   ├── evaluate.py       # Standalone evaluation script
-│   ├── setup_data.py     # Data preparation and integrity checks
-│   └── deep_analysis.py  # Model interpretation and metric analysis
-├── src/                  # Core package
-│   ├── data/             # NumpyDataset, Dataloaders, and Augmentations
-│   ├── evaluation/       # Metrics, confusion matrices, McNemar's test
-│   ├── interpretability/ # Grad-CAM, Integrated Gradients, etc.
-│   ├── models/           # CNN, Hybrid, ResNet1D, Transformer
-│   ├── training/         # Main Trainer, Finetuner, Losses, and Schedulers
-│   └── utils/            # Helper functions for config parsing and I/O
-└── tests/                # Unit tests
+4. **Run Patient-Level Cross Validation:**
+```bash
+python scripts/run_patient_cv.py --model tcn
+```
+5. **Generate LIME Explanations:**
+```bash
+python scripts/xai.py --exp-dir experiments/tcn_...
+```
+6. **Compare Models & Consensus Peak Analysis:**
+```bash
+python scripts/compare_models_xai.py --results-root experiments/
+```
+7. **Generate Research Plots:**
+```bash
+python scripts/generate_research_plots.py --exp_dir experiments/tcn_...
 ```
 
-## Google Colab Execution
+## Results & Highlights
+- **Best Model Architecture:** Temporal Convolutional Network (TCN)
+- **Final Stage 3 Accuracy:** 96.0%
+- **Final Patient-Level Accuracy:** 100%
+- **Interpretability:** Successfully mapped predictive features back to known biological and chemical Raman peaks using Consensus Peak Analysis.
 
-If you want to train this model on Google Colab, you can securely mount your dataset from Google Drive:
+## Citation
+If you use this code in your research, please cite our work using the provided `CITATION.cff` file.
 
-```python
-# 1. Clone the repo and install dependencies
-!git clone https://github.com/rana-rohit/raman-spectral-classifier.git
-%cd raman-spectral-classifier
-!pip install -r requirements.txt
+## License
+Distributed under the MIT License. See `LICENSE` for more information.
 
-# 2. Mount Google Drive
-from google.colab import drive
-drive.mount('/content/drive')
-
-# 3. Create the expected directory structure and copy data
-!mkdir -p data/raw
-!cp /content/drive/MyDrive/path_to_your_data/*.npy ./data/raw/
-
-# 4. Run training
-!python scripts/train.py --model resnet1d
-```
+## Acknowledgements
+We thank the clinical partners and domain experts who contributed to the dataset acquisition and labeling process.

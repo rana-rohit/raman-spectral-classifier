@@ -8,11 +8,11 @@ Outputs figures into <exp_dir>/plots/gradcam.
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 
-import numpy as np
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
@@ -21,12 +21,12 @@ from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.registry import DataRegistry
-from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
+from src.interpretability.gradcam1d import GradCAM1D
 from src.models.registry import get_model
 from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config
 from src.utils.seed import set_seed
-from src.interpretability.gradcam1d import GradCAM1D
+from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,19 +53,24 @@ def _class_labels(cfg: dict, n_classes: int) -> list[str]:
     if stage == "pretrain_30class":
         try:
             from metadata.ontology import ISOLATES
+
             return [ISOLATES[i] for i in range(n_classes)]
         except Exception:
             return [f"Class {i}" for i in range(n_classes)]
     if stage == "pretrain_treatment_8class":
         try:
             from metadata.ontology import GLOBAL_TREATMENTS
+
             return [GLOBAL_TREATMENTS[i] for i in range(n_classes)]
         except Exception:
             return [f"Treatment {i}" for i in range(n_classes)]
     if stage == "transfer_5class":
-        ids = cfg.get("task", {}).get("clinical_sparse_global_ids", list(range(n_classes)))
+        ids = cfg.get("task", {}).get(
+            "clinical_sparse_global_ids", list(range(n_classes))
+        )
         try:
             from metadata.ontology import GLOBAL_TREATMENTS
+
             return [GLOBAL_TREATMENTS[int(i)] for i in ids]
         except Exception:
             return [f"Clinical {i}" for i in range(n_classes)]
@@ -81,7 +86,7 @@ def main() -> None:
 
     task_cfg = cfg["task"]
     stage = task_cfg["stage"]
-    label_space = task_cfg["label_space"]
+    task_cfg["label_space"]
 
     if stage == "pretrain_30class":
         clinical_sparse_ids = []
@@ -163,7 +168,7 @@ def main() -> None:
             label = int(y[i].item())
             if class_counts[label] >= args.per_class:
                 continue
-            xi = x[i:i+1].to(device)
+            xi = x[i : i + 1].to(device)
             cam = gcam.compute(xi, target_class=label, signal_length=xi.shape[-1])
             signal = xi[0].mean(dim=0).detach().cpu().numpy()
 
@@ -177,7 +182,9 @@ def main() -> None:
             ax.legend(loc="upper right")
             fig.tight_layout()
 
-            out_path = plot_dir / f"gradcam_{split}_class_{label}_{class_counts[label]}.png"
+            out_path = (
+                plot_dir / f"gradcam_{split}_class_{label}_{class_counts[label]}.png"
+            )
             fig.savefig(out_path, dpi=500, bbox_inches="tight", facecolor="white")
             plt.close(fig)
 

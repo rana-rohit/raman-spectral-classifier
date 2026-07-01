@@ -9,12 +9,12 @@ from __future__ import annotations
 import argparse
 import gc
 import os
+import shutil
 import sys
 import tempfile
-import shutil
 
-import torch
 import matplotlib.pyplot as plt
+import torch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -22,12 +22,12 @@ from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.registry import DataRegistry
-from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
 from src.evaluation.evaluator import ModelEvaluator, compare_models
 from src.models.registry import get_model
 from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config
 from src.utils.seed import set_seed
+from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
 
 
 def _load_config_any(exp_dir: str) -> dict:
@@ -37,11 +37,10 @@ def _load_config_any(exp_dir: str) -> dict:
         return load_config(cfg_yaml)
     if os.path.exists(cfg_json):
         import json
+
         with open(cfg_json, "r") as f:
             return json.load(f)
-    raise FileNotFoundError(
-        f"No config.yaml or config.json found in {exp_dir}"
-    )
+    raise FileNotFoundError(f"No config.yaml or config.json found in {exp_dir}")
 
 
 def parse_args():
@@ -61,6 +60,7 @@ def parse_args():
 def _is_notebook() -> bool:
     try:
         from IPython import get_ipython
+
         return get_ipython() is not None
     except Exception:
         return False
@@ -106,7 +106,7 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int, DataRegistry]:
     )
     stage = task_cfg["stage"]
     label_space = task_cfg["label_space"]
-    
+
     if stage == "pretrain_30class":
         clinical_sparse_ids = []
         n_classes = cfg["dataset"]["n_classes_full"]
@@ -123,9 +123,7 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int, DataRegistry]:
         n_classes = len(clinical_sparse_ids)
 
     else:
-        raise ValueError(
-            f"Unknown evaluation stage: {stage}"
-        )
+        raise ValueError(f"Unknown evaluation stage: {stage}")
     cfg["model"] = dict(cfg["model"])
     cfg["model"]["n_classes"] = n_classes
 
@@ -148,14 +146,14 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int, DataRegistry]:
         assert cfg["model"]["semantic_space"] == "compact_transfer_space"
         assert n_classes == 5
         assert len(clinical_sparse_ids) == 5, (
-            "transfer_5class requires "
-            "5 sparse clinical treatment IDs"
+            "transfer_5class requires " "5 sparse clinical treatment IDs"
         )
 
-    from src.utils.logging import print_stage_header, print_label_space_info
-    print_stage_header(stage, task_cfg['name'])
+    from src.utils.logging import print_label_space_info, print_stage_header
+
+    print_stage_header(stage, task_cfg["name"])
     print_label_space_info(label_space, clinical_sparse_ids)
-    
+
     # Fit preprocessor on FULL reference set (matches pretrained backbone)
     X_ref, _ = registry.get_arrays("reference")
     preprocessor = SpectralPreprocessor.from_config(cfg["preprocessing"])
@@ -169,7 +167,7 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int, DataRegistry]:
     cfg["num_workers"] = num_workers
     if num_workers == 0:
         print("[EvaluationRunner] Using num_workers=0 for evaluation safety.")
-    
+
     loaders = build_all_loaders(
         registry,
         preprocessor,
@@ -180,13 +178,15 @@ def build_eval_loaders(cfg: dict, seed: int) -> tuple[dict, int, DataRegistry]:
     )
 
     from src.utils.logging import print_split_provenance
+
     print_split_provenance(loaders, cfg, context="evaluation")
     return loaders, n_classes, registry
 
 
 def _save_outputs(base_dir: str, split_name: str, artifact) -> None:
-    import numpy as np
     from pathlib import Path
+
+    import numpy as np
 
     out_dir = Path(base_dir) / "predictions"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -230,24 +230,18 @@ def evaluate_one(
     checkpoint = load_best_model(exp_dir, model)
     checkpoint_cfg = checkpoint.get("config", {})
 
-    checkpoint_stage = (
-        checkpoint_cfg
-        .get("task", {})
-        .get("stage", None)
-    )
+    checkpoint_stage = checkpoint_cfg.get("task", {}).get("stage", None)
 
     assert checkpoint_stage == stage, (
         "Checkpoint stage mismatch:\n"
         f"Expected: {stage}\n"
         f"Found: {checkpoint_stage}"
     )
-    checkpoint_label_space = (
-        checkpoint_cfg
-        .get("task", {})
-        .get("label_space", None)
-    )
+    checkpoint_label_space = checkpoint_cfg.get("task", {}).get("label_space", None)
     if checkpoint_label_space is None:
-        print("[EvaluationRunner] Warning: checkpoint missing 'task.label_space'; continuing.")
+        print(
+            "[EvaluationRunner] Warning: checkpoint missing 'task.label_space'; continuing."
+        )
     else:
         assert checkpoint_label_space == label_space, (
             "Checkpoint label-space mismatch:\n"
@@ -255,19 +249,14 @@ def evaluate_one(
             f"Found: {checkpoint_label_space}"
         )
 
-    checkpoint_model_space = (
-        checkpoint_cfg
-        .get("model", {})
-        .get("semantic_space", None)
-    )
+    checkpoint_model_space = checkpoint_cfg.get("model", {}).get("semantic_space", None)
 
     if checkpoint_model_space is None:
-        print("[EvaluationRunner] Warning: checkpoint missing 'model.semantic_space'; continuing.")
+        print(
+            "[EvaluationRunner] Warning: checkpoint missing 'model.semantic_space'; continuing."
+        )
     else:
-        assert (
-            checkpoint_model_space
-            == cfg["model"]["semantic_space"]
-        ), (
+        assert checkpoint_model_space == cfg["model"]["semantic_space"], (
             "Checkpoint model semantic-space mismatch:\n"
             f"Expected: "
             f"{cfg['model']['semantic_space']}\n"
@@ -308,11 +297,15 @@ def evaluate_one(
             print("[EvaluationRunner] Exporting prediction artifacts...")
             for split_name in ["test"]:
                 if split_name in evaluator.artifacts:
-                    _save_outputs(eval_base, split_name, evaluator.artifacts[split_name])
+                    _save_outputs(
+                        eval_base, split_name, evaluator.artifacts[split_name]
+                    )
 
             for split_name, _ in (loaders.get("ood", {}) or {}).items():
                 if split_name in evaluator.artifacts:
-                    _save_outputs(eval_base, split_name, evaluator.artifacts[split_name])
+                    _save_outputs(
+                        eval_base, split_name, evaluator.artifacts[split_name]
+                    )
 
             for split_name in ["train", "val"]:
                 loader = loaders.get(split_name)
@@ -327,7 +320,14 @@ def evaluate_one(
             _copy_tree_contents(staging_dir, exp_dir)
 
         from src.utils.logging import print_output_paths
-        print_output_paths({"Evaluation Results JSON": os.path.join(exp_dir, f"{stage}_eval_results.json")})
+
+        print_output_paths(
+            {
+                "Evaluation Results JSON": os.path.join(
+                    exp_dir, f"{stage}_eval_results.json"
+                )
+            }
+        )
         print("[EvaluationRunner] Evaluation complete.")
         return results
     finally:
@@ -365,7 +365,13 @@ def main():
     save_outputs = not args.no_save_outputs
 
     if args.exp_dir and not args.compare:
-        evaluate_one(args.exp_dir, args.seed, save_outputs=save_outputs, include_predictions=False, use_staging=True)
+        evaluate_one(
+            args.exp_dir,
+            args.seed,
+            save_outputs=save_outputs,
+            include_predictions=False,
+            use_staging=True,
+        )
     elif args.compare:
         all_results = [
             evaluate_one(
@@ -378,7 +384,8 @@ def main():
             for exp_dir in args.compare
         ]
         split_names = [args.split] + [
-            name for name in all_results[0].get("splits", {}).keys()
+            name
+            for name in all_results[0].get("splits", {}).keys()
             if name != args.split
         ]
         table = compare_models(

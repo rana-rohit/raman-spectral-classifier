@@ -14,16 +14,15 @@ remains in `src/xai/saliency.py` and LIME construction in
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Optional, List
-
-import numpy as np
+from typing import Optional
 
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
 try:
@@ -36,13 +35,13 @@ except Exception:  # pragma: no cover - optional visualization dependency
 #  Color scheme — research-quality, colorblind-friendly
 # ------------------------------------------------------------------ #
 
-_POSITIVE_COLOR = "#22C55E"     # Premium green — supports prediction
+_POSITIVE_COLOR = "#22C55E"  # Premium green — supports prediction
 _POSITIVE_FILL_COLOR = "#86EFAC"  # Soft support fill
 _POSITIVE_GLOW_COLOR = "#DCFCE7"  # Atmospheric support glow
-_NEGATIVE_COLOR = "#F44336"     # Red — opposes prediction
-_SPECTRUM_COLOR = "#212121"     # Near-black for spectrum line
-_BACKGROUND_COLOR = "#FAFAFA"   # Light grey background
-_GRID_COLOR = "#E0E0E0"        # Subtle grid
+_NEGATIVE_COLOR = "#F44336"  # Red — opposes prediction
+_SPECTRUM_COLOR = "#212121"  # Near-black for spectrum line
+_BACKGROUND_COLOR = "#FAFAFA"  # Light grey background
+_GRID_COLOR = "#E0E0E0"  # Subtle grid
 
 
 def _display_spectrum(signal: np.ndarray) -> np.ndarray:
@@ -100,7 +99,8 @@ def plot_lime_explanation(
 
     fig = plt.figure(figsize=figsize, facecolor="white")
     gs = gridspec.GridSpec(
-        3, 2,
+        3,
+        2,
         height_ratios=[3, 2, 0.3],
         width_ratios=[3, 1],
         hspace=0.35,
@@ -113,7 +113,8 @@ def plot_lime_explanation(
     display_spectrum = _display_spectrum(spectrum)
 
     ax_spectrum.plot(
-        x_axis, display_spectrum,
+        x_axis,
+        display_spectrum,
         color=_SPECTRUM_COLOR,
         linewidth=0.8,
         alpha=0.9,
@@ -152,7 +153,14 @@ def plot_lime_explanation(
                 zorder=1.1,
             )
 
-        ax_spectrum.plot([], [], color=_POSITIVE_COLOR, linewidth=6, alpha=0.0, label="Supports prediction")
+        ax_spectrum.plot(
+            [],
+            [],
+            color=_POSITIVE_COLOR,
+            linewidth=6,
+            alpha=0.0,
+            label="Supports prediction",
+        )
 
     if np.any(negative < 0):
         neg_indices = np.flatnonzero(negative < 0)
@@ -172,7 +180,14 @@ def plot_lime_explanation(
                 zorder=1,
             )
 
-        ax_spectrum.plot([], [], color=_NEGATIVE_COLOR, linewidth=6, alpha=0.0, label="Opposes prediction")
+        ax_spectrum.plot(
+            [],
+            [],
+            color=_NEGATIVE_COLOR,
+            linewidth=6,
+            alpha=0.0,
+            label="Opposes prediction",
+        )
 
     ax_spectrum.set_xlabel(x_label, fontsize=11)
     ax_spectrum.set_ylabel("Intensity (a.u.)", fontsize=11)
@@ -185,11 +200,15 @@ def plot_lime_explanation(
         f"Confidence: {explanation.confidence:.1%}"
     )
     ax_spectrum.text(
-        0.02, 0.95, conf_text,
+        0.02,
+        0.95,
+        conf_text,
         transform=ax_spectrum.transAxes,
         fontsize=9,
         verticalalignment="top",
-        bbox=dict(boxstyle="round,pad=0.4", facecolor="white", alpha=0.85, edgecolor="#BDBDBD"),
+        bbox=dict(
+            boxstyle="round,pad=0.4", facecolor="white", alpha=0.85, edgecolor="#BDBDBD"
+        ),
     )
 
     ax_heatmap = fig.add_subplot(gs[1, 0])
@@ -221,10 +240,7 @@ def plot_lime_explanation(
     if top_features:
         names = [f[0] for f in reversed(top_features)]
         weights = [f[1] for f in reversed(top_features)]
-        colors = [
-            _POSITIVE_COLOR if w >= 0 else _NEGATIVE_COLOR
-            for w in weights
-        ]
+        colors = [_POSITIVE_COLOR if w >= 0 else _NEGATIVE_COLOR for w in weights]
 
         ax_bars.barh(range(len(names)), weights, color=colors, alpha=0.8, height=0.7)
         ax_bars.set_yticks(range(len(names)))
@@ -238,9 +254,7 @@ def plot_lime_explanation(
 
     probs = explanation.probabilities
     n_classes = len(probs)
-    class_names = explanation.class_names or [
-        f"Class {i}" for i in range(n_classes)
-    ]
+    class_names = explanation.class_names or [f"Class {i}" for i in range(n_classes)]
 
     bar_colors = ["#BDBDBD"] * n_classes
     bar_colors[explanation.predicted_class] = _POSITIVE_COLOR
@@ -248,8 +262,11 @@ def plot_lime_explanation(
         bar_colors[explanation.explained_class] = "#FF9800"
 
     ax_probs.barh(
-        range(n_classes), probs,
-        color=bar_colors, alpha=0.85, height=0.6,
+        range(n_classes),
+        probs,
+        color=bar_colors,
+        alpha=0.85,
+        height=0.6,
     )
     ax_probs.set_yticks(range(n_classes))
     ax_probs.set_yticklabels(class_names, fontsize=8)
@@ -279,7 +296,8 @@ def plot_lime_comparison(
         return
 
     fig, axes = plt.subplots(
-        n, 1,
+        n,
+        1,
         figsize=(figsize_per_row[0], figsize_per_row[1] * n),
         facecolor="white",
     )
@@ -288,7 +306,9 @@ def plot_lime_comparison(
 
     for i, (ax, exp) in enumerate(zip(axes, explanations)):
         wavenumbers = exp.wavenumbers
-        x_axis = wavenumbers if wavenumbers is not None else np.arange(len(exp.spectrum))
+        x_axis = (
+            wavenumbers if wavenumbers is not None else np.arange(len(exp.spectrum))
+        )
         display_spectrum = _display_spectrum(exp.spectrum)
 
         if wavenumbers is not None:
@@ -301,9 +321,11 @@ def plot_lime_comparison(
 
         ax.set_facecolor(_BACKGROUND_COLOR)
         ax.plot(
-            x_axis, display_spectrum,
+            x_axis,
+            display_spectrum,
             color=_SPECTRUM_COLOR,
-            linewidth=0.8, alpha=0.8,
+            linewidth=0.8,
+            alpha=0.8,
         )
 
         pos = np.maximum(importance, 0)
@@ -354,10 +376,7 @@ def plot_lime_comparison(
                     zorder=1,
                 )
 
-        label = (
-            f"{exp.explained_label} — "
-            f"P={exp.confidence:.1%}"
-        )
+        label = f"{exp.explained_label} — " f"P={exp.confidence:.1%}"
         ax.set_ylabel(label, fontsize=9)
         ax.grid(True, alpha=0.2)
 

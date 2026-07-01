@@ -30,10 +30,7 @@ import torch
 import torch.nn as nn
 
 
-# ============================================================
 # TEMPORAL BLOCK
-# ============================================================
-
 class TemporalBlock(nn.Module):
     """
     Single residual temporal block with dilated convolutions.
@@ -101,22 +98,19 @@ class TemporalBlock(nn.Module):
 
         out = self.conv1(x)
         # Trim to input length if padding is asymmetric
-        out = out[:, :, :x.size(2)]
+        out = out[:, :, : x.size(2)]
         out = self.relu(self.bn1(out))
         out = self.dropout(out)
 
         out = self.conv2(out)
-        out = out[:, :, :x.size(2)]
+        out = out[:, :, : x.size(2)]
         out = self.bn2(out)
 
         out = self.relu(out + residual)
         return out
 
 
-# ============================================================
 # TEMPORAL STAGE
-# ============================================================
-
 class TemporalStage(nn.Module):
     """
     A stage consisting of multiple TemporalBlocks at a fixed
@@ -155,10 +149,7 @@ class TemporalStage(nn.Module):
         return self.blocks(x)
 
 
-# ============================================================
 # TCN BACKBONE
-# ============================================================
-
 class TCN1D(nn.Module):
     """
     Temporal Convolutional Network for 1D spectral classification.
@@ -217,7 +208,8 @@ class TCN1D(nn.Module):
         # receptive field structure while reducing sequence length.
         # --------------------------------------------------------
         self.stage1 = TemporalStage(
-            c1, c1,
+            c1,
+            c1,
             kernel_size=kernel_size,
             dilations=dilations,
             dropout=dropout,
@@ -226,7 +218,8 @@ class TCN1D(nn.Module):
         self.down1 = nn.Conv1d(c1, c2, kernel_size=1, stride=2, bias=False)
 
         self.stage2 = TemporalStage(
-            c2, c2,
+            c2,
+            c2,
             kernel_size=kernel_size,
             dilations=dilations,
             dropout=dropout,
@@ -235,7 +228,8 @@ class TCN1D(nn.Module):
         self.down2 = nn.Conv1d(c2, c3, kernel_size=1, stride=2, bias=False)
 
         self.stage3 = TemporalStage(
-            c3, c3,
+            c3,
+            c3,
             kernel_size=kernel_size,
             dilations=dilations,
             dropout=dropout,
@@ -244,7 +238,8 @@ class TCN1D(nn.Module):
         self.down3 = nn.Conv1d(c3, c4, kernel_size=1, stride=2, bias=False)
 
         self.stage4 = TemporalStage(
-            c4, c4,
+            c4,
+            c4,
             kernel_size=kernel_size,
             dilations=dilations,
             dropout=dropout,

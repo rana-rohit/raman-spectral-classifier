@@ -41,8 +41,7 @@ try:
     from lime.lime_tabular import LimeTabularExplainer
 except ImportError:
     raise ImportError(
-        "LIME is required for this module. Install it with:\n"
-        "  pip install lime"
+        "LIME is required for this module. Install it with:\n" "  pip install lime"
     )
 
 
@@ -101,22 +100,16 @@ class SpectralLimeExplainer:
 
         signal_length = training_data.shape[1]
 
-        # Build feature names from wavenumbers or indices
         if wavenumbers is not None:
             if len(wavenumbers) != signal_length:
                 raise ValueError(
                     f"wavenumbers length ({len(wavenumbers)}) must match "
                     f"signal length ({signal_length})"
                 )
-            self.feature_names = [
-                f"{wn:.0f} cm⁻¹" for wn in wavenumbers
-            ]
+            self.feature_names = [f"{wn:.0f} cm⁻¹" for wn in wavenumbers]
         else:
-            self.feature_names = [
-                f"idx_{i}" for i in range(signal_length)
-            ]
+            self.feature_names = [f"idx_{i}" for i in range(signal_length)]
 
-        # Initialize the LIME tabular explainer with background data
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self._explainer = LimeTabularExplainer(
@@ -160,20 +153,16 @@ class SpectralLimeExplainer:
         """
         spectrum = np.asarray(spectrum, dtype=np.float64)
         if spectrum.ndim != 1:
-            raise ValueError(
-                f"Expected 1D spectrum, got shape {spectrum.shape}"
-            )
+            raise ValueError(f"Expected 1D spectrum, got shape {spectrum.shape}")
 
         n_feat = n_features or self.n_features
         n_samp = n_samples or self.n_samples
 
-        # Get model prediction for the original sample
         probs = self.predict_fn(spectrum[np.newaxis, :])[0]
         predicted_class = int(np.argmax(probs))
 
         explain_class = label if label is not None else predicted_class
 
-        # Generate LIME explanation
         lime_exp = self._explainer.explain_instance(
             spectrum,
             self.predict_fn,
@@ -318,14 +307,6 @@ class SpectralLimeExplanation:
     @property
     def confidence(self) -> float:
         return float(self.probabilities[self.predicted_class])
-
-    @property
-    def positive_importance(self) -> np.ndarray:
-        return np.maximum(self.importance, 0.0)
-
-    @property
-    def negative_importance(self) -> np.ndarray:
-        return np.minimum(self.importance, 0.0)
 
     def top_features(self, n: int = 10) -> list:
         """Return top N features sorted by absolute importance."""

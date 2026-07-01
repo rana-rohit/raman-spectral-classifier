@@ -7,8 +7,7 @@ Combining local feature extraction via CNN with global context modeling via Tran
 
 from __future__ import annotations
 
-import math
-from typing import List, Optional
+from typing import List
 
 import torch
 import torch.nn as nn
@@ -69,7 +68,7 @@ class CNNTransformer(nn.Module):
     ) -> None:
         super().__init__()
         channels = channels or [32, 64, 128, 256]
-        
+
         self.d_model = d_model
         self.embedding_dim = d_model
         self.in_channels = in_channels
@@ -129,7 +128,9 @@ class CNNTransformer(nn.Module):
         nn.init.trunc_normal_(self.cls_token, std=0.02)
         for module in self.modules():
             if isinstance(module, nn.Conv1d):
-                nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+                nn.init.kaiming_normal_(
+                    module.weight, mode="fan_out", nonlinearity="relu"
+                )
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
             elif isinstance(module, nn.BatchNorm1d):
@@ -150,7 +151,7 @@ class CNNTransformer(nn.Module):
     ) -> tuple[torch.Tensor, list[torch.Tensor]]:
         # 1. Local feature extraction via CNN stem
         feat = self.cnn_stem(x)  # (B, final_cnn_channels, L')
-        
+
         # 2. Projection to d_model dimension
         feat = self.proj(feat)  # (B, d_model, L')
         feat = feat.transpose(1, 2)  # (B, L', d_model)
@@ -193,10 +194,10 @@ class CNNTransformer(nn.Module):
         tokens, attn_maps = self._encode(x, return_attn=return_attn)
         cls_out = self.norm(tokens[:, 0, :])
         logits = self.forward_logits(cls_out)
-        
+
         if return_attn:
             return logits, attn_maps
-            
+
         return {
             "main_logits": logits,
             "aux_logits": None,

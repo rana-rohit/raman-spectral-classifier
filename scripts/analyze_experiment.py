@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from scripts.evaluate import evaluate_one, _load_config_any
+from scripts.evaluate import _load_config_any, evaluate_one
 from scripts.generate_research_plots import run_all_plots
 
 
@@ -112,13 +112,18 @@ class ArtifactExporter:
             if source.exists():
                 shutil.copy2(source, analysis_dir / source.name)
 
-        for artifact_name in ["aggregated_cv_results.json", "detailed_predictions.json"]:
+        for artifact_name in [
+            "aggregated_cv_results.json",
+            "detailed_predictions.json",
+        ]:
             source = exp_dir / artifact_name
             if source.exists():
                 shutil.copy2(source, analysis_dir / artifact_name)
 
         if synthetic_config is not None and not (analysis_dir / "config.json").exists():
-            (analysis_dir / "config.json").write_text(json.dumps(synthetic_config, indent=2), encoding="utf-8")
+            (analysis_dir / "config.json").write_text(
+                json.dumps(synthetic_config, indent=2), encoding="utf-8"
+            )
 
         # Keep the canonical evaluation JSON in the analysis root for the
         # plotting pipeline to discover automatically.
@@ -158,7 +163,9 @@ class ArtifactExporter:
 
 class ReportGenerator:
     @staticmethod
-    def write_root_summary(exp_dir: Path, discovery: DiscoveryResult, results: Dict, analysis_dir: Path) -> None:
+    def write_root_summary(
+        exp_dir: Path, discovery: DiscoveryResult, results: Dict, analysis_dir: Path
+    ) -> None:
         summary_path = exp_dir / "evaluation_summary.md"
         lines = []
         lines.append("# Experiment Analysis Summary")
@@ -175,22 +182,34 @@ class ReportGenerator:
         lines.append(f"- Embeddings present: {discovery.has_embeddings}")
         lines.append(f"- Patient-CV detected: {discovery.has_patient_cv}")
         if discovery.fold_dirs:
-            lines.append(f"- CV folds: {', '.join(p.name for p in discovery.fold_dirs)}")
-        lines.append(f"- Aggregated CV results: {discovery.aggregate_results.name if discovery.aggregate_results else 'none'}")
+            lines.append(
+                f"- CV folds: {', '.join(p.name for p in discovery.fold_dirs)}"
+            )
+        lines.append(
+            f"- Aggregated CV results: {discovery.aggregate_results.name if discovery.aggregate_results else 'none'}"
+        )
         lines.append(f"- clinical_all present: {discovery.has_clinical_all}")
-        lines.append(f"- Splits: {', '.join(discovery.available_splits) if discovery.available_splits else 'none'}")
+        lines.append(
+            f"- Splits: {', '.join(discovery.available_splits) if discovery.available_splits else 'none'}"
+        )
         lines.append("")
         lines.append("## Key metrics")
         for split_name, split_data in results.get("splits", {}).items():
             metrics = split_data.get("metrics", split_data.get("spectrum_metrics", {}))
-            group_metrics = split_data.get("group_metrics", split_data.get("patient_metrics", {}))
+            group_metrics = split_data.get(
+                "group_metrics", split_data.get("patient_metrics", {})
+            )
             lines.append(f"### {split_name}")
             lines.append(f"- Accuracy: {metrics.get('accuracy', 'n/a')}")
             lines.append(f"- Macro F1: {metrics.get('f1_macro', 'n/a')}")
             lines.append(f"- MCC: {metrics.get('mcc', 'n/a')}")
             if group_metrics:
-                lines.append(f"- Patient/Grouped Accuracy: {group_metrics.get('accuracy', 'n/a')}")
-                lines.append(f"- Patient/Grouped Macro F1: {group_metrics.get('f1_macro', 'n/a')}")
+                lines.append(
+                    f"- Patient/Grouped Accuracy: {group_metrics.get('accuracy', 'n/a')}"
+                )
+                lines.append(
+                    f"- Patient/Grouped Macro F1: {group_metrics.get('f1_macro', 'n/a')}"
+                )
         lines.append("")
         lines.append("## Output package")
         lines.append(f"- Analysis directory: {analysis_dir}")
@@ -202,7 +221,9 @@ class ReportGenerator:
         lines.append("- Cross-fold outputs: analysis/research_plots/cross_fold/")
         lines.append("")
         lines.append("## Notes")
-        lines.append("This run used the audited single-pass evaluation pipeline and staged exports.")
+        lines.append(
+            "This run used the audited single-pass evaluation pipeline and staged exports."
+        )
         summary_path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -226,16 +247,23 @@ class ExperimentAnalysisRunner:
     def discover(self) -> DiscoveryResult:
         config = ConfigLoader.load_optional(self.exp_dir)
         eval_results = sorted(self.exp_dir.glob("*_eval_results.json"))
-        fold_dirs = sorted([
-            d for d in self.exp_dir.iterdir()
-            if d.is_dir() and (d.name.startswith("fold_") or "_fold" in d.name)
-        ])
+        fold_dirs = sorted(
+            [
+                d
+                for d in self.exp_dir.iterdir()
+                if d.is_dir() and (d.name.startswith("fold_") or "_fold" in d.name)
+            ]
+        )
         has_patient_cv = bool(fold_dirs)
         if not eval_results and has_patient_cv:
-            eval_results = sorted(path for fold in fold_dirs for path in fold.glob("*_eval_results.json"))
+            eval_results = sorted(
+                path for fold in fold_dirs for path in fold.glob("*_eval_results.json")
+            )
         checkpoints = CheckpointResolver.discover(self.exp_dir)
         if not checkpoints and has_patient_cv:
-            checkpoints = [ckpt for fold in fold_dirs for ckpt in CheckpointResolver.discover(fold)]
+            checkpoints = [
+                ckpt for fold in fold_dirs for ckpt in CheckpointResolver.discover(fold)
+            ]
         has_predictions = (self.exp_dir / "predictions").exists()
         has_embeddings = (self.exp_dir / "embeddings").exists()
         aggregate_results = self.exp_dir / "aggregated_cv_results.json"
@@ -250,7 +278,9 @@ class ExperimentAnalysisRunner:
         if config is not None:
             model_name = config.get("model", {}).get("name", model_name)
             stage = config.get("task", {}).get("stage", stage)
-            semantic_space = config.get("model", {}).get("semantic_space", semantic_space)
+            semantic_space = config.get("model", {}).get(
+                "semantic_space", semantic_space
+            )
 
         if config is None and has_patient_cv:
             for fold_dir in fold_dirs:
@@ -265,17 +295,31 @@ class ExperimentAnalysisRunner:
             model_name = data.get("model", model_name)
             first_split = next(iter(data.get("splits", {})), None)
             if first_split is not None:
-                semantic_space = data.get("splits", {}).get(first_split, {}).get("semantic_space", semantic_space)
+                semantic_space = (
+                    data.get("splits", {})
+                    .get(first_split, {})
+                    .get("semantic_space", semantic_space)
+                )
             available_splits = list(data.get("splits", {}).keys())
             has_clinical_all = "clinical_all" in available_splits
 
             # Synthesize a minimal config for legacy experiments without a saved
             # config file so the plotting pipeline can still infer labels.
             if config is None:
-                inferred_n_classes = data.get("splits", {}).get(first_split, {}).get("n_classes", 0) if first_split else 0
+                inferred_n_classes = (
+                    data.get("splits", {}).get(first_split, {}).get("n_classes", 0)
+                    if first_split
+                    else 0
+                )
                 clinical_ids = []
                 if stage == "transfer_5class":
-                    clinical_ids = data.get("splits", {}).get(first_split, {}).get("original_present_classes", []) if first_split else []
+                    clinical_ids = (
+                        data.get("splits", {})
+                        .get(first_split, {})
+                        .get("original_present_classes", [])
+                        if first_split
+                        else []
+                    )
                 elif inferred_n_classes:
                     clinical_ids = list(range(int(inferred_n_classes)))
                 self.synthetic_config = {
@@ -321,7 +365,9 @@ class ExperimentAnalysisRunner:
 
     def evaluate(self) -> Dict:
         if self.discovery is not None and self.discovery.has_patient_cv:
-            print("[AnalysisRunner] Patient-CV parent detected; packaging fold and aggregate artifacts without re-evaluation.")
+            print(
+                "[AnalysisRunner] Patient-CV parent detected; packaging fold and aggregate artifacts without re-evaluation."
+            )
             if self.discovery.aggregate_results is not None:
                 with open(self.discovery.aggregate_results, "r", encoding="utf-8") as f:
                     aggregate = json.load(f)
@@ -335,10 +381,14 @@ class ExperimentAnalysisRunner:
                 with open(self.discovery.eval_results[0], "r", encoding="utf-8") as f:
                     self.results = json.load(f)
                 return self.results
-            raise FileNotFoundError("Patient-CV experiment has no fold evaluation JSONs or aggregated_cv_results.json.")
+            raise FileNotFoundError(
+                "Patient-CV experiment has no fold evaluation JSONs or aggregated_cv_results.json."
+            )
 
         if ConfigLoader.load_optional(self.exp_dir) is None:
-            print("[AnalysisRunner] No config file found; packaging existing artifacts without re-evaluation.")
+            print(
+                "[AnalysisRunner] No config file found; packaging existing artifacts without re-evaluation."
+            )
             if self.discovery is not None and self.discovery.eval_results:
                 with open(self.discovery.eval_results[0], "r", encoding="utf-8") as f:
                     self.results = json.load(f)
@@ -392,7 +442,9 @@ class ExperimentAnalysisRunner:
     def write_summary(self) -> None:
         assert self.discovery is not None
         assert self.results is not None
-        ReportGenerator.write_root_summary(self.exp_dir, self.discovery, self.results, self.analysis_dir)
+        ReportGenerator.write_root_summary(
+            self.exp_dir, self.discovery, self.results, self.analysis_dir
+        )
 
     def run(self) -> Dict:
         self.discover()
@@ -411,7 +463,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--exp_dir", required=True, help="Path to experiment directory")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dpi", type=int, default=500)
-    parser.add_argument("--no-embeddings", action="store_true", help="Skip embedding plots")
+    parser.add_argument(
+        "--no-embeddings", action="store_true", help="Skip embedding plots"
+    )
     return parser.parse_args()
 
 

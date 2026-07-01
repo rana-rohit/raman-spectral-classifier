@@ -27,9 +27,9 @@ Pipeline:
          - xai_consensus_report.txt
 
 Usage:
-    python scripts/compare_models_xai.py \\
-        --results-root /content/drive/MyDrive/raman_results \\
-        --n-patients 5 \\
+    python scripts/compare_models_xai.py \
+        --results-root experiments/ \
+        --n-patients 5 \
         --top-k-peaks 10
 
 Requirements:
@@ -47,7 +47,6 @@ import json
 import os
 import re
 import sys
-import warnings
 
 # Reconfigure stdout/stderr to support UTF-8 on Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -66,12 +65,11 @@ import numpy as np
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import matplotlib
 import torch
 
-import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 
 from src.data.preprocessing import SpectralPreprocessor
 from src.data.registry import DataRegistry
@@ -133,10 +131,7 @@ N_CLASSES: int = 5
 CLINICAL_SPARSE_IDS: list[int] = [0, 2, 3, 5, 6]
 
 
-# ===================================================================
 # CLI
-# ===================================================================
-
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     p = argparse.ArgumentParser(
@@ -203,10 +198,7 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-# ===================================================================
 # STEP 1: Locate experiment folders
-# ===================================================================
-
 def locate_experiments(results_root: Path) -> dict[str, Path]:
     """
     Locate all Stage 3 experiment directories under results_root.
@@ -247,10 +239,7 @@ def locate_experiments(results_root: Path) -> dict[str, Path]:
     return found
 
 
-# ===================================================================
 # STEP 2: Load and aggregate detailed_predictions.json
-# ===================================================================
-
 def load_fold_predictions(exp_dir: Path) -> dict[str, Any]:
     """
     Load detailed_predictions.json from every fold in an experiment
@@ -267,19 +256,20 @@ def load_fold_predictions(exp_dir: Path) -> dict[str, Any]:
         - grouped_targets: np.ndarray or None
     """
     # Find fold directories
-    fold_dirs = sorted([
-        d for d in exp_dir.iterdir()
-        if d.is_dir() and ("fold_" in d.name or "_fold" in d.name)
-    ])
+    fold_dirs = sorted(
+        [
+            d
+            for d in exp_dir.iterdir()
+            if d.is_dir() and ("fold_" in d.name or "_fold" in d.name)
+        ]
+    )
 
     if not fold_dirs:
         # Maybe folds are nested
         fold_dirs = sorted(exp_dir.glob("**/fold_*"))
 
     if not fold_dirs:
-        raise FileNotFoundError(
-            f"No fold directories found in {exp_dir}"
-        )
+        raise FileNotFoundError(f"No fold directories found in {exp_dir}")
 
     # Load all fold data
     all_fold_data: list[dict] = []
@@ -347,10 +337,7 @@ def load_fold_predictions(exp_dir: Path) -> dict[str, Any]:
     return aggregated
 
 
-# ===================================================================
 # STEPS 3–7: Find common correctly-classified patients
-# ===================================================================
-
 def compute_correct_patients(
     all_model_preds: dict[str, dict[str, dict]],
 ) -> dict[str, dict[int, set[str]]]:
@@ -450,10 +437,7 @@ def find_common_patients(
     return class_common, best_class, best_patients
 
 
-# ===================================================================
 # STEP 8: Sample patients
-# ===================================================================
-
 def sample_patients(
     patient_set: set[str],
     n_patients: int,
@@ -474,10 +458,7 @@ def sample_patients(
     return sorted(selected.tolist())
 
 
-# ===================================================================
 # Model loading helper (reuses existing repository logic)
-# ===================================================================
-
 def load_model_and_explainer(
     exp_dir: Path,
     X_background: np.ndarray,
@@ -502,9 +483,7 @@ def load_model_and_explainer(
     fold_dirs = sorted(exp_dir.glob("fold_*"))
 
     if not fold_dirs:
-        raise FileNotFoundError(
-            f"No fold directories found in {exp_dir}"
-        )
+        raise FileNotFoundError(f"No fold directories found in {exp_dir}")
 
     model_dir = fold_dirs[0]
 
@@ -514,7 +493,9 @@ def load_model_and_explainer(
 
     # Configure for Stage 3 transfer
     task_cfg = cfg["task"]
-    clinical_sparse_ids = task_cfg.get("clinical_sparse_global_ids", CLINICAL_SPARSE_IDS)
+    clinical_sparse_ids = task_cfg.get(
+        "clinical_sparse_global_ids", CLINICAL_SPARSE_IDS
+    )
     n_classes = len(clinical_sparse_ids)
     cfg["model"]["n_classes"] = n_classes
     cfg["seed"] = seed
@@ -528,8 +509,7 @@ def load_model_and_explainer(
     ckpt_stage = checkpoint.get("config", {}).get("task", {}).get("stage")
     if ckpt_stage and ckpt_stage != "transfer_5class":
         raise ValueError(
-            f"Expected transfer_5class checkpoint, got {ckpt_stage} "
-            f"in {exp_dir}"
+            f"Expected transfer_5class checkpoint, got {ckpt_stage} " f"in {exp_dir}"
         )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -558,10 +538,7 @@ def load_model_and_explainer(
     return model, explainer
 
 
-# ===================================================================
 # Patient spectrum retrieval
-# ===================================================================
-
 def get_patient_spectra(
     all_model_preds: dict[str, dict[str, dict]],
     patient_id: str,
@@ -584,10 +561,7 @@ def get_patient_spectra(
     return None, None
 
 
-# ===================================================================
 # Peak extraction from LIME explanations
-# ===================================================================
-
 def extract_peaks(
     explanation,
     wavenumbers: Optional[np.ndarray],
@@ -614,19 +588,18 @@ def extract_peaks(
     peaks = []
     for rank, idx in enumerate(top_indices, start=1):
         wn = float(wavenumbers[idx]) if wavenumbers is not None else float(idx)
-        peaks.append({
-            "wavenumber": wn,
-            "weight": float(importance[idx]),
-            "rank": rank,
-        })
+        peaks.append(
+            {
+                "wavenumber": wn,
+                "weight": float(importance[idx]),
+                "rank": rank,
+            }
+        )
 
     return peaks
 
 
-# ===================================================================
 # Consensus analysis
-# ===================================================================
-
 def compute_consensus(
     all_peaks: dict[str, dict[str, list[dict]]],
     tolerance: float,
@@ -690,16 +663,18 @@ def compute_consensus(
                     contributing_models.add(model_name)
                     break
 
-        display_names = sorted([
-            MODEL_DISPLAY_NAMES.get(m, m) for m in contributing_models
-        ])
+        display_names = sorted(
+            [MODEL_DISPLAY_NAMES.get(m, m) for m in contributing_models]
+        )
 
-        consensus_peaks.append({
-            "wavenumber": round(center, 1),
-            "frequency": len(contributing_models),
-            "models": display_names,
-            "n_models": len(model_names),
-        })
+        consensus_peaks.append(
+            {
+                "wavenumber": round(center, 1),
+                "frequency": len(contributing_models),
+                "models": display_names,
+                "n_models": len(model_names),
+            }
+        )
 
     # Sort by frequency (descending), then by wavenumber
     consensus_peaks.sort(key=lambda x: (-x["frequency"], x["wavenumber"]))
@@ -721,10 +696,7 @@ def compute_consensus(
     return deduped
 
 
-# ===================================================================
 # Publication-quality plotting
-# ===================================================================
-
 # Color scheme — consistent with existing xai_visualization.py
 _POSITIVE_COLOR = "#22C55E"
 _POSITIVE_FILL_COLOR = "#86EFAC"
@@ -758,7 +730,8 @@ def plot_patient_comparison(
         _savgol = None
 
     fig, axes = plt.subplots(
-        3, 2,
+        3,
+        2,
         figsize=(16, 14),
         facecolor="white",
         constrained_layout=False,
@@ -790,9 +763,11 @@ def plot_patient_comparison(
 
         if exp_name not in explanations:
             ax.text(
-                0.5, 0.5,
+                0.5,
+                0.5,
                 f"{display_name}\n(not available)",
-                ha="center", va="center",
+                ha="center",
+                va="center",
                 transform=ax.transAxes,
                 fontsize=12,
             )
@@ -802,7 +777,9 @@ def plot_patient_comparison(
         exp = explanations[exp_name]
         spectrum = exp.spectrum
         importance = exp.importance
-        x_axis = exp.wavenumbers if exp.wavenumbers is not None else np.arange(len(spectrum))
+        x_axis = (
+            exp.wavenumbers if exp.wavenumbers is not None else np.arange(len(spectrum))
+        )
 
         # Sort by wavenumber if available
         if exp.wavenumbers is not None:
@@ -823,7 +800,8 @@ def plot_patient_comparison(
 
         # Plot spectrum
         ax.plot(
-            x_axis, display_spectrum,
+            x_axis,
+            display_spectrum,
             color=_SPECTRUM_COLOR,
             linewidth=0.7,
             alpha=0.85,
@@ -845,10 +823,22 @@ def plot_patient_comparison(
             fill_alpha = 0.07 + 0.05 * strength
             left = x_center - band_width / 2.0
             right = x_center + band_width / 2.0
-            ax.axvspan(left, right, facecolor=_POSITIVE_GLOW_COLOR,
-                       alpha=glow_alpha, edgecolor="none", zorder=1)
-            ax.axvspan(left, right, facecolor=_POSITIVE_FILL_COLOR,
-                       alpha=fill_alpha, edgecolor="none", zorder=1.1)
+            ax.axvspan(
+                left,
+                right,
+                facecolor=_POSITIVE_GLOW_COLOR,
+                alpha=glow_alpha,
+                edgecolor="none",
+                zorder=1,
+            )
+            ax.axvspan(
+                left,
+                right,
+                facecolor=_POSITIVE_FILL_COLOR,
+                alpha=fill_alpha,
+                edgecolor="none",
+                zorder=1.1,
+            )
 
         # Negative (opposes prediction)
         neg_indices = np.flatnonzero(negative < 0)
@@ -859,8 +849,14 @@ def plot_patient_comparison(
             band_alpha = 0.07 + 0.07 * strength
             left = x_center - band_width / 2.0
             right = x_center + band_width / 2.0
-            ax.axvspan(left, right, facecolor=_NEGATIVE_COLOR,
-                       alpha=band_alpha, edgecolor="none", zorder=1)
+            ax.axvspan(
+                left,
+                right,
+                facecolor=_NEGATIVE_COLOR,
+                alpha=band_alpha,
+                edgecolor="none",
+                zorder=1,
+            )
 
         # Labels and styling
         ax.set_title(
@@ -943,9 +939,13 @@ def plot_consensus_bar_chart(
     fig, ax = plt.subplots(figsize=(14, 6), facecolor="white")
 
     bars = ax.bar(
-        range(len(labels)), frequencies,
-        color=colors, edgecolor="white", linewidth=0.5,
-        alpha=0.9, width=0.7,
+        range(len(labels)),
+        frequencies,
+        color=colors,
+        edgecolor="white",
+        linewidth=0.5,
+        alpha=0.9,
+        width=0.7,
     )
 
     ax.set_xticks(range(len(labels)))
@@ -960,8 +960,14 @@ def plot_consensus_bar_chart(
     )
     ax.set_ylim(0, n_models + 0.5)
     ax.set_yticks(range(n_models + 1))
-    ax.axhline(y=n_models, color="#22C55E", linewidth=1.0, linestyle="--",
-               alpha=0.5, label=f"All {n_models} models")
+    ax.axhline(
+        y=n_models,
+        color="#22C55E",
+        linewidth=1.0,
+        linestyle="--",
+        alpha=0.5,
+        label=f"All {n_models} models",
+    )
     ax.grid(True, axis="y", alpha=0.3, color=_GRID_COLOR)
     ax.legend(loc="upper right", fontsize=9, framealpha=0.9)
 
@@ -984,10 +990,7 @@ def plot_consensus_bar_chart(
     print(f"  Saved: {save_path}")
 
 
-# ===================================================================
 # Main pipeline
-# ===================================================================
-
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
@@ -1030,7 +1033,8 @@ def main() -> None:
                 n_samples = len(data["predictions"])
                 n_patients = (
                     len(set(data["patient_ids"].tolist()))
-                    if data["patient_ids"] is not None else 0
+                    if data["patient_ids"] is not None
+                    else 0
                 )
                 print(f"    {split_name}: {n_samples} spectra, {n_patients} patients")
         except Exception as e:
@@ -1115,9 +1119,7 @@ def main() -> None:
     config_candidates = sorted(first_exp.rglob("config.yaml"))
 
     if not config_candidates:
-        raise FileNotFoundError(
-            f"No config.yaml found under {first_exp}"
-        )
+        raise FileNotFoundError(f"No config.yaml found under {first_exp}")
 
     cfg = load_config(str(config_candidates[0]))
 
@@ -1192,15 +1194,19 @@ def main() -> None:
 
             # Generate patient IDs for this split
             from metadata.patient_ids import generate_patient_ids
+
             patient_ids = generate_patient_ids(y_split, split_name)
 
             clinical_splits_data[split_name] = (X_split, y_split, np.array(patient_ids))
-            print(f"    After filtering: {X_split.shape}, {len(set(patient_ids))} patients")
+            print(
+                f"    After filtering: {X_split.shape}, {len(set(patient_ids))} patients"
+            )
         except Exception as e:
             print(f"  WARNING: Could not load {split_name}: {e}")
 
     # Class names for LIME
     from metadata.ontology import GLOBAL_TREATMENTS
+
     class_names = [GLOBAL_TREATMENTS[gid] for gid in CLINICAL_SPARSE_IDS]
 
     # ------------------------------------------------------------------
@@ -1211,7 +1217,7 @@ def main() -> None:
 
     # Storage for all peaks
     all_peaks: dict[str, dict[str, list[dict]]] = {}  # patient -> model -> peaks
-    all_explanations: dict[str, dict[str, Any]] = {}   # patient -> model -> explanation
+    all_explanations: dict[str, dict[str, Any]] = {}  # patient -> model -> explanation
 
     for patient_idx, patient_id in enumerate(selected_patients):
         print(f"\n  Patient {patient_idx + 1}/{len(selected_patients)}: {patient_id}")
@@ -1282,6 +1288,7 @@ def main() -> None:
             except Exception as e:
                 print(f"ERROR: {e}")
                 import traceback
+
                 traceback.print_exc()
 
         all_explanations[patient_id] = patient_explanations
@@ -1315,11 +1322,13 @@ def main() -> None:
         writer = csv.writer(f)
         writer.writerow(["Peak", "Frequency", "Models"])
         for peak in consensus:
-            writer.writerow([
-                f"{peak['wavenumber']:.1f}",
-                f"{peak['frequency']}/{peak['n_models']}",
-                ", ".join(sorted(peak["models"])),
-            ])
+            writer.writerow(
+                [
+                    f"{peak['wavenumber']:.1f}",
+                    f"{peak['frequency']}/{peak['n_models']}",
+                    ", ".join(sorted(peak["models"])),
+                ]
+            )
     print(f"\n[OUTPUT 3] Saved: {csv_path}")
 
     # ------------------------------------------------------------------
@@ -1345,8 +1354,10 @@ def main() -> None:
         f.write("=" * 70 + "\n\n")
 
         f.write(f"Best class: {best_class} ({best_class_name})\n\n")
-        f.write(f"Common patients (correctly classified by ALL {len(STAGE3_EXPERIMENT_NAMES)} models): "
-                f"{len(best_patients)}\n\n")
+        f.write(
+            f"Common patients (correctly classified by ALL {len(STAGE3_EXPERIMENT_NAMES)} models): "
+            f"{len(best_patients)}\n\n"
+        )
 
         f.write("Selected patients:\n")
         for pid in selected_patients:
@@ -1359,7 +1370,9 @@ def main() -> None:
             class_name = COMPACT_CLASS_NAMES.get(cls, f"Class {cls}")
             n_common = len(class_common[cls])
             marker = " ← BEST" if cls == best_class else ""
-            f.write(f"  Class {cls} ({class_name}): {n_common} common patients{marker}\n")
+            f.write(
+                f"  Class {cls} ({class_name}): {n_common} common patients{marker}\n"
+            )
 
         f.write("\n" + "-" * 70 + "\n")
         f.write("Models Used\n")

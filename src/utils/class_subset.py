@@ -21,17 +21,20 @@ from __future__ import annotations
 
 from typing import Sequence
 
-import torch
 import numpy as np
-from metadata.ontology import (
-    COMPACT_LABEL_MAP,
-    INVERSE_COMPACT_LABEL_MAP,
-)
+import torch
+
+from metadata.ontology import COMPACT_LABEL_MAP, INVERSE_COMPACT_LABEL_MAP
+
 
 def subset_mask(targets: torch.Tensor, class_ids: Sequence[int]) -> torch.Tensor:
     if not class_ids:
         return torch.zeros_like(targets, dtype=torch.bool)
-    if targets.numel() > 0 and int(targets.min()) >= 0 and int(targets.max()) < len(class_ids):
+    if (
+        targets.numel() > 0
+        and int(targets.min()) >= 0
+        and int(targets.max()) < len(class_ids)
+    ):
         return torch.ones_like(targets, dtype=torch.bool)
     valid = torch.as_tensor(class_ids, dtype=targets.dtype, device=targets.device)
     return (targets[:, None] == valid[None, :]).any(dim=1)
@@ -47,18 +50,18 @@ def remap_targets_to_subset(
     # Compact transfer-space labels are already contiguous:
     # [0,1,2,3,4]
     # In this case no sparse->compact remapping is needed.
-    if targets.numel() > 0 and int(targets.min()) >= 0 and int(targets.max()) < len(class_ids):
+    if (
+        targets.numel() > 0
+        and int(targets.min()) >= 0
+        and int(targets.max()) < len(class_ids)
+    ):
         return targets.long()
 
     mapping = {int(cls): idx for idx, cls in enumerate(class_ids)}
-    unknown = set(
-        targets.detach().cpu().tolist()
-    ) - set(mapping.keys())
+    unknown = set(targets.detach().cpu().tolist()) - set(mapping.keys())
 
     if unknown:
-        raise ValueError(
-            f"Unknown sparse labels encountered: {sorted(unknown)}"
-        )
+        raise ValueError(f"Unknown sparse labels encountered: {sorted(unknown)}")
     mapped = [mapping[int(label)] for label in targets.detach().cpu().tolist()]
     return torch.as_tensor(mapped, dtype=torch.long, device=targets.device)
 
@@ -91,6 +94,7 @@ def prepare_subset_eval_logits(
 
     return main_logits, targets.long()
 
+
 # ------------------------------------------------------------
 # Sparse clinical-space -> compact transfer-space
 #
@@ -111,7 +115,7 @@ def filter_and_remap_classes(X, y, keep_classes):
     keep_classes = np.array(sorted(keep_classes))
     if len(np.unique(keep_classes)) != len(keep_classes):
         raise ValueError("Duplicate class IDs detected in keep_classes")
-        
+
     mask = np.isin(y, keep_classes)
 
     if mask.shape[0] != X.shape[0]:
@@ -126,7 +130,9 @@ def filter_and_remap_classes(X, y, keep_classes):
     class_map = {cls: i for i, cls in enumerate(keep_classes)}
 
     try:
-        y_remapped = np.fromiter((class_map[label] for label in y_filtered), dtype=np.int64)
+        y_remapped = np.fromiter(
+            (class_map[label] for label in y_filtered), dtype=np.int64
+        )
     except KeyError as e:
         raise ValueError(f"Unexpected label encountered during remapping: {e}")
 
@@ -145,12 +151,6 @@ def class_maps(keep_classes):
         class_map = COMPACT_LABEL_MAP
         inverse_class_map = INVERSE_COMPACT_LABEL_MAP
     else:
-        class_map = {
-            cls: idx
-            for idx, cls in enumerate(keep_classes)
-        }
-        inverse_class_map = {
-            idx: cls
-            for cls, idx in class_map.items()
-        }
+        class_map = {cls: idx for idx, cls in enumerate(keep_classes)}
+        inverse_class_map = {idx: cls for cls, idx in class_map.items()}
     return class_map, inverse_class_map

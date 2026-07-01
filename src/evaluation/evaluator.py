@@ -17,35 +17,23 @@ Supports semantic restoration between:
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
+from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef
 from torch.utils.data import DataLoader
 
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import f1_score
-from sklearn.metrics import matthews_corrcoef
-
-from src.evaluation.metrics import (
-    compute_confusion_matrix,
-    compute_metrics,
-    compute_transfer_gap,
-    confidence_vote_predictions,
-)
-
-from src.evaluation.visualization import (
-    save_confusion_matrix_figure,
-)
+from metadata.clinical import CLINICAL_LABEL_INVERSE_REMAP, CLINICAL_LABELS
+from src.evaluation.metrics import (compute_confusion_matrix, compute_metrics,
+                                    compute_transfer_gap,
+                                    confidence_vote_predictions)
+from src.evaluation.visualization import save_confusion_matrix_figure
 from src.utils.split_modes import resolve_split_mode
 
-from metadata.clinical import (
-    CLINICAL_LABELS,
-    CLINICAL_LABEL_INVERSE_REMAP
-)
 
 @dataclass
 class SplitEvaluationArtifact:
@@ -78,11 +66,8 @@ class ModelEvaluator:
         self.device = torch.device(device)
         self.model.to(self.device)
         self.model.eval()
-        clinical_sparse_ids = (
-            self.cfg.get("task", {}).get(
-                "clinical_sparse_global_ids",
-                []
-            )
+        clinical_sparse_ids = self.cfg.get("task", {}).get(
+            "clinical_sparse_global_ids", []
         )
 
         stage = self.cfg.get("task", {}).get(
@@ -90,15 +75,11 @@ class ModelEvaluator:
             None,
         )
         if stage is None:
-            raise ValueError(
-                "Missing task.stage in evaluator config"
-            )
+            raise ValueError("Missing task.stage in evaluator config")
         if stage == "transfer_5class":
             assert self.n_classes == len(clinical_sparse_ids), (
-
                 "Evaluator n_classes must match number of "
                 "clinical sparse IDs, "
-
                 f"got {self.n_classes} vs "
                 f"{len(clinical_sparse_ids)}"
             )
@@ -115,13 +96,7 @@ class ModelEvaluator:
         self.artifacts: Dict[str, SplitEvaluationArtifact] = {}
 
         self.output_dir = Path(
-            self.cfg.get(
-                "experiment",
-                {}
-            ).get(
-                "save_dir",
-                "results"
-            )
+            self.cfg.get("experiment", {}).get("save_dir", "results")
         )
 
     @torch.no_grad()
@@ -178,6 +153,7 @@ class ModelEvaluator:
         # --------------------------------------------------------
 
         from src.utils.logging import SPECTRA_PER_GROUP
+
         group_metrics = {}
         grouped_cfg = self.cfg.get("evaluation", {}).get("grouped", {})
         grouped_enabled = grouped_cfg.get("enabled", True)
@@ -185,7 +161,9 @@ class ModelEvaluator:
             "spectra_per_group",
             SPECTRA_PER_GROUP,
         )
-        spectra_per_group = spectra_per_group_map.get(split_name) if grouped_enabled else None
+        spectra_per_group = (
+            spectra_per_group_map.get(split_name) if grouped_enabled else None
+        )
 
         group_preds = None
         group_targets = None
@@ -194,9 +172,11 @@ class ModelEvaluator:
 
         if "clinical" in split_name and hasattr(loader.dataset, "sample_ids"):
             sample_ids_arr = np.asarray(loader.dataset.sample_ids)
-            if len(sample_ids_arr) > 0 and any("_p" in str(sid) for sid in sample_ids_arr[:5]):
+            if len(sample_ids_arr) > 0 and any(
+                "_p" in str(sid) for sid in sample_ids_arr[:5]
+            ):
                 from src.evaluation.metrics import patient_vote_predictions
-                
+
                 targets_np = eval_targets.cpu().numpy()
                 group_preds, group_targets, unique_pids = patient_vote_predictions(
                     probabilities=probabilities,
@@ -204,7 +184,7 @@ class ModelEvaluator:
                     patient_ids=sample_ids_arr,
                 )
                 patient_ids_for_artifact = sample_ids_arr
-                
+
                 group_results = {
                     "accuracy": accuracy_score(group_targets, group_preds),
                     "f1_macro": f1_score(
@@ -232,8 +212,7 @@ class ModelEvaluator:
             targets_np = eval_targets.cpu().numpy()
 
             assert len(preds_np) % spectra_per_group == 0, (
-                f"{split_name} size must be divisible by "
-                f"{spectra_per_group}"
+                f"{split_name} size must be divisible by " f"{spectra_per_group}"
             )
 
             group_preds, group_targets = confidence_vote_predictions(
@@ -270,16 +249,17 @@ class ModelEvaluator:
             else:
                 group_name = "patient"
 
-        cm, present_classes = compute_confusion_matrix(eval_logits, eval_targets, n_classes)
+        cm, present_classes = compute_confusion_matrix(
+            eval_logits, eval_targets, n_classes
+        )
         inverse_class_map = getattr(loader.dataset, "inverse_class_map", {})
-        
+
         # Restore original sparse clinical IDs from
         # compact transfer-space labels.
         original_present_classes = [
-            inverse_class_map.get(int(cls), int(cls))
-            for cls in present_classes
+            inverse_class_map.get(int(cls), int(cls)) for cls in present_classes
         ]
-        
+
         # --------------------------------------------------------
         # Semantic restoration layer
         # Convert compact transfer labels:
@@ -287,7 +267,7 @@ class ModelEvaluator:
         #
         # back into sparse clinical IDs:
         #   [0,2,3,5,6]
-        #   
+        #
         # and attach human-readable
         # treatment/species semantics.
         # --------------------------------------------------------
@@ -299,9 +279,7 @@ class ModelEvaluator:
             None,
         )
         if stage is None:
-            raise ValueError(
-                "Missing task.stage in evaluator config"
-            )
+            raise ValueError("Missing task.stage in evaluator config")
         clinical_semantics = {}
 
         if stage == "transfer_5class":
@@ -312,24 +290,16 @@ class ModelEvaluator:
 
                 if compact_idx in CLINICAL_LABEL_INVERSE_REMAP:
 
-                    original_label = (
-                        CLINICAL_LABEL_INVERSE_REMAP[
-                            compact_idx
-                        ]
-                    )
+                    original_label = CLINICAL_LABEL_INVERSE_REMAP[compact_idx]
 
-                    clinical_semantics[
-                        str(compact_idx)
-                    ] = {
+                    clinical_semantics[str(compact_idx)] = {
                         "original_label": original_label,
-                        "species": CLINICAL_LABELS[
-                            original_label
-                        ]["clinical_species"],
-                        "treatment": CLINICAL_LABELS[
-                            original_label
-                        ]["global_treatment"],
+                        "species": CLINICAL_LABELS[original_label]["clinical_species"],
+                        "treatment": CLINICAL_LABELS[original_label][
+                            "global_treatment"
+                        ],
                     }
-        
+
         include_predictions = bool(
             self.cfg.get("evaluation", {}).get("include_predictions", False)
         )
@@ -356,8 +326,7 @@ class ModelEvaluator:
             "compact_to_sparse_label_map": (
                 {
                     str(compact_idx): int(original_idx)
-                    for compact_idx, original_idx
-                    in inverse_class_map.items()
+                    for compact_idx, original_idx in inverse_class_map.items()
                 }
                 if stage == "transfer_5class"
                 else {}
@@ -366,14 +335,12 @@ class ModelEvaluator:
 
         if include_predictions:
             self.results["splits"][split_name]["predictions"] = predictions.tolist()
-            self.results["splits"][split_name]["targets"] = eval_targets.cpu().numpy().tolist()
+            self.results["splits"][split_name]["targets"] = (
+                eval_targets.cpu().numpy().tolist()
+            )
         # Automatic confusion matrix visualization generation
 
-        figure_dir = (
-            self.output_dir
-            / "confusion_matrices"
-            / split_name
-        )
+        figure_dir = self.output_dir / "confusion_matrices" / split_name
 
         # Spectrum-level confusion
 
@@ -430,25 +397,15 @@ class ModelEvaluator:
         else:
             label_map = TREATMENT_LABELS
 
-        class_labels = [
-            label_map.get(int(x), str(x))
-            for x in present_classes
-        ]
+        class_labels = [label_map.get(int(x), str(x)) for x in present_classes]
 
         if self.cfg.get("evaluation", {}).get("save_confusion_matrices", True):
             save_confusion_matrix_figure(
                 targets=eval_targets.numpy(),
                 predictions=predictions,
                 class_labels=class_labels,
-                save_path=(
-                    figure_dir
-                    / "spectrum_confusion_normalized.png"
-                ),
-                title=(
-                    f"{split_name} "
-                    "Spectrum-Level Confusion "
-                    "(Normalized)"
-                ),
+                save_path=(figure_dir / "spectrum_confusion_normalized.png"),
+                title=(f"{split_name} " "Spectrum-Level Confusion " "(Normalized)"),
                 normalize=True,
             )
 
@@ -460,15 +417,8 @@ class ModelEvaluator:
                     targets=group_metrics["targets"],
                     predictions=group_metrics["predictions"],
                     class_labels=class_labels,
-                    save_path=(
-                        figure_dir
-                        / "group_confusion_normalized.png"
-                    ),
-                    title=(
-                        f"{split_name} "
-                        "Group-Level Confusion "
-                        "(Normalized)"
-                    ),
+                    save_path=(figure_dir / "group_confusion_normalized.png"),
+                    title=(f"{split_name} " "Group-Level Confusion " "(Normalized)"),
                     normalize=True,
                 )
         self.artifacts[split_name] = SplitEvaluationArtifact(
@@ -497,7 +447,9 @@ class ModelEvaluator:
         self._assert_logits_and_targets(main_logits, targets, split_name)
         probabilities = torch.softmax(main_logits, dim=-1).cpu().numpy()
         predictions = main_logits.argmax(dim=-1).cpu().numpy()
-        cm, present_classes = compute_confusion_matrix(main_logits, targets, self.n_classes)
+        cm, present_classes = compute_confusion_matrix(
+            main_logits, targets, self.n_classes
+        )
 
         artifact = SplitEvaluationArtifact(
             logits=main_logits.cpu().numpy(),
@@ -513,7 +465,7 @@ class ModelEvaluator:
         )
         self.artifacts[split_name] = artifact
         return artifact
-    
+
     # --------------------------------------------------------
     # Evaluation protocol
     #
@@ -548,25 +500,35 @@ class ModelEvaluator:
 
         # Call the centralized print_evaluation_summary for highly structured reporting
         from src.utils.logging import print_evaluation_summary
+
         stage = self.cfg.get("task", {}).get("stage", "transfer_5class")
         label_space = self.cfg.get("task", {}).get("label_space", "")
-        clinical_sparse_ids = self.cfg.get("task", {}).get("clinical_sparse_global_ids", [])
-        
+        clinical_sparse_ids = self.cfg.get("task", {}).get(
+            "clinical_sparse_global_ids", []
+        )
+
         output_files = {}
         for sname, sdata in self.results["splits"].items():
             cf_dir = self.output_dir / "confusion_matrices" / sname
-            output_files[f"Confusion Matrix ({sname})"] = str(cf_dir / "spectrum_confusion_normalized.png")
+            output_files[f"Confusion Matrix ({sname})"] = str(
+                cf_dir / "spectrum_confusion_normalized.png"
+            )
             if sdata.get("group_metrics"):
-                output_files[f"Group Confusion Matrix ({sname})"] = str(cf_dir / "group_confusion_normalized.png")
-                
+                output_files[f"Group Confusion Matrix ({sname})"] = str(
+                    cf_dir / "group_confusion_normalized.png"
+                )
+
         checkpoint_path = None
-        save_dir = self.cfg.get("experiment", {}).get("save_dir") or str(self.output_dir)
+        save_dir = self.cfg.get("experiment", {}).get("save_dir") or str(
+            self.output_dir
+        )
         try:
             from src.utils.checkpoint import resolve_best_checkpoint_path
+
             checkpoint_path = resolve_best_checkpoint_path(save_dir)
         except Exception:
             pass
-            
+
         print_evaluation_summary(
             stage=stage,
             model_name=self.model_name,
@@ -575,7 +537,7 @@ class ModelEvaluator:
             clinical_sparse_ids=clinical_sparse_ids,
             checkpoint_path=checkpoint_path,
             split_metrics=self.results["splits"],
-            output_files=output_files
+            output_files=output_files,
         )
 
         return self.results
@@ -586,7 +548,7 @@ class ModelEvaluator:
         preds_b: List[int],
         targets: List[int],
     ) -> Dict:
-        import math
+        pass
 
         preds_a = np.array(preds_a)
         preds_b = np.array(preds_b)
@@ -610,7 +572,6 @@ class ModelEvaluator:
             "n_b_wins": int(n_ba),
         }
 
-
     def save_detailed_predictions(self, path: str) -> None:
         """Save detailed spectrum-level predictions, probabilities, and patient IDs for aggregation."""
         Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -618,7 +579,10 @@ class ModelEvaluator:
         for split_name, artifact in self.artifacts.items():
             if "clinical" in split_name or split_name in ("test", "clinical_val"):
                 patient_ids = []
-                if hasattr(artifact, "patient_ids") and artifact.patient_ids is not None:
+                if (
+                    hasattr(artifact, "patient_ids")
+                    and artifact.patient_ids is not None
+                ):
                     patient_ids = list(artifact.patient_ids)
 
                 export[split_name] = {
@@ -627,8 +591,16 @@ class ModelEvaluator:
                     "predictions": artifact.predictions.tolist(),
                     "targets": artifact.targets.tolist(),
                     "patient_ids": patient_ids if patient_ids else None,
-                    "grouped_predictions": artifact.grouped_predictions.tolist() if artifact.grouped_predictions is not None else None,
-                    "grouped_targets": artifact.grouped_targets.tolist() if artifact.grouped_targets is not None else None,
+                    "grouped_predictions": (
+                        artifact.grouped_predictions.tolist()
+                        if artifact.grouped_predictions is not None
+                        else None
+                    ),
+                    "grouped_targets": (
+                        artifact.grouped_targets.tolist()
+                        if artifact.grouped_targets is not None
+                        else None
+                    ),
                 }
         with open(path, "w") as f:
             json.dump(export, f, indent=2)
@@ -643,7 +615,11 @@ class ModelEvaluator:
             "summary": self.results.get("summary"),
         }
         for split_name, split_data in self.results.get("splits", {}).items():
-            clean = {k: v for k, v in split_data.items() if k not in {"predictions", "targets"}}
+            clean = {
+                k: v
+                for k, v in split_data.items()
+                if k not in {"predictions", "targets"}
+            }
             export["splits"][split_name] = clean
         with open(path, "w") as f:
             json.dump(export, f, indent=2)
@@ -701,13 +677,10 @@ class ModelEvaluator:
         )
 
         if targets.numel() == 0:
-            raise AssertionError(
-                f"{split_name} has no targets"
-            )
+            raise AssertionError(f"{split_name} has no targets")
 
         assert int(targets.min()) >= 0, (
-            f"{split_name} targets must be non-negative, "
-            f"got {int(targets.min())}"
+            f"{split_name} targets must be non-negative, " f"got {int(targets.min())}"
         )
 
         assert int(targets.max()) < self.n_classes, (
@@ -716,9 +689,7 @@ class ModelEvaluator:
             f"got {int(targets.max())}"
         )
 
-        unique_targets = sorted(
-            torch.unique(targets).cpu().tolist()
-        )
+        unique_targets = sorted(torch.unique(targets).cpu().tolist())
 
         # --------------------------------------------------------
         # Compact transfer-space integrity check
@@ -748,7 +719,6 @@ class ModelEvaluator:
 
             if unexpected:
                 raise AssertionError(
-
                     f"{split_name} contains unexpected "
                     f"compact transfer labels: "
                     f"{sorted(unexpected)}"

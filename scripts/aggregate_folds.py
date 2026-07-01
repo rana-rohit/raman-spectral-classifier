@@ -16,19 +16,27 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef, precision_score, recall_score
+from sklearn.metrics import (accuracy_score, f1_score, matthews_corrcoef,
+                             precision_score, recall_score)
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.evaluation.metrics import compute_confusion_matrix, patient_vote_predictions
-from src.evaluation.visualization import save_confusion_matrix_figure
 from metadata.ontology import GLOBAL_TREATMENTS, INVERSE_COMPACT_LABEL_MAP
+from src.evaluation.metrics import (compute_confusion_matrix,
+                                    patient_vote_predictions)
+from src.evaluation.visualization import save_confusion_matrix_figure
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Aggregate 5-fold cross validation results")
-    p.add_argument("--run-dir", required=True, help="Directory containing fold subdirectories")
-    p.add_argument("--save-dir", default=None, help="Directory to save aggregated results (defaults to run-dir)")
+    p.add_argument(
+        "--run-dir", required=True, help="Directory containing fold subdirectories"
+    )
+    p.add_argument(
+        "--save-dir",
+        default=None,
+        help="Directory to save aggregated results (defaults to run-dir)",
+    )
     return p.parse_args()
 
 
@@ -57,9 +65,7 @@ def _compute_aggregate(split_name, records, save_dir):
         for pid in sorted(set(record["patient_ids"].tolist())):
             patient_folds.setdefault(str(pid), set()).add(str(fold_name))
     repeated_patients = {
-        pid: sorted(folds)
-        for pid, folds in patient_folds.items()
-        if len(folds) > 1
+        pid: sorted(folds) for pid, folds in patient_folds.items() if len(folds) > 1
     }
     if repeated_patients:
         example_pid = sorted(repeated_patients)[0]
@@ -90,7 +96,9 @@ def _compute_aggregate(split_name, records, save_dir):
         raise RuntimeError(f"{split_name}: duplicate patient IDs after aggregation")
 
     pat_accuracy = accuracy_score(pat_targets, pat_preds)
-    pat_precision = precision_score(pat_targets, pat_preds, average="macro", zero_division=0)
+    pat_precision = precision_score(
+        pat_targets, pat_preds, average="macro", zero_division=0
+    )
     pat_recall = recall_score(pat_targets, pat_preds, average="macro", zero_division=0)
     pat_f1 = f1_score(pat_targets, pat_preds, average="macro", zero_division=0)
     pat_mcc = matthews_corrcoef(pat_targets, pat_preds)
@@ -177,22 +185,19 @@ def main():
     print(f"============================================================\n")
 
     # Find fold directories
-    fold_dirs = sorted([
-        d for d in run_dir.iterdir()
-        if d.is_dir() and ("_fold" in d.name or "fold_" in d.name)
-    ])
+    fold_dirs = sorted(
+        [
+            d
+            for d in run_dir.iterdir()
+            if d.is_dir() and ("_fold" in d.name or "fold_" in d.name)
+        ]
+    )
 
     if not fold_dirs:
         # Check if the run-dir itself contains folds inside subdirectories
-        fold_dirs = sorted([
-            d for d in run_dir.glob("**/fold_*")
-            if d.is_dir()
-        ])
+        fold_dirs = sorted([d for d in run_dir.glob("**/fold_*") if d.is_dir()])
         if not fold_dirs:
-            fold_dirs = sorted([
-                d for d in run_dir.glob("**/*_fold*")
-                if d.is_dir()
-            ])
+            fold_dirs = sorted([d for d in run_dir.glob("**/*_fold*") if d.is_dir()])
 
     if not fold_dirs:
         raise FileNotFoundError(
@@ -221,8 +226,10 @@ def main():
     all_splits = set()
     for fd in fold_data:
         all_splits.update(fd.keys())
-    
-    clinical_splits = sorted([s for s in all_splits if "clinical" in s or s == "clinical_val"])
+
+    clinical_splits = sorted(
+        [s for s in all_splits if "clinical" in s or s == "clinical_val"]
+    )
     if not clinical_splits:
         print("No clinical splits found in predictions. Using all splits.")
         clinical_splits = sorted(list(all_splits))

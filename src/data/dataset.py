@@ -21,7 +21,7 @@ class SpectralDataset(Dataset):
         X: np.ndarray,
         y: np.ndarray,
         augmentation=None,
-        training: bool = False, 
+        training: bool = False,
         n_views: int = 1,
         preprocessor=None,
         expected_n_classes: int | None = None,
@@ -64,7 +64,7 @@ class SpectralDataset(Dataset):
 
         self.augmentation = augmentation
         self.training = training
-        self.n_views = int(n_views) 
+        self.n_views = int(n_views)
         self.preprocessor = preprocessor
 
     def __len__(self) -> int:
@@ -73,10 +73,6 @@ class SpectralDataset(Dataset):
     def __getitem__(self, idx: int):
         x = self.X[idx].copy()
         y_tensor = torch.as_tensor(self.y[idx], dtype=torch.long)
-        # Per-sample provenance string (e.g. "split:123").
-        # Keep as a Python str so DataLoader's default collate
-        # produces a list of strings which we can group on later.
-        sample_id = str(self.sample_ids[idx])
 
         if self.n_views == 2 and self.training:
             x1 = self._transform_sample(x.copy())
@@ -94,14 +90,10 @@ class SpectralDataset(Dataset):
         return x_tensor, y_tensor
 
     def _to_multichannel(self, x: np.ndarray, idx: int) -> torch.Tensor:
-        """
-        x should be (C, L) after preprocessing (C=2 if derivative enabled)
-        """
+        """Returns a (C, L) float tensor; C=2 when the derivative channel is enabled."""
         return torch.from_numpy(x.astype(np.float32))
 
     def _transform_sample(self, x: np.ndarray) -> np.ndarray:
-        # x is RAW (1000,)
-
         if self.training and self.augmentation is not None:
             if hasattr(self.augmentation, "steps") and len(self.augmentation.steps) > 0:
                 x = self.augmentation(x[None])[0]
@@ -110,7 +102,7 @@ class SpectralDataset(Dataset):
             x = self.preprocessor.transform(x[None])[0]
         else:
             raise ValueError("Preprocessor is required for dataset")
-        
+
         if x.ndim != 2:
             raise ValueError(f"Expected (C, L) after preprocessing, got {x.shape}")
 
@@ -169,21 +161,3 @@ class SpectralDataset(Dataset):
                     f"got [{self.y.min()}, {self.y.max()}]"
                 )
 
-
-def make_train_val_split(
-    X: np.ndarray,
-    y: np.ndarray,
-    val_fraction: float = 0.20,
-    random_seed: int = 42,
-) -> Tuple:
-    sss = StratifiedShuffleSplit(
-        n_splits=1,
-        test_size=val_fraction,
-        random_state=random_seed,
-    )
-    train_idx, val_idx = next(sss.split(X, y))
-
-    return (
-        (X[train_idx], y[train_idx]),
-        (X[val_idx], y[val_idx]),
-    )

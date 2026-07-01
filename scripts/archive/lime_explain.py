@@ -12,6 +12,7 @@ Works for all splits:
     - IID:     test (reference domain)
     - OOD:     2018clinical, 2019clinical
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,20 +31,13 @@ from src.models.registry import get_model
 from src.utils.checkpoint import load_best_model
 from src.utils.config import load_config
 from src.utils.seed import set_seed
-from src.utils.split_modes import IID_REFERENCE, resolve_split_mode
-
 from src.xai.lime_explainer import SpectralLimeExplainer
 from src.xai.predict_wrapper import build_predict_fn
-from src.xai.xai_visualization import (
-    plot_lime_explanation,
-    plot_lime_comparison,
-)
+from src.xai.xai_visualization import (plot_lime_comparison,
+                                       plot_lime_explanation)
 
 
-# ================================================================
 # Stage-aware label semantics
-# ================================================================
-
 def _resolve_class_names(cfg: dict, n_classes: int) -> list[str]:
 
     stage = cfg.get("task", {}).get("stage", "unknown")
@@ -51,6 +45,7 @@ def _resolve_class_names(cfg: dict, n_classes: int) -> list[str]:
     if stage == "pretrain_30class":
         try:
             from metadata.ontology import ISOLATES
+
             return [ISOLATES[i]["strain"] for i in range(n_classes)]
         except Exception:
             return [f"Isolate {i}" for i in range(n_classes)]
@@ -58,6 +53,7 @@ def _resolve_class_names(cfg: dict, n_classes: int) -> list[str]:
     if stage == "pretrain_treatment_8class":
         try:
             from metadata.ontology import GLOBAL_TREATMENTS
+
             return [GLOBAL_TREATMENTS[i] for i in range(n_classes)]
         except Exception:
             return [f"Treatment {i}" for i in range(n_classes)]
@@ -69,6 +65,7 @@ def _resolve_class_names(cfg: dict, n_classes: int) -> list[str]:
         )
         try:
             from metadata.ontology import GLOBAL_TREATMENTS
+
             return [GLOBAL_TREATMENTS[int(i)] for i in ids]
         except Exception:
             return [f"Clinical {i}" for i in range(n_classes)]
@@ -84,49 +81,55 @@ def _stage_display_name(stage: str) -> str:
     }.get(stage, stage)
 
 
-# ================================================================
 # CLI
-# ================================================================
-
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Generate LIME explanations for Raman spectral models"
     )
     p.add_argument(
-        "--exp-dir", required=True,
+        "--exp-dir",
+        required=True,
         help="Path to trained experiment directory",
     )
     p.add_argument(
-        "--split", default=None,
+        "--split",
+        default=None,
         help="Split to explain (test, 2018clinical, 2019clinical)",
     )
     p.add_argument(
-        "--per-class", type=int, default=2,
+        "--per-class",
+        type=int,
+        default=2,
         help="Number of samples to explain per class",
     )
     p.add_argument(
-        "--n-samples", type=int, default=2000,
+        "--n-samples",
+        type=int,
+        default=2000,
         help="Number of LIME perturbation samples",
     )
     p.add_argument(
-        "--n-features", type=int, default=20,
+        "--n-features",
+        type=int,
+        default=20,
         help="Number of top features for LIME",
     )
     p.add_argument(
-        "--n-background", type=int, default=500,
+        "--n-background",
+        type=int,
+        default=500,
         help="Number of background samples for LIME distribution",
     )
     p.add_argument(
-        "--seed", type=int, default=42,
+        "--seed",
+        type=int,
+        default=42,
         help="Random seed",
     )
     return p.parse_args()
 
 
-# ================================================================
 # Main
-# ================================================================
-
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
@@ -258,9 +261,7 @@ def main() -> None:
     # --------------------------------------------------------
     split = args.split or cfg.get("xai", {}).get("split")
     if split is None:
-        raise ValueError(
-            "No split specified. Use --split test or --split 2018clinical"
-        )
+        raise ValueError("No split specified. Use --split test or --split 2018clinical")
 
     # Load the split data (raw arrays for LIME input)
     if split == "reference":
@@ -273,7 +274,9 @@ def main() -> None:
         registry.load(split)
         X_split, y_split = registry.get_arrays(split)
 
-    print(f"[LIME] Split '{split}': {len(X_split)} samples, {len(np.unique(y_split))} classes")
+    print(
+        f"[LIME] Split '{split}': {len(X_split)} samples, {len(np.unique(y_split))} classes"
+    )
 
     # --------------------------------------------------------
     # Resolve label remapping for non-isolate stages
@@ -284,6 +287,7 @@ def main() -> None:
     if stage == "pretrain_treatment_8class":
         if label_space == "isolate_space":
             from metadata.ontology import ISOLATE_TO_TREATMENT
+
             y_mapped = np.array(
                 [ISOLATE_TO_TREATMENT[int(lbl)] for lbl in y_split],
                 dtype=np.int64,
@@ -297,6 +301,7 @@ def main() -> None:
 
         if label_space == "isolate_space":
             from metadata.ontology import ISOLATE_TO_TREATMENT
+
             y_treatment = np.array(
                 [ISOLATE_TO_TREATMENT[int(lbl)] for lbl in y_split],
                 dtype=np.int64,
@@ -305,6 +310,7 @@ def main() -> None:
             X_split = np.array(X_split[mask])
             y_treatment = y_treatment[mask]
             from src.utils.class_subset import class_maps
+
             cmap, _ = class_maps(clinical_sparse_ids)
             y_split = np.array([cmap[int(lbl)] for lbl in y_treatment])
         else:
@@ -313,6 +319,7 @@ def main() -> None:
             X_split = np.array(X_split[mask])
             y_filtered = y_split[mask]
             from src.utils.class_subset import class_maps
+
             cmap, _ = class_maps(clinical_sparse_ids)
             y_split = np.array([cmap[int(lbl)] for lbl in y_filtered])
 
@@ -353,11 +360,10 @@ def main() -> None:
         )
 
         safe_name = (
-            class_names[label]
-            .replace(" ", "_")
-            .replace("/", "_")
-            .replace(".", "")
-        ) if label < len(class_names) else f"class_{label}"
+            (class_names[label].replace(" ", "_").replace("/", "_").replace(".", ""))
+            if label < len(class_names)
+            else f"class_{label}"
+        )
 
         plot_path = output_dir / f"{safe_name}_sample_{sample_num}.png"
 
@@ -381,11 +387,10 @@ def main() -> None:
             continue
 
         safe_name = (
-            class_names[label]
-            .replace(" ", "_")
-            .replace("/", "_")
-            .replace(".", "")
-        ) if label < len(class_names) else f"class_{label}"
+            (class_names[label].replace(" ", "_").replace("/", "_").replace(".", ""))
+            if label < len(class_names)
+            else f"class_{label}"
+        )
 
         comparison_path = output_dir / f"{safe_name}_comparison.png"
 

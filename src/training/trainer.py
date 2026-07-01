@@ -13,32 +13,31 @@ Supports:
 from __future__ import annotations
 
 import time
-import numpy as np
+from itertools import cycle
 from pathlib import Path
 from typing import Dict, Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from torch.autograd import Function
+from torch.utils.data import DataLoader
 
+from src.data.augmentation import AugmentationPipeline
 from src.evaluation.metrics import compute_metrics
-from src.training.losses import (
-    consistency_loss,
-    get_loss,
-    coral_loss,
-    SupConLoss,
-)
+from src.training.losses import (SupConLoss, consistency_loss, coral_loss,
+                                 get_loss)
 from src.training.regularizers import L2SPRegularizer
 from src.training.scheduler import get_scheduler
 from src.utils.checkpoint import save_checkpoint
-from src.utils.class_subset import subset_mask, remap_targets_to_subset
+from src.utils.class_subset import remap_targets_to_subset, subset_mask
 from src.utils.logging import ExperimentLogger
-from src.data.augmentation import AugmentationPipeline
-from itertools import cycle
+
 
 class EarlyStopping:
-    def __init__(self, patience: int = 10, min_delta: float = 1e-4, mode: str = "max") -> None: 
+    def __init__(
+        self, patience: int = 10, min_delta: float = 1e-4, mode: str = "max"
+    ) -> None:
         self.patience = patience
         self.min_delta = min_delta
         self.mode = mode
@@ -65,6 +64,7 @@ class EarlyStopping:
     def best(self) -> float:
         return self._best
 
+
 class GradReverse(Function):
     @staticmethod
     def forward(ctx, x, lambda_):
@@ -76,7 +76,9 @@ class GradReverse(Function):
         return -ctx.lambda_ * grad_output, None
 
 
-def _training_feature_enabled(train_cfg: dict, section: str, alias: str | None = None) -> bool:
+def _training_feature_enabled(
+    train_cfg: dict, section: str, alias: str | None = None
+) -> bool:
     """Resolve explicit optional training feature flags without implicit defaults."""
     enabled = bool(train_cfg.get(section, {}).get("enabled", False))
     if alias is not None:
@@ -111,16 +113,13 @@ class Trainer:
         self.exp_dir = Path(exp_dir)
         self.n_classes = n_classes
         self.reference_state = reference_state
-        clinical_sparse_ids = (
-            cfg.get("task", {})
-            .get("clinical_sparse_global_ids", [])
-        )
+        clinical_sparse_ids = cfg.get("task", {}).get("clinical_sparse_global_ids", [])
 
         stage = cfg.get("task", {}).get(
             "stage",
             "transfer_5class",
         )
-        
+
         # --------------------------------------------------------
         # Transfer-learning semantic integrity
         #
@@ -135,12 +134,9 @@ class Trainer:
         # --------------------------------------------------------
         if stage == "transfer_5class" and len(clinical_sparse_ids) > 0:
             assert self.n_classes == len(clinical_sparse_ids), (
-
                 "transfer_5class requires "
-
                 "n_classes == number of "
                 "clinical sparse IDs, "
-
                 f"got {self.n_classes} vs "
                 f"{len(clinical_sparse_ids)}"
             )
@@ -227,7 +223,9 @@ class Trainer:
         self.supcon_enabled = False
         self.supcon_weight = 0.0
         self.supcon_loss = None
-        self.supervised_on_both_views = self.consistency_cfg.get("supervised_on_both_views", True)
+        self.supervised_on_both_views = self.consistency_cfg.get(
+            "supervised_on_both_views", True
+        )
 
         # Canonical supervised contrastive training configuration.
         # training.supcon.enabled is the source of truth after config
@@ -239,7 +237,9 @@ class Trainer:
                 **self.supcon_cfg,
                 "enabled": True,
                 "weight": self.train_cfg.get("contrastive_weight", 0.7),
-                "classification_weight": self.train_cfg.get("classification_weight", 0.3),
+                "classification_weight": self.train_cfg.get(
+                    "classification_weight", 0.3
+                ),
                 "temperature": self.train_cfg.get("temperature", 0.07),
                 "projection_dim": cfg.get("model", {}).get("projection_dim", 128),
             }
@@ -252,29 +252,35 @@ class Trainer:
         if self.contrastive_weight == 0.0:
             self.contrastive_learning_enabled = False
 
-        if self.contrastive_learning_enabled and not hasattr(self.model, "projection_head"):
+        if self.contrastive_learning_enabled and not hasattr(
+            self.model, "projection_head"
+        ):
             raise ValueError(
                 "training.supcon.enabled=True requires a model projection_head. "
                 "Build the model through src.models.registry.get_model() with "
                 "the resolved training.supcon config."
             )
-            
+
         self.is_pure_supcon = False
         if self.contrastive_learning_enabled:
             self.supcon_temp = self.supcon_cfg.get("temperature", 0.07)
             self.supcon_loss_fn = SupConLoss(temperature=self.supcon_temp)
-            
+
             p_dim = self.supcon_cfg.get(
                 "projection_dim",
                 cfg.get("model", {}).get("projection_dim", 128),
             )
-            
+
             # Determine trainable/frozen modules
             trainable_mods = []
             frozen_mods = []
             for name, param in self.model.named_parameters():
                 mod_name = name.split(".")[0]
-                if mod_name == "backbone" and len(name.split(".")) > 1 and name.split(".")[1] == "classifier":
+                if (
+                    mod_name == "backbone"
+                    and len(name.split(".")) > 1
+                    and name.split(".")[1] == "classifier"
+                ):
                     mod_name = "classifier"
                 if param.requires_grad:
                     if mod_name not in trainable_mods:
@@ -282,39 +288,23 @@ class Trainer:
                 else:
                     if mod_name not in frozen_mods:
                         frozen_mods.append(mod_name)
-            
+
             trainable_mods = sorted(list(set(trainable_mods)))
             frozen_mods = sorted(list(set(frozen_mods)))
-            
-            is_joint = self.classification_weight > 0.0 and self.contrastive_weight > 0.0
-            
-            print("\n============================================================")
-            if is_joint:
-                print("JOINT SUPERVISED CONTRASTIVE TRAINING")
-            else:
-                print("PURE SUPERVISED CONTRASTIVE PRETRAINING (PHASE 1)")
-            print("============================================================")
-            print(f"SupCon Enabled:        True")
-            print(f"Multi-View Mode:       True")
-            print(f"Number of Views:       2")
-            print(f"Projection Dim:        {p_dim}")
-            print(f"Temperature:           {self.supcon_temp}")
-            print(f"Contrastive Weight:    {self.contrastive_weight}")
-            print(f"Classification Weight: {self.classification_weight}")
-            
-            losses = []
-            if self.contrastive_weight > 0.0:
-                losses.append("Supervised Contrastive (SupCon)")
-            if self.classification_weight > 0.0:
-                losses.append("Cross Entropy (Classification)")
-            print(f"Active Losses:         {', '.join(losses)}")
-            print(f"Trainable Modules:     {', '.join(trainable_mods) if trainable_mods else 'None'}")
-            print(f"Frozen Modules:        {', '.join(frozen_mods) if frozen_mods else 'None'}")
-            print("============================================================\n")
-            
-            # Print dynamic projection tensor shape info once at startup
+
+            is_joint = (
+                self.classification_weight > 0.0 and self.contrastive_weight > 0.0
+            )
+
+            mode = "joint" if is_joint else "pure contrastive"
+            print(
+                f"  SupCon [{mode}]: temp={self.supcon_temp}, "
+                f"proj_dim={p_dim}, "
+                f"contrastive_weight={self.contrastive_weight}, "
+                f"classification_weight={self.classification_weight}"
+            )
             batch_sz = self.train_cfg.get("batch_size", 128)
-            print(f"\n[SupCon] Projection Tensor Shape: ({batch_sz}, 2, {p_dim})\n")
+            print(f"  Projection tensor shape: ({batch_sz}, 2, {p_dim})")
 
         self.l2sp = None
         l2sp_cfg = self.train_cfg.get("l2sp", {})
@@ -334,22 +324,21 @@ class Trainer:
 
         self.model.to(self.device)
         self.loss_fn.to(self.device)
-        
+
         # Optionally freeze BatchNorm running statistics.
         # Useful during pretraining with multi-forward passes, but should
         # be disabled during finetuning to allow domain adaptation.
         if self.train_cfg.get("freeze_bn", False):
             for m in self.model.modules():
                 if isinstance(m, nn.BatchNorm1d):
-                    m.eval()                 # freeze running mean/var
-                    m.requires_grad_(True)   # still allow gamma/beta to learn
+                    m.eval()  # freeze running mean/var
+                    m.requires_grad_(True)  # still allow gamma/beta to learn
 
         print(f"  Device: {self.device}")
         monitor_metric = self.train_cfg.get("monitor_metric", "f1_macro")
         mode = "min" if "loss" in monitor_metric else "max"
         self.early_stopping = EarlyStopping(
-            patience=self.train_cfg.get("early_stopping_patience", 10),
-            mode=mode
+            patience=self.train_cfg.get("early_stopping_patience", 10), mode=mode
         )
 
     def fit(self) -> Dict:
@@ -490,7 +479,9 @@ class Trainer:
                 src_x1 = src_x1.to(self.device)
                 src_y = src_y.to(self.device)
                 outputs1 = self._normalize_outputs(self.model(src_x1))
-                self._assert_logits_and_targets(outputs1["main_logits"], src_y, "source")
+                self._assert_logits_and_targets(
+                    outputs1["main_logits"], src_y, "source"
+                )
 
             # For simplicity we do not support multi-view clinical inputs here; clinical loader should be single-view
             outputs_clin = None
@@ -498,8 +489,10 @@ class Trainer:
                 clin_x1 = clin_x1.to(self.device)
                 clin_y = clin_y.to(self.device)
                 outputs_clin = self._normalize_outputs(self.model(clin_x1))
-                self._assert_logits_and_targets(outputs_clin["main_logits"], clin_y, "target")
-                
+                self._assert_logits_and_targets(
+                    outputs_clin["main_logits"], clin_y, "target"
+                )
+
             coral_term = self._zero_loss()
 
             target_loss = self._zero_loss()
@@ -512,33 +505,36 @@ class Trainer:
                     feat_ref = feat_ref[:min_bs]
                     feat_clin = feat_clin[:min_bs]
                     coral_term = coral_loss(feat_ref, feat_clin)
-                            
+
             if self.contrastive_learning_enabled and self.classification_weight == 0.0:
                 source_loss = self._zero_loss()
                 main_loss = self._zero_loss()
                 classification_loss_term = self._zero_loss()
-                
+
                 # Pure contrastive loss term
                 contrastive_loss_term = self._zero_loss()
                 proj1 = outputs1.get("projection_features")
-                proj2 = outputs2.get("projection_features") if outputs2 is not None else None
+                proj2 = (
+                    outputs2.get("projection_features")
+                    if outputs2 is not None
+                    else None
+                )
                 if proj1 is not None:
                     if proj2 is not None:
                         proj_feats = torch.stack([proj1, proj2], dim=1)
                     else:
                         proj_feats = proj1
                     contrastive_loss_term = self.supcon_loss_fn(proj_feats, y)
-                
+
                 main_loss = contrastive_loss_term
             else:
                 source_loss = self.loss_fn(outputs1["main_logits"], y)
-                if (
-                    outputs_clin is not None
-                    and self.target_supervised_enabled
-                ):
+                if outputs_clin is not None and self.target_supervised_enabled:
                     target_loss = self.loss_fn(outputs_clin["main_logits"], clin_y)
                     # Restore original Stage-3 weighting: source + w_target * target
-                    main_loss = source_loss + self.target_supervised_weight * target_loss
+                    main_loss = (
+                        source_loss + self.target_supervised_weight * target_loss
+                    )
                 else:
                     main_loss = source_loss
 
@@ -547,7 +543,11 @@ class Trainer:
                 classification_loss_term = main_loss
                 if self.contrastive_learning_enabled:
                     proj1 = outputs1.get("projection_features")
-                    proj2 = outputs2.get("projection_features") if outputs2 is not None else None
+                    proj2 = (
+                        outputs2.get("projection_features")
+                        if outputs2 is not None
+                        else None
+                    )
                     if proj1 is not None:
                         if proj2 is not None:
                             proj_feats = torch.stack([proj1, proj2], dim=1)
@@ -558,21 +558,16 @@ class Trainer:
                         self.contrastive_weight * contrastive_loss_term
                         + self.classification_weight * classification_loss_term
                     )
-            
+
             if outputs_clin is not None and self.target_supervised_enabled:
                 aux_loss = self._compute_aux_loss(outputs_clin, clin_y)
             else:
                 aux_loss = self._compute_aux_loss(outputs1, y)
 
-
-
             consistency_term = self._compute_consistency_loss(outputs1, outputs2, y)
             supcon_term = self._zero_loss()
 
-            if (
-                self.supcon_enabled
-                and outputs2 is not None
-            ):
+            if self.supcon_enabled and outputs2 is not None:
                 feat1 = outputs1.get("features")
                 feat2 = outputs2.get("features")
 
@@ -588,10 +583,11 @@ class Trainer:
                         y,
                     )
 
-            l2sp_term = self.l2sp(self.model) if self.l2sp is not None else self._zero_loss()
-            
-            coral_weight = self.coral_weight
-            
+            l2sp_term = (
+                self.l2sp(self.model) if self.l2sp is not None else self._zero_loss()
+            )
+
+
             loss = (
                 main_loss
                 + self.aux_loss_weight * aux_loss
@@ -600,7 +596,7 @@ class Trainer:
                 + l2sp_term
                 + coral_w * coral_term
             )
-            
+
             # DANN
             domain_loss = torch.tensor(0.0).to(self.device)
             if self.dann_enabled and outputs_clin is not None:
@@ -616,14 +612,20 @@ class Trainer:
 
                     feat_all = torch.cat([feat_ref, feat_clin], dim=0)
 
-                    domain_labels = torch.cat([
-                        torch.zeros(feat_ref.size(0), dtype=torch.long, device=self.device),
-                        torch.ones(feat_clin.size(0), dtype=torch.long, device=self.device)
-                    ])
+                    domain_labels = torch.cat(
+                        [
+                            torch.zeros(
+                                feat_ref.size(0), dtype=torch.long, device=self.device
+                            ),
+                            torch.ones(
+                                feat_clin.size(0), dtype=torch.long, device=self.device
+                            ),
+                        ]
+                    )
 
                     max_epochs = max(1, self.train_cfg.get("max_epochs", 100) - 1)
                     p = (epoch - 1) / max_epochs
-                    lambda_ = 2. / (1. + np.exp(-10 * p)) - 1
+                    lambda_ = 2.0 / (1.0 + np.exp(-10 * p)) - 1
 
                     feat_all = GradReverse.apply(feat_all, lambda_)
 
@@ -634,7 +636,6 @@ class Trainer:
                     domain_logits = self.model.domain_classifier(feat_all)
 
                     domain_loss = nn.CrossEntropyLoss()(domain_logits, domain_labels)
-                    
 
                     domain_batch_size = domain_labels.size(0)
 
@@ -644,7 +645,9 @@ class Trainer:
                     loss = loss + dann_w * domain_loss
 
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=self.gradient_clip
+            )
             self.optimizer.step()
 
             batch_size = len(y)
@@ -658,7 +661,9 @@ class Trainer:
             total_l2sp_loss += l2sp_term.item() * batch_size
             if self.contrastive_learning_enabled:
                 total_contrastive_loss += contrastive_loss_term.item() * batch_size
-                total_classification_loss += classification_loss_term.item() * batch_size
+                total_classification_loss += (
+                    classification_loss_term.item() * batch_size
+                )
             total_coral_loss += coral_term.item() * batch_size
             total += batch_size
             source_logits.append(outputs1["main_logits"].detach().cpu())
@@ -666,10 +671,9 @@ class Trainer:
             if outputs_clin is not None:
                 target_logits.append(outputs_clin["main_logits"].detach().cpu())
                 target_targets.append(y_clin.detach().cpu())
-        
+
         avg_domain_loss = total_domain_loss / max(total_domain_samples, 1)
-        avg_coral = total_coral_loss / max(total, 1)
-        
+
         metrics = compute_metrics(
             torch.cat(source_logits, dim=0),
             torch.cat(source_targets, dim=0),
@@ -704,10 +708,12 @@ class Trainer:
             }
         )
         if self.contrastive_learning_enabled:
-            metrics.update({
-                "contrastive_loss": total_contrastive_loss / total,
-                "classification_loss": total_classification_loss / total,
-            })
+            metrics.update(
+                {
+                    "contrastive_loss": total_contrastive_loss / total,
+                    "classification_loss": total_classification_loss / total,
+                }
+            )
         return metrics
 
     @torch.no_grad()
@@ -745,7 +751,9 @@ class Trainer:
                 total_loss += loss.item() * batch_size
                 total_samples += batch_size
 
-                dummy_logits = torch.zeros(batch_size, self.n_classes, device=self.device)
+                dummy_logits = torch.zeros(
+                    batch_size, self.n_classes, device=self.device
+                )
                 all_logits.append(dummy_logits.cpu())
                 all_targets.append(y.cpu())
 
@@ -836,7 +844,7 @@ class Trainer:
             x, y = batch
 
             if isinstance(x, (tuple, list)) and len(x) == 2:
-                x1, x2 = x 
+                x1, x2 = x
                 return x1.to(self.device), x2.to(self.device), y.to(self.device)
 
             if self.model.training and augment:
@@ -864,7 +872,7 @@ class Trainer:
             return x.to(self.device), None, y.to(self.device)
 
         raise TypeError(f"Unsupported batch type: {type(batch)!r}")
-    
+
     # --------------------------------------------------------
     # Auxiliary clinical-head supervision
     #
@@ -872,7 +880,7 @@ class Trainer:
     # determine which samples participate
     # in auxiliary transfer supervision.
     # --------------------------------------------------------
-    
+
     def _compute_aux_loss(
         self,
         outputs: dict[str, torch.Tensor | None],
@@ -885,10 +893,10 @@ class Trainer:
         stage = self.cfg.get("task", {}).get("stage", "transfer_5class")
 
         # --------------------------------------------------------
-        # If we are in isolate space, targets are isolates [0..29]. 
-        # We MUST map them to treatments before applying 
+        # If we are in isolate space, targets are isolates [0..29].
+        # We MUST map them to treatments before applying
         # clinical_sparse_ids (which are treatment IDs).
-        # Otherwise the aux head learns to classify isolates 
+        # Otherwise the aux head learns to classify isolates
         # instead of treatments, causing semantic corruption!
         # --------------------------------------------------------
         if stage == "pretrain_30class":
@@ -897,7 +905,7 @@ class Trainer:
 
             mapped_targets = torch.tensor(
                 [ISOLATE_TO_TREATMENT[int(t.item())] for t in targets],
-                device=targets.device
+                device=targets.device,
             )
 
         elif stage == "pretrain_treatment_8class":
@@ -919,9 +927,11 @@ class Trainer:
         if not mask.any():
             return self._zero_loss()
 
-        aux_targets = remap_targets_to_subset(mapped_targets[mask], self.clinical_sparse_ids)
+        aux_targets = remap_targets_to_subset(
+            mapped_targets[mask], self.clinical_sparse_ids
+        )
         return self.loss_fn(aux_logits[mask], aux_targets)
-    
+
     # --------------------------------------------------------
     # Consistency regularization
     #
@@ -948,12 +958,12 @@ class Trainer:
             loss_type=loss_type,
             temperature=temperature,
         )
-        
+
         # Consistency loss operates directly on auxiliary
         # logits, assuming semantic alignment is already
         # enforced by auxiliary target remapping during
         # supervised optimization.
-        
+
         if outputs1["aux_logits"] is not None and outputs2["aux_logits"] is not None:
             stage = self.cfg.get(
                 "task",
@@ -968,10 +978,7 @@ class Trainer:
                 from metadata.ontology import ISOLATE_TO_TREATMENT
 
                 mapped_targets = torch.tensor(
-                    [
-                        ISOLATE_TO_TREATMENT[int(t.item())]
-                        for t in targets
-                    ],
+                    [ISOLATE_TO_TREATMENT[int(t.item())] for t in targets],
                     device=targets.device,
                 )
 
@@ -1000,7 +1007,6 @@ class Trainer:
 
     def _zero_loss(self) -> torch.Tensor:
         return torch.tensor(0.0, device=self.device)
-    
 
     def _assert_logits_and_targets(
         self,
@@ -1014,9 +1020,9 @@ class Trainer:
         )
         if targets.numel() == 0:
             raise AssertionError(f"{split_name} batch has no targets")
-        assert int(targets.min()) >= 0, (
-            f"{split_name} targets must be non-negative, got {int(targets.min())}"
-        )
+        assert (
+            int(targets.min()) >= 0
+        ), f"{split_name} targets must be non-negative, got {int(targets.min())}"
         assert int(targets.max()) < self.n_classes, (
             f"{split_name} targets must be < "
             f"{self.n_classes}, "
@@ -1036,9 +1042,7 @@ class Trainer:
         #
         # [0,1,2,3,4]
         # --------------------------------------------------------
-        unique_targets = sorted(
-            torch.unique(targets).cpu().tolist()
-        )
+        unique_targets = sorted(torch.unique(targets).cpu().tolist())
 
         stage = self.cfg.get(
             "task",
@@ -1049,10 +1053,7 @@ class Trainer:
         )
 
         if stage == "transfer_5class":
-            unexpected = (
-                set(unique_targets)
-                - set([0,1,2,3,4])
-            )
+            unexpected = set(unique_targets) - set([0, 1, 2, 3, 4])
             if unexpected:
                 raise AssertionError(
                     f"{split_name} contains invalid "

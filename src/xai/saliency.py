@@ -1,5 +1,6 @@
 import torch
 
+
 def compute_saliency(model, x, target_class=None):
     """
     Compute saliency map for 1D spectral input
@@ -27,7 +28,7 @@ def compute_saliency(model, x, target_class=None):
     score.backward()
 
     saliency = x.grad.abs()
-    
+
     saliency = saliency.max(dim=1)[0]
 
     saliency = saliency.squeeze()
@@ -35,6 +36,7 @@ def compute_saliency(model, x, target_class=None):
     saliency = saliency / (saliency.max() + 1e-8)
 
     return saliency.cpu().numpy()
+
 
 def compute_smoothgrad(model, x, target_class=None, n_samples=25, noise_std=0.02):
     """
@@ -56,7 +58,7 @@ def compute_smoothgrad(model, x, target_class=None, n_samples=25, noise_std=0.02
     x = x.clone().detach()
 
     smooth_saliency = 0
-    
+
     # Determine target class ONCE before noise sampling
     if target_class is None:
         with torch.no_grad():
@@ -86,8 +88,6 @@ def compute_smoothgrad(model, x, target_class=None, n_samples=25, noise_std=0.02
 
     smooth_saliency = smooth_saliency.squeeze()
 
-    smooth_saliency = smooth_saliency / (
-        smooth_saliency.max() + 1e-8
-    )
+    smooth_saliency = smooth_saliency / (smooth_saliency.max() + 1e-8)
 
     return smooth_saliency.cpu().numpy()

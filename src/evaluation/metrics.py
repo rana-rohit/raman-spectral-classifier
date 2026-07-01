@@ -33,12 +33,11 @@ Future upgrades may include:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-from collections import Counter
 
 
 def compute_metrics(
@@ -73,10 +72,10 @@ def compute_metrics(
 
     probs = F.softmax(logits, dim=-1).detach().cpu().numpy()
     preds = logits.argmax(dim=-1).detach().cpu().numpy()
-    y     = targets.detach().cpu().numpy()
+    y = targets.detach().cpu().numpy()
     # --------------------------------------------------------
     # Compact transfer-space integrity check
-    # Transfer evaluation must operate on:  
+    # Transfer evaluation must operate on:
     # [0,1,2,3,4]
     # Sparse clinical labels:
     # [0,2,3,5,6]
@@ -84,10 +83,7 @@ def compute_metrics(
     # --------------------------------------------------------
 
     if n_classes == 5:
-        unexpected = (
-            set(np.unique(y).tolist())
-            - set([0,1,2,3,4])
-        )
+        unexpected = set(np.unique(y).tolist()) - set([0, 1, 2, 3, 4])
         if unexpected:
             raise AssertionError(
                 "Metrics received invalid compact "
@@ -107,18 +103,16 @@ def compute_metrics(
     # Core metrics
     accuracy = (preds == y).mean()
     if np.isnan(accuracy):
-        raise ValueError(
-            "Accuracy computation produced NaN"
-        )
+        raise ValueError("Accuracy computation produced NaN")
     macro_f1 = _macro_f1(y, preds, present_classes)
-    mcc      = _matthews_corrcoef(y, preds)
+    mcc = _matthews_corrcoef(y, preds)
 
     metrics = {
-        "accuracy":  float(accuracy),
+        "accuracy": float(accuracy),
         "precision_macro": float(_macro_precision(y, preds, present_classes)),
         "recall_macro": float(_macro_recall(y, preds, present_classes)),
-        "f1_macro":  float(macro_f1),
-        "mcc":       float(mcc),
+        "f1_macro": float(macro_f1),
+        "mcc": float(mcc),
     }
 
     # ROC-AUC (one-vs-rest, macro over present classes)
@@ -138,6 +132,7 @@ def compute_metrics(
         metrics = {f"{prefix}{k}": v for k, v in metrics.items()}
 
     return metrics
+
 
 # --------------------------------------------------------
 # Confusion matrix operates ONLY on
@@ -160,8 +155,8 @@ def compute_confusion_matrix(
         return np.zeros((0, 0), dtype=int), []
 
     preds = logits.argmax(dim=-1).detach().cpu().numpy()
-    y     = targets.detach().cpu().numpy()
-    
+    y = targets.detach().cpu().numpy()
+
     present = sorted(np.unique(np.concatenate([y, preds])).tolist())
     n = len(present)
     idx_map = {cls: i for i, cls in enumerate(present)}
@@ -169,6 +164,7 @@ def compute_confusion_matrix(
     for true, pred in zip(y, preds):
         cm[idx_map[true], idx_map[pred]] += 1
     return cm, present
+
 
 # --------------------------------------------------------
 # Domain-transfer degradation metric
@@ -197,6 +193,7 @@ def compute_transfer_gap(
 # Internal helpers (pure numpy, no sklearn dependency)
 # ------------------------------------------------------------------ #
 
+
 def _macro_f1(y_true, y_pred, classes) -> float:
     f1s = []
     for cls in classes:
@@ -207,7 +204,7 @@ def _macro_f1(y_true, y_pred, classes) -> float:
             f1 = 0.0
         else:
             prec = tp / (tp + fp)
-            rec  = tp / (tp + fn)
+            rec = tp / (tp + fn)
             if prec + rec == 0:
                 f1 = 0.0
             else:
@@ -244,7 +241,7 @@ def _per_class_f1(y_true, y_pred, classes) -> Dict[int, float]:
             f1 = 0.0
         else:
             prec = tp / (tp + fp)
-            rec  = tp / (tp + fn)
+            rec = tp / (tp + fn)
             if prec + rec == 0:
                 f1 = 0.0
             else:
@@ -259,7 +256,7 @@ def _roc_auc_ovr(y_true, probs, classes) -> float:
     for cls in classes:
         cls = int(cls)
         binary_y = (y_true == cls).astype(float)
-        scores   = probs[:, cls]
+        scores = probs[:, cls]
         auc = _binary_auc(binary_y, scores)
         aucs.append(auc)
     return float(np.mean(aucs))
@@ -303,13 +300,14 @@ def _matthews_corrcoef(y_true, y_pred) -> float:
     n_samples = cm.sum()
 
     cov_ytyp = n_correct * n_samples - np.dot(t_sum, p_sum)
-    cov_ypyp = n_samples ** 2 - np.dot(p_sum, p_sum)
-    cov_ytyt = n_samples ** 2 - np.dot(t_sum, t_sum)
+    cov_ypyp = n_samples**2 - np.dot(p_sum, p_sum)
+    cov_ytyt = n_samples**2 - np.dot(t_sum, t_sum)
 
     denom = np.sqrt(cov_ypyp * cov_ytyt)
     if denom == 0:
         return 0.0
     return float(cov_ytyp / denom)
+
 
 def confidence_vote_predictions(
     logits,
@@ -355,11 +353,9 @@ def confidence_vote_predictions(
 
         voted_pred = np.argmax(mean_probs)
 
-        assert len(np.unique(group_targets_local)) == 1, (
-            "Group contains mixed labels"
-        )
+        assert len(np.unique(group_targets_local)) == 1, "Group contains mixed labels"
         voted_target = group_targets_local[0]
-        
+
         group_preds.append(voted_pred)
         group_targets.append(voted_target)
 
@@ -414,8 +410,10 @@ def patient_vote_predictions(
 
         # Verify target consistency
         unique_targets = np.unique(patient_targets_local)
-        assert len(unique_targets) == 1, f"Patient {pid} contains mixed labels: {unique_targets}"
-        
+        assert (
+            len(unique_targets) == 1
+        ), f"Patient {pid} contains mixed labels: {unique_targets}"
+
         patient_preds.append(voted_pred)
         patient_targets.append(unique_targets[0])
 

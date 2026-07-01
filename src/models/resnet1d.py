@@ -13,6 +13,7 @@ import torch.nn as nn
 
 from src.models.modules.cbam1d import CBAM1D
 
+
 class DepthwiseSeparableConv1D(nn.Module):
     def __init__(
         self,
@@ -35,18 +36,17 @@ class DepthwiseSeparableConv1D(nn.Module):
                 groups=in_channels,
                 bias=False,
             ),
-
             nn.Conv1d(
                 in_channels,
                 out_channels,
                 kernel_size=1,
                 bias=False,
             ),
-
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.block(x)
+
 
 class SEBlock1D(nn.Module):
     def __init__(self, channels: int, reduction: int = 16) -> None:
@@ -65,6 +65,7 @@ class SEBlock1D(nn.Module):
         y = self.fc(y).view(batch_size, channels, 1)
         return x * y
 
+
 class ResidualBlock1D(nn.Module):
     def __init__(
         self,
@@ -80,7 +81,7 @@ class ResidualBlock1D(nn.Module):
         cbam_kernel_size: int = 7,
     ) -> None:
         super().__init__()
-        
+
         self.use_se = use_se
         self.use_cbam = use_cbam
 
@@ -126,7 +127,7 @@ class ResidualBlock1D(nn.Module):
             )
         else:
             self.shortcut = nn.Identity()
-            
+
         if self.use_se:
             self.se = SEBlock1D(out_channels, reduction=se_reduction)
         if self.use_cbam:
@@ -145,6 +146,7 @@ class ResidualBlock1D(nn.Module):
             out = self.cbam(out)
         out = out + self.shortcut(x)
         return self.relu(out)
+
 
 class ResNet1D(nn.Module):
     def __init__(
@@ -177,12 +179,20 @@ class ResNet1D(nn.Module):
         c1, c2, c3, c4 = channels
 
         self.stem = nn.Sequential(
-            nn.Conv1d(in_channels, c1, stem_kernel, stride=1, padding=stem_kernel // 2, bias=False),
+            nn.Conv1d(
+                in_channels,
+                c1,
+                stem_kernel,
+                stride=1,
+                padding=stem_kernel // 2,
+                bias=False,
+            ),
             nn.ReLU(inplace=True),
         )
 
         self.stage1 = self._make_stage(
-            c1, c1,
+            c1,
+            c1,
             n_blocks[0],
             stride=1,
             kernel_size=7,
@@ -195,7 +205,8 @@ class ResNet1D(nn.Module):
         )
 
         self.stage2 = self._make_stage(
-            c1, c2,
+            c1,
+            c2,
             n_blocks[1],
             stride=2,
             kernel_size=9,
@@ -208,7 +219,8 @@ class ResNet1D(nn.Module):
         )
 
         self.stage3 = self._make_stage(
-            c2, c3,
+            c2,
+            c3,
             n_blocks[2],
             stride=2,
             kernel_size=13,
@@ -221,7 +233,8 @@ class ResNet1D(nn.Module):
         )
 
         self.stage4 = self._make_stage(
-            c3, c4,
+            c3,
+            c4,
             n_blocks[3],
             stride=2,
             kernel_size=17,
@@ -244,7 +257,7 @@ class ResNet1D(nn.Module):
         self.domain_classifier = nn.Sequential(
             nn.Linear(c4, 128),
             nn.ReLU(),
-            nn.Linear(128, 2)  # 2 domains: reference vs clinical
+            nn.Linear(128, 2),  # 2 domains: reference vs clinical
         )
         self._init_weights()
 
@@ -320,7 +333,9 @@ class ResNet1D(nn.Module):
     def _init_weights(self) -> None:
         for module in self.modules():
             if isinstance(module, nn.Conv1d):
-                nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+                nn.init.kaiming_normal_(
+                    module.weight, mode="fan_out", nonlinearity="relu"
+                )
             elif isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
@@ -328,7 +343,7 @@ class ResNet1D(nn.Module):
 
     def n_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
-    
+
     def forward_logits(self, features: torch.Tensor) -> torch.Tensor:
         """
         Apply classifier head to latent embeddings.

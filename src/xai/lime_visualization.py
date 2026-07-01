@@ -14,10 +14,8 @@ from __future__ import annotations
 
 import warnings
 
-from src.xai.xai_visualization import (
-    plot_lime_explanation,
-    plot_lime_comparison,
-)
+from src.xai.xai_visualization import (plot_lime_comparison,
+                                       plot_lime_explanation)
 
 warnings.warn(
     "src.xai.lime_visualization is deprecated; use src.xai.xai_visualization instead",

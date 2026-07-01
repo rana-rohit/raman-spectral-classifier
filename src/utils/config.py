@@ -23,6 +23,7 @@ class Config(dict):
     Dict subclass with recursive dot-access.
     cfg["model"]["n_classes"] == cfg.model.n_classes
     """
+
     def __getattr__(self, key):
         try:
             val = self[key]
@@ -35,6 +36,7 @@ class Config(dict):
 
     def __repr__(self):
         import json
+
         return json.dumps(dict(self), indent=2, default=str)
 
 

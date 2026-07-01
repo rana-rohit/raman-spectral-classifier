@@ -29,7 +29,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from metadata.ontology import GLOBAL_TREATMENTS, ISOLATES
-
 from src.data.augmentation import AugmentationPipeline
 from src.data.dataloader import build_all_loaders
 from src.data.preprocessing import SpectralPreprocessor
@@ -45,12 +44,7 @@ from src.xai.saliency import compute_saliency, compute_smoothgrad
 
 
 def _safe_name(value: str) -> str:
-    return (
-        str(value)
-        .replace(" ", "_")
-        .replace("/", "_")
-        .replace(".", "")
-    )
+    return str(value).replace(" ", "_").replace("/", "_").replace(".", "")
 
 
 def _display_label(stage: str, label: int, clinical_sparse_ids: list[int]) -> str:
@@ -133,7 +127,9 @@ def _validate_label_space(stage: str, label_space: str, n_classes: int) -> None:
     )
 
 
-def _class_names(stage: str, n_classes: int, clinical_sparse_ids: list[int]) -> list[str]:
+def _class_names(
+    stage: str, n_classes: int, clinical_sparse_ids: list[int]
+) -> list[str]:
     if stage == "pretrain_30class":
         try:
             return [ISOLATES[i]["strain"] for i in range(n_classes)]
@@ -171,7 +167,9 @@ def _resolve_loader(loaders: dict, split: str):
     raise ValueError(f"Unknown XAI split: {split}")
 
 
-def _load_split_arrays(registry: DataRegistry, split: str) -> tuple[np.ndarray, np.ndarray]:
+def _load_split_arrays(
+    registry: DataRegistry, split: str
+) -> tuple[np.ndarray, np.ndarray]:
     if split == "reference":
         return registry.get_arrays("reference")
     if split == "test":
@@ -194,9 +192,13 @@ def _validate_split_labels(stage: str, y_split: np.ndarray, n_classes: int) -> N
         )
 
 
-def _validate_probability_matrix(probs: np.ndarray, n_classes: int, context: str) -> None:
+def _validate_probability_matrix(
+    probs: np.ndarray, n_classes: int, context: str
+) -> None:
     if probs.ndim != 2:
-        raise ValueError(f"{context}: expected 2D probability matrix, got shape {probs.shape}")
+        raise ValueError(
+            f"{context}: expected 2D probability matrix, got shape {probs.shape}"
+        )
     if probs.shape[1] != n_classes:
         raise ValueError(
             f"{context}: expected {n_classes} probability columns, got {probs.shape[1]}"
@@ -259,7 +261,9 @@ def _load_wavenumbers(signal_length: int) -> np.ndarray | None:
     try:
         loaded = np.load(wave_path)
     except Exception:
-        print("[XAI] Warning: failed to load wavenumbers; falling back to index-based axes")
+        print(
+            "[XAI] Warning: failed to load wavenumbers; falling back to index-based axes"
+        )
         return None
 
     if len(loaded) != signal_length:
@@ -349,7 +353,9 @@ def _run_saliency(
             xi = x[i : i + 1].to(device)
             with torch.no_grad():
                 outputs = model(xi)
-                logits = outputs["main_logits"] if isinstance(outputs, dict) else outputs
+                logits = (
+                    outputs["main_logits"] if isinstance(outputs, dict) else outputs
+                )
                 if logits.ndim != 2 or logits.shape[1] != len(class_counts):
                     raise ValueError(
                         f"Saliency model output shape mismatch: expected (1, {len(class_counts)}), got {tuple(logits.shape)}"
@@ -374,16 +380,30 @@ def _run_saliency(
             save_dir.mkdir(parents=True, exist_ok=True)
 
             sample_num = class_counts[label] + 1
-            save_path_sal = save_dir / f"{_artifact_stem(sample_num, true_name, pred_name, 'saliency')}.png"
-            save_path_sg = save_dir / f"{_artifact_stem(sample_num, true_name, pred_name, 'smoothgrad')}.png"
+            save_path_sal = (
+                save_dir
+                / f"{_artifact_stem(sample_num, true_name, pred_name, 'saliency')}.png"
+            )
+            save_path_sg = (
+                save_dir
+                / f"{_artifact_stem(sample_num, true_name, pred_name, 'smoothgrad')}.png"
+            )
 
             _plot_saliency(signal, saliency, save_path_sal, base_title)
-            _plot_saliency(signal, smooth_saliency, save_path_sg, base_title.replace("Saliency", "SmoothGrad"))
+            _plot_saliency(
+                signal,
+                smooth_saliency,
+                save_path_sg,
+                base_title.replace("Saliency", "SmoothGrad"),
+            )
 
             class_counts[label] += 1
 
         if stage == "transfer_5class":
-            done = all(class_counts[i] >= (5 if i == 2 else per_class_limit) for i in class_counts)
+            done = all(
+                class_counts[i] >= (5 if i == 2 else per_class_limit)
+                for i in class_counts
+            )
         else:
             done = all(count >= per_class_limit for count in class_counts.values())
 
@@ -429,10 +449,8 @@ def _run_lime(
     print("[XAI] Generating LIME explanations...")
 
     from src.xai.lime_explainer import SpectralLimeExplainer
-    from src.xai.xai_visualization import (
-        plot_lime_comparison,
-        plot_lime_explanation,
-    )
+    from src.xai.xai_visualization import (plot_lime_comparison,
+                                           plot_lime_explanation)
 
     class_names = _class_names(stage, n_classes, clinical_sparse_ids)
     method_root = output_root / "lime"
@@ -524,7 +542,10 @@ def _run_lime(
         sample_dir = method_root / folder_name
         sample_dir.mkdir(parents=True, exist_ok=True)
 
-        plot_path = sample_dir / f"{_artifact_stem(sample_num, true_name, pred_name, 'lime')}.png"
+        plot_path = (
+            sample_dir
+            / f"{_artifact_stem(sample_num, true_name, pred_name, 'lime')}.png"
+        )
         plot_lime_explanation(
             explanation=explanation,
             save_path=plot_path,
@@ -628,7 +649,9 @@ def main() -> None:
     exp_dir = Path(args.exp_dir)
     cfg = load_config(str(exp_dir / "config.yaml"))
 
-    stage, label_space, n_classes, clinical_sparse_ids = _resolve_stage_context(cfg, args.seed)
+    stage, label_space, n_classes, clinical_sparse_ids = _resolve_stage_context(
+        cfg, args.seed
+    )
     _validate_label_space(stage, label_space, n_classes)
 
     print("\n" + "=" * 60)
@@ -767,7 +790,10 @@ def main() -> None:
                 "split": xai_split,
                 "methods": sorted(methods),
                 "output_root": str(xai_root),
-                "outputs": {name: {str(k): v for k, v in counts.items()} for name, counts in outputs.items()},
+                "outputs": {
+                    name: {str(k): v for k, v in counts.items()}
+                    for name, counts in outputs.items()
+                },
             },
             indent=2,
         ),

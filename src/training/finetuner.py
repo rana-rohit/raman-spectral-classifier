@@ -25,13 +25,13 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import numpy as np
-import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
 
 from src.evaluation.evaluator import ModelEvaluator
 from src.training.trainer import build_trainer
 from src.utils.checkpoint import load_best_model
+
 
 def finetune(
     model: nn.Module,
@@ -52,8 +52,7 @@ def finetune(
     )
 
     assert stage == "transfer_5class", (
-        "finetuner.py currently supports only "
-        "transfer_5class stage"
+        "finetuner.py currently supports only " "transfer_5class stage"
     )
 
     # --------------------------------------------------------
@@ -67,23 +66,24 @@ def finetune(
     monitor_value = checkpoint["metrics"].get("monitor_value", float("nan"))
 
     from src.utils.logging import print_checkpoint_info
+
     print_checkpoint_info(
         pretrained_exp_dir,
         loaded=True,
         details={
             "monitor_metric": monitor_metric,
-            "monitor_value": f"{monitor_value:.4f}"
-        }
+            "monitor_value": f"{monitor_value:.4f}",
+        },
     )
 
     reference_state = {
-        name: param.detach().cpu().clone()
-        for name, param in model.named_parameters()
+        name: param.detach().cpu().clone() for name, param in model.named_parameters()
     }
-    
+
     from src.utils.logging import print_split_provenance
+
     print_split_provenance(loaders, cfg, context="finetuning")
-    
+
     # Only reset the classifier head if the number of classes has changed;
     # preserves the pretrained class-feature mapping when possible.
     if n_classes is None:
@@ -101,15 +101,11 @@ def finetune(
                 "operate in compact transfer-space "
                 f"with exactly 5 classes, got {n_classes}"
             )
-    
+
     if not hasattr(model, "classifier"):
-        raise AttributeError(
-            f"{type(model).__name__} missing classifier"
-        )
+        raise AttributeError(f"{type(model).__name__} missing classifier")
     if not isinstance(model.classifier, nn.Sequential):
-        raise TypeError(
-            "Expected classifier to be nn.Sequential"
-        )
+        raise TypeError("Expected classifier to be nn.Sequential")
     in_features = model.classifier[-1].in_features
     current_out = model.classifier[-1].out_features
     # --------------------------------------------------------
@@ -136,7 +132,7 @@ def finetune(
     # --------------------------------------------------------
     local_loaders = {
         **loaders,
-        "val": loaders["clinical_val"],   # only validation changes
+        "val": loaders["clinical_val"],  # only validation changes
     }
     if n_shots_per_class is not None:
         local_loaders["clinical_train"] = _subsample_loader(
@@ -145,7 +141,7 @@ def finetune(
             n_classes=n_classes,
         )
         print(f"  * Few-shot clinical adaptation: {n_shots_per_class} shots/class")
-    
+
     ft_cfg = _make_finetune_cfg(cfg, freeze_epochs)
     Path(exp_dir).mkdir(parents=True, exist_ok=True)
 
@@ -165,10 +161,12 @@ def finetune(
             n_classes,
             reference_state=reference_state,
         )
-        phase_summaries.append({
-            "phase": "phase1_frozen",
-            "best": frozen_trainer.fit(),
-        })
+        phase_summaries.append(
+            {
+                "phase": "phase1_frozen",
+                "best": frozen_trainer.fit(),
+            }
+        )
         load_best_model(frozen_dir, model)
 
     remaining_epochs = max(total_epochs - freeze_epochs, 0)
@@ -188,10 +186,12 @@ def finetune(
             reference_state=reference_state,
         )
         best_metrics = full_trainer.fit()
-        phase_summaries.append({
-            "phase": "phase2_full",
-            "best": best_metrics,
-        })
+        phase_summaries.append(
+            {
+                "phase": "phase2_full",
+                "best": best_metrics,
+            }
+        )
         load_best_model(full_dir, model)
 
     evaluator = ModelEvaluator(
@@ -232,6 +232,7 @@ def finetune(
         json.dump(results, f, indent=2, default=str)
     return results
 
+
 # --------------------------------------------------------
 # Few-shot transfer simulation
 #
@@ -252,7 +253,12 @@ def _subsample_loader(
     if hasattr(dataset, "y"):
         targets = np.asarray(dataset.y)
     else:
-        targets = np.array([dataset[i]["y"] if isinstance(dataset[i], dict) else dataset[i][1] for i in range(len(dataset))])
+        targets = np.array(
+            [
+                dataset[i]["y"] if isinstance(dataset[i], dict) else dataset[i][1]
+                for i in range(len(dataset))
+            ]
+        )
 
     selected = []
     rng = np.random.default_rng(42)
@@ -260,10 +266,7 @@ def _subsample_loader(
         idx = np.where(targets == cls)[0]
         if len(idx) == 0:
 
-            raise ValueError(
-                f"No samples found for "
-                f"compact transfer label {cls}"
-            )
+            raise ValueError(f"No samples found for " f"compact transfer label {cls}")
         chosen = rng.choice(idx, n_shots, replace=(len(idx) < n_shots))
         selected.extend(chosen.tolist())
 
@@ -293,6 +296,7 @@ def _freeze_stem(model: nn.Module) -> None:
 def _unfreeze_all(model: nn.Module) -> None:
     for param in model.parameters():
         param.requires_grad = True
+
 
 # --------------------------------------------------------
 # Domain adaptation finetuning policy

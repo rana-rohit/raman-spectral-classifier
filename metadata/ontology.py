@@ -242,11 +242,6 @@ GLOBAL_TREATMENTS = {
 # - original ATCC_GROUPINGS
 # - paper confusion matrices
 # - paper isolate grouping figure
-#
-# AUDIT NOTE (2026-05-08):
-# Previous version had 11/30 corrupted entries.
-# Isolates 6,7,20,21,23,24,25,26,27,28,29 were assigned
-# to wrong treatment groups. Now corrected.
 
 ISOLATE_TO_TREATMENT = {
 

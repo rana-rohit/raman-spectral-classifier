@@ -10,21 +10,15 @@ structured summaries of training, evaluation, and inference.
 import json
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 
-from src.utils.split_modes import (
-    HOLDOUT,
-    IID_REFERENCE,
-    resolve_iid_reference_split_config,
-    resolve_split_mode,
-)
+from src.utils.split_modes import (HOLDOUT, IID_REFERENCE,
+                                   resolve_iid_reference_split_config,
+                                   resolve_split_mode)
 
-
-# ============================================================
 # GROUPED EVALUATION CONFIG
-# ============================================================
 # Spectra-per-group is a property of the dataset acquisition
 # structure. Shared between the evaluator and the provenance
 # reporter so both always agree on grouping boundaries.
@@ -157,14 +151,15 @@ def print_split_provenance(
     source_loaders = [loader for loader in source_loaders if loader is not None]
     if source_loaders:
         source_samples = sum(len(loader.dataset) for loader in source_loaders)
-        source_classes = sorted({
-            int(label)
-            for loader in source_loaders
-            for label in np.unique(np.asarray(getattr(loader.dataset, "y", [])))
-        })
+        source_classes = sorted(
+            {
+                int(label)
+                for loader in source_loaders
+                for label in np.unique(np.asarray(getattr(loader.dataset, "y", [])))
+            }
+        )
         print(
-            f"  Source Samples/Classes: {source_samples:,} / "
-            f"{len(source_classes)}"
+            f"  Source Samples/Classes: {source_samples:,} / " f"{len(source_classes)}"
         )
     if "test" in loaders:
         test_info = _introspect_loader(loaders["test"], "test", spectra_per_group_map)
@@ -180,8 +175,12 @@ def print_split_provenance(
 
     # Ordered list of top-level loader keys to report
     report_order = [
-        "train", "source_val", "finetune",
-        "clinical_train", "clinical_val", "test",
+        "train",
+        "source_val",
+        "finetune",
+        "clinical_train",
+        "clinical_val",
+        "test",
     ]
 
     split_cfg = cfg.get("splits", {})
@@ -207,10 +206,7 @@ def print_split_provenance(
         f"  {'Split':<18} {'Role':<20} "
         f"{'Samples':>8} {'Classes':>8} {'Groups':>8} {'Spec/Grp':>9}"
     )
-    sep = (
-        f"  {'-'*18} {'-'*20} "
-        f"{'-'*8} {'-'*8} {'-'*8} {'-'*9}"
-    )
+    sep = f"  {'-'*18} {'-'*20} " f"{'-'*8} {'-'*8} {'-'*8} {'-'*9}"
     print(hdr)
     print(sep)
 
@@ -248,7 +244,8 @@ def print_split_provenance(
     clinical_ids = cfg.get("task", {}).get("clinical_sparse_global_ids", [])
     if clinical_ids:
         try:
-            from metadata.ontology import GLOBAL_TREATMENTS, COMPACT_LABEL_MAP
+            from metadata.ontology import COMPACT_LABEL_MAP, GLOBAL_TREATMENTS
+
             print()
             print("  Compact Label Mapping:")
             for gid in sorted(int(g) for g in clinical_ids):
@@ -267,7 +264,11 @@ def print_split_provenance(
         spg = spectra_per_group_map.get(name)
         if spg is None:
             continue
-        ldr = ood.get(name) if name in (ood if isinstance(ood, dict) else {}) else loaders.get(name)
+        ldr = (
+            ood.get(name)
+            if name in (ood if isinstance(ood, dict) else {})
+            else loaders.get(name)
+        )
         if ldr is not None:
             ns = len(ldr.dataset)
             grouped.append((name, spg, ns // spg))
@@ -285,7 +286,7 @@ def print_split_provenance(
 def print_stage_header(stage: str, task_name: str = "") -> None:
     """
     Print a prominent, stage-aware section header.
-    
+
     Distinguishes Stage 1, 2, and 3 clearly.
     """
     if stage == "pretrain_30class":
@@ -304,7 +305,7 @@ def print_stage_header(stage: str, task_name: str = "") -> None:
     title = f"STAGE {stage_num}: {stage_name}"
     border = "=" * 60
     sub_border = "=" * len(title)
-    
+
     print(f"\n{border}")
     print(title)
     print(sub_border)
@@ -313,18 +314,20 @@ def print_stage_header(stage: str, task_name: str = "") -> None:
     print(f"{border}\n")
 
 
-def print_model_summary(model_name: str, model_cfg: Optional[Dict[str, Any]] = None) -> None:
+def print_model_summary(
+    model_name: str, model_cfg: Optional[Dict[str, Any]] = None
+) -> None:
     """
     Print model family and key structural hyperparameters.
-    
+
     Outputs format: TCN (dilations=[1,2,4], dropout=0.3)
     """
     if model_cfg is None:
         model_cfg = {}
-    
+
     print("MODEL:")
     name_display = model_cfg.get("name", model_name).upper()
-    
+
     # Collect key model properties
     details = []
     if "dilations" in model_cfg:
@@ -341,7 +344,7 @@ def print_model_summary(model_name: str, model_cfg: Optional[Dict[str, Any]] = N
         details.append(f"n_blocks={model_cfg['n_blocks']}")
     if "n_heads" in model_cfg:
         details.append(f"n_heads={model_cfg['n_heads']}")
-        
+
     if details:
         # Format list outputs without unnecessary spacing for clean look
         detail_strs = []
@@ -368,8 +371,14 @@ def print_feature_summary(cfg: Dict[str, Any]) -> None:
     supcon_enabled = bool(supcon_cfg.get("enabled", False))
     two_stage_enabled = bool(train_cfg.get("two_stage", False))
     finetune_enabled = bool(finetune_cfg.get("enabled", False))
-    dann_enabled = bool(train_cfg.get("use_dann", False) or train_cfg.get("dann", {}).get("enabled", False))
-    coral_enabled = bool(train_cfg.get("use_coral", False) or train_cfg.get("coral", {}).get("enabled", False))
+    dann_enabled = bool(
+        train_cfg.get("use_dann", False)
+        or train_cfg.get("dann", {}).get("enabled", False)
+    )
+    coral_enabled = bool(
+        train_cfg.get("use_coral", False)
+        or train_cfg.get("coral", {}).get("enabled", False)
+    )
 
     if two_stage_enabled:
         paradigm = "two_stage_supcon"
@@ -417,39 +426,48 @@ def print_clinical_adaptation_config(cfg: Dict[str, Any]) -> None:
     print(f"DANN Weight: {dann_start:.3f}")
 
     print("Adaptation Curriculum: none (static weights only)")
-    print("Goal: Validate corrected transfer-learning baseline with explicit provenance and grouped evaluation.")
+    print(
+        "Goal: Validate corrected transfer-learning baseline with explicit provenance and grouped evaluation."
+    )
     print(border)
     print()
 
 
-def print_label_space_info(label_space: str, clinical_sparse_ids: Optional[list] = None) -> None:
+def print_label_space_info(
+    label_space: str, clinical_sparse_ids: Optional[list] = None
+) -> None:
     """Print detailed, stage-aware explanation of the target label space."""
     print("LABEL SPACE:")
     print(label_space)
     if clinical_sparse_ids:
         print(f"Clinical Sparse IDs: {clinical_sparse_ids}")
         from metadata.ontology import CLINICAL_LABELS
+
         for idx in clinical_sparse_ids:
             if int(idx) in CLINICAL_LABELS:
                 info = CLINICAL_LABELS[int(idx)]
-                print(f"  {idx} -> {info['global_treatment']} ({info['clinical_species']})")
+                print(
+                    f"  {idx} -> {info['global_treatment']} ({info['clinical_species']})"
+                )
     print()
 
 
-def print_metric_block(title: str, metrics: Dict[str, float], is_grouped: bool = False) -> None:
+def print_metric_block(
+    title: str, metrics: Dict[str, float], is_grouped: bool = False
+) -> None:
     """Print a structured block of evaluation metrics."""
     print(f"## {title}")
     print()
-    
+
     # Extract keys safely
     loss = metrics.get("loss", None)
     acc = metrics.get("accuracy", metrics.get("acc", None))
     f1 = metrics.get("f1_macro", metrics.get("f1", None))
     mcc = metrics.get("mcc", None)
     roc_auc = metrics.get("roc_auc", None)
-    
+
     prefix = "Grouped " if is_grouped else ""
-    
+
     if loss is not None:
         print(f"{prefix}Loss: {loss:.4f}")
     if acc is not None:
@@ -460,19 +478,23 @@ def print_metric_block(title: str, metrics: Dict[str, float], is_grouped: bool =
         print(f"{prefix}MCC: {mcc:.4f}")
     if roc_auc is not None:
         print(f"{prefix}ROC-AUC: {roc_auc:.4f}")
-        
+
     # Optional per-class F1 print
     per_class_f1 = {k: v for k, v in metrics.items() if k.startswith("f1_class_")}
     if per_class_f1:
         class_f1s = []
-        for k, v in sorted(per_class_f1.items(), key=lambda x: int(x[0].split("_")[-1])):
+        for k, v in sorted(
+            per_class_f1.items(), key=lambda x: int(x[0].split("_")[-1])
+        ):
             cls_id = int(k.split("_")[-1])
             class_f1s.append(f"Class {cls_id}: {v:.4f}")
         print(f"Per-Class F1: {', '.join(class_f1s)}")
     print()
 
 
-def print_checkpoint_info(checkpoint_path: str, loaded: bool = True, details: Optional[Dict[str, Any]] = None) -> None:
+def print_checkpoint_info(
+    checkpoint_path: str, loaded: bool = True, details: Optional[Dict[str, Any]] = None
+) -> None:
     """Print structured checkpoint loading or saving updates."""
     print("## CHECKPOINT INFO")
     print()
@@ -503,22 +525,22 @@ def print_evaluation_summary(
     clinical_sparse_ids: Optional[list],
     checkpoint_path: Optional[str],
     split_metrics: Dict[str, Dict[str, Any]],
-    output_files: Optional[Dict[str, str]] = None
+    output_files: Optional[Dict[str, str]] = None,
 ) -> None:
     """Print the complete, research-grade evaluation report for a given stage."""
     print_stage_header(stage)
     print_model_summary(model_name, model_cfg)
     print_label_space_info(label_space, clinical_sparse_ids)
-    
+
     # Print metrics for each split
     for split_name, split_data in split_metrics.items():
         print("---")
         print(f"\nSPLIT: {split_name.upper()}")
         print()
-        
+
         metrics = split_data.get("metrics", {})
         group_metrics = split_data.get("group_metrics", {})
-        
+
         # Clarify metric semantic space
         if stage == "pretrain_30class":
             spec_title = "ISOLATE-SPACE METRICS"
@@ -536,22 +558,22 @@ def print_evaluation_summary(
         else:
             spec_title = f"{split_name.upper()} SPECTRUM METRICS"
             group_title = f"{split_name.upper()} GROUPED METRICS"
-            
+
         print_metric_block(spec_title, metrics)
-        
+
         if group_metrics:
             print("---")
             print()
             print_metric_block(group_title, group_metrics, is_grouped=True)
-            
+
     print("---")
     print()
-    
+
     if checkpoint_path:
         print_checkpoint_info(checkpoint_path, loaded=True)
         print("---")
         print()
-        
+
     if output_files:
         print_output_paths(output_files)
         print("---")
@@ -567,21 +589,21 @@ class ExperimentLogger:
     """
 
     def __init__(self, exp_dir: str, model_name: str, config: Dict) -> None:
-        self.exp_dir    = Path(exp_dir)
+        self.exp_dir = Path(exp_dir)
         self.model_name = model_name
-        self.config     = config
+        self.config = config
         self.exp_dir.mkdir(parents=True, exist_ok=True)
 
         self._history: list = []
-        self._best: Dict    = {}
-        self._start_time    = time.time()
+        self._best: Dict = {}
+        self._start_time = time.time()
 
         with open(self.exp_dir / "config.json", "w") as f:
             json.dump(config, f, indent=2, default=str)
 
         stage = self.config.get("task", {}).get("stage", "")
         task_name = self.config.get("task", {}).get("name", "")
-        
+
         # Centralized Stage Header and Model Summary
         print_stage_header(stage, task_name)
         print_model_summary(model_name, config.get("model", {}))
@@ -591,7 +613,11 @@ class ExperimentLogger:
 
     def log(self, epoch: int, split: str, metrics: Dict[str, float]) -> None:
         """Log metrics for one epoch/split."""
-        record = {"epoch": epoch, "split": split, "time": time.time() - self._start_time}
+        record = {
+            "epoch": epoch,
+            "split": split,
+            "time": time.time() - self._start_time,
+        }
         record.update(metrics)
         self._history.append(record)
 
@@ -599,9 +625,9 @@ class ExperimentLogger:
         if "accuracy" in metrics:
             acc = metrics["accuracy"]
             if key not in self._best or acc > self._best[key]:
-                self._best[key]                  = acc
-                self._best[f"{split}_epoch"]     = epoch
-                self._best[f"{split}_metrics"]   = metrics
+                self._best[key] = acc
+                self._best[f"{split}_epoch"] = epoch
+                self._best[f"{split}_metrics"] = metrics
 
         self._flush()
         self._print_row(epoch, split, metrics)
@@ -609,7 +635,7 @@ class ExperimentLogger:
     def log_final(self, split: str, metrics: Dict[str, float]) -> None:
         """Log final test-set results (called once at end of training)."""
         stage = self.config.get("task", {}).get("stage", "")
-        
+
         # Determine semantic block title
         if stage == "pretrain_30class":
             title = f"FINAL ISOLATE-SPACE METRICS ({split.upper()})"
@@ -617,18 +643,18 @@ class ExperimentLogger:
             title = f"FINAL TREATMENT-SPACE METRICS ({split.upper()})"
         else:
             title = f"FINAL CLINICAL-TRANSFER METRICS ({split.upper()})"
-            
+
         print_metric_block(title, metrics)
-        
+
         self._best[f"final_{split}"] = metrics
         self._flush()
 
     def _print_row(self, epoch: int, split: str, metrics: Dict) -> None:
         stage = self.config.get("task", {}).get("stage", "")
-        acc  = metrics.get("accuracy", float("nan"))
-        loss = metrics.get("loss",     float("nan"))
-        f1   = metrics.get("f1_macro", float("nan"))
-        
+        acc = metrics.get("accuracy", float("nan"))
+        loss = metrics.get("loss", float("nan"))
+        f1 = metrics.get("f1_macro", float("nan"))
+
         # Set stage-aware column headers to avoid ambiguous metric names
         if stage == "pretrain_30class":
             acc_name = "isolate_acc"
@@ -642,13 +668,15 @@ class ExperimentLogger:
         else:
             acc_name = "acc"
             f1_name = "f1"
-            
+
         # Determine logging configurations
         verbose_losses = self.config.get("logging", {}).get("verbose_losses", False)
         contrastive_enabled = self.config.get("model", {}).get("contrastive", False)
 
         # 1. Print Metric Row: Primary Performance Metrics Visually Dominate
-        print(f"  Ep {epoch:>3d} | {split:<12} | {acc_name}={acc:.4f}  {f1_name}={f1:.4f}")
+        print(
+            f"  Ep {epoch:>3d} | {split:<12} | {acc_name}={acc:.4f}  {f1_name}={f1:.4f}"
+        )
 
         # 2. Print Loss Row: Secondary, Compact, and Visually Grouped
         if verbose_losses:

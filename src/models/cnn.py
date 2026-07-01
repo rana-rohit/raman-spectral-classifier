@@ -88,12 +88,12 @@ class CNN1D(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(c4, n_classes),
         )
-        
+
         # Optional domain head for future DANN/domain-adaptation experiments
         self.domain_classifier = nn.Sequential(
             nn.Linear(c4, 128),
             nn.ReLU(),
-            nn.Linear(128, 2)  # 2 domains: reference vs clinical
+            nn.Linear(128, 2),  # 2 domains: reference vs clinical
         )
 
         self._init_weights()
@@ -121,7 +121,9 @@ class CNN1D(nn.Module):
         for module in self.modules():
             # normal conv
             if isinstance(module, nn.Conv1d):
-                nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+                nn.init.kaiming_normal_(
+                    module.weight, mode="fan_out", nonlinearity="relu"
+                )
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
