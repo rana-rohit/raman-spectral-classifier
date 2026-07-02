@@ -64,17 +64,17 @@ The official execution order to reproduce the paper's results is:
 ```bash
 python scripts/setup_data.py
 ```
-2. **Train the Model (Stage 1 to 3 with TCN):**
+2. **Train the Model (Stage 1 to 2 with TCN):**
 ```bash
 python scripts/train.py --model tcn
 ```
-3. **Evaluate the Model:**
-```bash
-python scripts/evaluate.py --exp-dir experiments/tcn_...
-```
-4. **Run Patient-Level Cross Validation:**
+3. **Train the Model (Stage 3 with TCN):**
 ```bash
 python scripts/run_patient_cv.py --model tcn
+```
+4. **Evaluate the Model:**
+```bash
+python scripts/analyze_experiments.py --exp-dir experiments/tcn_...
 ```
 5. **Generate LIME Explanations:**
 ```bash
@@ -95,11 +95,5 @@ python scripts/generate_research_plots.py --exp_dir experiments/tcn_...
 - **Final Patient-Level Accuracy:** 100%
 - **Interpretability:** Successfully mapped predictive features back to known biological and chemical Raman peaks using Consensus Peak Analysis.
 
-## Citation
-If you use this code in your research, please cite our work using the provided `CITATION.cff` file.
-
 ## License
 Distributed under the MIT License. See `LICENSE` for more information.
-
-## Acknowledgements
-We thank the clinical partners and domain experts who contributed to the dataset acquisition and labeling process.
