@@ -18,6 +18,7 @@ Pipeline:
     6. Randomly sample N patients from that intersection.
     7. For every selected patient × every model: generate LIME explanation.
     8. Extract top-K important Raman peaks from each explanation.
+    Note: Data augmentation (if enabled) is applied during preprocessing as configured in `configs/data/augmentation.yaml`.
     9. Compute consensus peak frequency (±5 cm⁻¹ tolerance).
    10. Output:
          - common_patient_summary.json
@@ -60,9 +61,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Repository path setup — identical to lime_explain.py
-# ---------------------------------------------------------------------------
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import matplotlib
@@ -80,9 +79,7 @@ from src.utils.seed import set_seed
 from src.xai.lime_explainer import SpectralLimeExplainer
 from src.xai.predict_wrapper import build_predict_fn
 
-# ---------------------------------------------------------------------------
-# Stage 3 experiment names (the only ones we care about)
-# ---------------------------------------------------------------------------
+
 STAGE3_EXPERIMENT_NAMES: list[str] = [
     "cnn_s3_transfer_ts_iid_patient_cv",
     "cnn_transformer_s3_transfer_ts_iid_patient_cv",
@@ -112,9 +109,7 @@ PANEL_ORDER: list[str] = [
     "cnn_transformer_s3_transfer_ts_iid_patient_cv",
 ]
 
-# ---------------------------------------------------------------------------
-# Stage 3 class semantics (compact transfer-space)
-# ---------------------------------------------------------------------------
+
 # Compact label -> global treatment ID
 COMPACT_TO_GLOBAL: dict[int, int] = {0: 0, 1: 2, 2: 3, 3: 5, 4: 6}
 
@@ -214,13 +209,13 @@ def locate_experiments(results_root: Path) -> dict[str, Path]:
         if candidate.is_dir():
             found[name] = candidate
         else:
-            # Try searching recursively (one level deep)
+    
             for child in results_root.iterdir():
                 if child.is_dir() and child.name == name:
                     found[name] = child
                     break
 
-    # Report results
+
     print("\n[STEP 1] Locating Stage 3 experiment folders...")
     for name in STAGE3_EXPERIMENT_NAMES:
         status = "✓ FOUND" if name in found else "✗ MISSING"

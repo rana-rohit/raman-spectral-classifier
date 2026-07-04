@@ -14,6 +14,7 @@ The repository implements the exact methodology described in the final research 
    - Standard Normal Variate (SNV) Normalization
    - First Derivative Computation
    - Clip Transform
+   - Data Augmentation
 2. **Three-Stage Transfer Learning**:
    - **Stage 1**: 30 Isolate Classification (Pre-training on Reference Data)
    - **Stage 2**: 8 Treatment Groups (Semantic Alignment)
@@ -24,7 +25,15 @@ The repository implements the exact methodology described in the final research 
    - LIME-based Explainability
    - Consensus Raman Peak Analysis to extract biologically meaningful spectral features.
 
-> *[Architecture Diagram Placeholder]*
+<p align="center">
+  <img src="assets/images/framework_overview.png"
+       alt="Framework Overview"
+       width="650">
+</p>
+
+<p align="center">
+<b>Figure 1.</b> Overall workflow of the proposed three-stage transfer learning framework.
+</p>
 
 ## Repository Structure
 ```text
