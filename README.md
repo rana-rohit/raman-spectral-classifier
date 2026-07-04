@@ -59,7 +59,20 @@ pip install -r requirements.txt
 ```
 
 ## Dataset
-Due to size constraints, the raw `.npy` and `.csv` datasets are not hosted in this repository. Ensure your raw datasets are placed at `data/raw/`. 
+
+This project is built on the publicly available Raman spectroscopy datasets provided through the **RamanSPy** project.
+
+The repository **does not redistribute** the original datasets. Please download them from the official source before running the training pipeline.
+
+The Raman Spectral Dataset is available through the RamanSPy:
+
+https://ramanspy.readthedocs.io/en/latest/datasets.html
+
+The datasets originate from:
+
+Ho, C. S., et al. (2019), *Rapid identification of pathogenic bacteria using Raman spectroscopy and deep learning.*
+
+Due to size constraints, the raw `.npy` of Raman spectral dataset are not hosted in this repository. Ensure your raw datasets are placed at `Raman_spectral_classifier/data/raw/` in google drive. 
 
 To prepare and validate your data:
 ```bash
