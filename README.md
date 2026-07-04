@@ -60,9 +60,7 @@ pip install -r requirements.txt
 
 ## Dataset
 
-This project is built on the publicly available Raman spectroscopy datasets provided through the **RamanSPy** project.
-
-The repository **does not redistribute** the original datasets. Please download them from the official source before running the training pipeline.
+This project is built on the publicly available Raman spectroscopy datasets provided through the **RamanSPy** project. The repository **does not redistribute** the original datasets. Please download them from the official source before running the training pipeline.
 
 The Raman Spectral Dataset is available through the RamanSPy:
 
