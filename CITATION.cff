@@ -3,7 +3,7 @@ message: "If you use this software in your research, please cite it as below."
 authors:
   - family-names: "Rana"
     given-names: "Rohit"
-    orcid: "https://orcid.org/0000-0000-0000-0000" # [MANUAL COMPLETION REQUIRED: ADD ORCID]
+    orcid: "https://orcid.org/0000-0000-0000-0000" # [MANUAL COMPLETION PENDING]
 title: "Explainable AI Framework for Raman Spectroscopy-Based Antimicrobial Treatment Classification"
 version: 1.0.0
 date-released: 2026-07-01
