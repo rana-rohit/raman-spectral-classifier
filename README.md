@@ -98,7 +98,7 @@ To prepare and validate your data:
 ```bash
 python scripts/setup_data.py --stage s1_isolate --split-mode iid_reference
 python scripts/setup_data.py --stage s2_treatment --split-mode iid_reference
-python scripts/setup_data.py --stage s3_transfer
+python scripts/setup_data.py --stage s3_transfer --split-mode patient_cv
 ```
 
 ## Official Workflow
