@@ -8,6 +8,6 @@ Rather than interpreting isolated samples, we extract the top-K most important p
 
 ## Execution
 ```bash
-python scripts/xai.py --exp-dir <experiment_dir>
+python scripts/xai.py --exp-dir <stage3_fold_experiment_dir>
 python scripts/compare_models_xai.py --results-root experiments/
 ```

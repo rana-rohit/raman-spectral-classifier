@@ -10,6 +10,26 @@ The project utilizes a Three-Stage Transfer Learning architecture to handle comp
 ## Execution
 Training is managed via `scripts/train.py`.
 ```bash
-python scripts/train.py --model tcn
+python scripts/train.py \
+  --model tcn \
+  --stage s1_isolate \
+  --split-mode iid_reference \
+  --exp-name tcn_s1_isolate_iid \
+  --seed 42
+
+python scripts/train.py \
+  --model tcn \
+  --stage s2_treatment \
+  --split-mode iid_reference \
+  --override training.pretrained_checkpoint=experiments/tcn_s1_isolate_iid/checkpoints/best_model.pt \
+  --exp-name tcn_s2_treatment_iid \
+  --seed 42
+
+python scripts/run_patient_cv.py \
+  --model tcn \
+  --stage s3_transfer \
+  --exp-name tcn_s3_transfer_ts_iid_patient_cv \
+  --seed 42 \
+  --override training.pretrained_checkpoint=experiments/tcn_s2_treatment_iid/checkpoints/best_model.pt
 ```
 Model hyperparameters are managed in `configs/model/`. Stage hyperparameters are in `configs/stages/`.

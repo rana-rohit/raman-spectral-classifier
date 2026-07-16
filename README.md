@@ -38,30 +38,35 @@ The repository implements the exact methodology described in the final research 
 ## Project Structure
 ```text
 .
-├── artifacts/            # Generated checkpoints and experimental results
-├── assets/               # Publication figures and documentation images
-├── configs/              # YAML configuration files
-│   ├── data/             # Splits, preprocessing, and augmentation configs
-│   ├── model/            # Architecture-specific hyperparameters
-│   └── training/         # Base training config, optimizer, losses, etc.
-├── data/
-│   └── raw/              # .npy files go here
-├── docs/                 # Additional documentation
-├── experiments/          # Output directory for training logs
-├── notebooks/            # Jupyter notebooks for data exploration and analysis
-├── scripts/              # Executable entry points
-│   ├── train.py          # Main training and finetuning script
-│   ├── evaluate.py       # Standalone evaluation script
-│   ├── setup_data.py     # Data preparation and integrity checks
-│   └── analyze_experiment.py # Model interpretation and metric analysis
-├── src/                  # Core package
-│   ├── data/             # NumpyDataset, Dataloaders, and Augmentations
-│   ├── evaluation/       # Metrics, confusion matrices, McNemar's test
-│   ├── interpretability/ # Grad-CAM, Integrated Gradients, etc.
-│   ├── models/           # CNN, Hybrid, ResNet1D, Transformer
-│   ├── training/         # Main Trainer, Finetuner, Losses, and Schedulers
-│   └── utils/            # Helper functions for config parsing and I/O
-└── tests/                # Unit tests
+|-- artifacts/            # Publication checkpoints and released result figures
+|-- assets/               # Documentation images
+|-- configs/              # YAML configuration files
+|   |-- data/             # Splits, preprocessing, and augmentation configs
+|   |-- model/            # Architecture-specific hyperparameters
+|   |-- stages/           # Stage 1/2/3 task definitions
+|   `-- training/         # Shared optimizer, loss, scheduler, and evaluation defaults
+|-- data/
+|   `-- raw/              # Local .npy datasets; not redistributed
+|-- docs/                 # Additional documentation
+|-- metadata/             # Label ontology, isolates, treatments, and patient IDs
+|-- notebooks/            # Canonical reproduction and analysis notebooks
+|   `-- archive/          # Archived exploratory notebooks
+|-- scripts/              # Executable entry points
+|   |-- setup_data.py     # Data preparation and integrity checks
+|   |-- train.py          # Stage 1/2/3 training entry point
+|   |-- run_patient_cv.py # Stage 3 patient-aware CV orchestration
+|   |-- evaluate.py       # Standalone evaluation
+|   |-- analyze_experiment.py
+|   |-- xai.py
+|   `-- archive/          # Archived development scripts
+|-- src/                  # Core package
+|   |-- data/             # Dataset, dataloader, preprocessing, and split logic
+|   |-- evaluation/       # Metrics, visualization, and clinical utilities
+|   |-- models/           # CNN, ResNet1D, TCN, Transformer, Inception1D, hybrids
+|   |-- training/         # Training loops, finetuning, losses, and schedulers
+|   |-- utils/            # Config, checkpoints, logging, seeds, and split modes
+|   `-- xai/              # LIME, saliency, and XAI orchestration
+`-- tests/                # Unit and regression tests
 ```
 
 ## Installation
@@ -87,43 +92,71 @@ The datasets originate from:
 
 Ho, C. S., et al. (2019), *Rapid identification of pathogenic bacteria using Raman spectroscopy and deep learning.*
 
-Due to size constraints, the raw `.npy` of Raman spectral dataset are not hosted in this repository. Ensure your raw datasets are placed at `Raman_spectral_classifier/data/raw/` in google drive. 
+Due to size constraints, the raw `.npy` Raman spectral datasets are not hosted in this repository. Place them under `data/raw/` before running the pipeline. The Colab workflow in `notebooks/00_getting_started.ipynb` links this directory from Google Drive.
 
 To prepare and validate your data:
 ```bash
-python scripts/setup_data.py
+python scripts/setup_data.py --stage s1_isolate --split-mode iid_reference
+python scripts/setup_data.py --stage s2_treatment --split-mode iid_reference
+python scripts/setup_data.py --stage s3_transfer
 ```
 
 ## Official Workflow
 The official execution order to reproduce the paper's results is:
 
-1. **Data Setup:**
+1. **Set the output directory:**
 ```bash
-python scripts/setup_data.py
+export OUTPUT_DIR=experiments
 ```
-2. **Train the Model (Stage 1 to 2 with TCN):**
+2. **Train Stage 1 (TCN isolate pretraining):**
 ```bash
-python scripts/train.py --model tcn
+python scripts/train.py \
+  --model tcn \
+  --stage s1_isolate \
+  --split-mode iid_reference \
+  --exp-name tcn_s1_isolate_iid \
+  --exp-dir "$OUTPUT_DIR" \
+  --seed 42
 ```
-3. **Train the Model (Stage 3 with TCN):**
+3. **Train Stage 2 (TCN treatment pretraining):**
 ```bash
-python scripts/run_patient_cv.py --model tcn
+python scripts/train.py \
+  --model tcn \
+  --stage s2_treatment \
+  --split-mode iid_reference \
+  --override training.pretrained_checkpoint="$OUTPUT_DIR/tcn_s1_isolate_iid/checkpoints/best_model.pt" \
+  --exp-name tcn_s2_treatment_iid \
+  --exp-dir "$OUTPUT_DIR" \
+  --seed 42
 ```
-4. **Evaluate the Model:**
+4. **Train Stage 3 (patient-aware clinical transfer):**
 ```bash
-python scripts/analyze_experiments.py --exp-dir experiments/tcn_...
+python scripts/run_patient_cv.py \
+  --model tcn \
+  --stage s3_transfer \
+  --exp-name tcn_s3_transfer_ts_iid_patient_cv \
+  --exp-dir "$OUTPUT_DIR" \
+  --seed 42 \
+  --override training.pretrained_checkpoint="$OUTPUT_DIR/tcn_s2_treatment_iid/checkpoints/best_model.pt"
 ```
-5. **Generate LIME Explanations:**
+5. **Evaluate and package the Stage 3 run:**
 ```bash
-python scripts/xai.py --exp-dir experiments/tcn_...
+python scripts/analyze_experiment.py \
+  --exp_dir "$OUTPUT_DIR/tcn_s3_transfer_ts_iid_patient_cv"
 ```
-6. **Compare Models & Consensus Peak Analysis:**
+6. **Generate LIME and saliency explanations from one Stage 3 fold:**
 ```bash
-python scripts/compare_models_xai.py --results-root experiments/
+python scripts/xai.py \
+  --exp-dir "$OUTPUT_DIR/tcn_s3_transfer_ts_iid_patient_cv/fold_0_fold0"
 ```
-7. **Generate Research Plots:**
+7. **Compare models and run consensus peak analysis:**
 ```bash
-python scripts/generate_research_plots.py --exp_dir experiments/tcn_...
+python scripts/compare_models_xai.py --results-root "$OUTPUT_DIR"
+```
+8. **Generate research plots directly, if needed:**
+```bash
+python scripts/generate_research_plots.py \
+  --exp_dir "$OUTPUT_DIR/tcn_s3_transfer_ts_iid_patient_cv"
 ```
 
 ## Results & Highlights

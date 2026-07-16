@@ -10,6 +10,12 @@ This approach achieved a **100% Patient-Level Accuracy** in Stage 3.
 
 ## Execution
 ```bash
-python scripts/run_patient_cv.py --model tcn
-python scripts/aggregate_folds.py --exp-dir <path_to_cv_experiment>
+python scripts/run_patient_cv.py \
+  --model tcn \
+  --stage s3_transfer \
+  --exp-name tcn_s3_transfer_ts_iid_patient_cv \
+  --override training.pretrained_checkpoint=experiments/tcn_s2_treatment_iid/checkpoints/best_model.pt
+
+python scripts/aggregate_folds.py --run-dir experiments/tcn_s3_transfer_ts_iid_patient_cv
+python scripts/analyze_experiment.py --exp_dir experiments/tcn_s3_transfer_ts_iid_patient_cv
 ```

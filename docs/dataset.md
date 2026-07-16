@@ -11,4 +11,10 @@ To handle domain shift between reference and clinical data, the following transf
 4. **Clip Transform**: Clips extreme values to prevent instability.
 
 ## Usage
-Data splits and preprocessing are configured in `configs/data/`. Run `python scripts/setup_data.py` to validate and prepare the datasets before training.
+Data splits and preprocessing are configured in `configs/data/`. Validate each stage before training:
+
+```bash
+python scripts/setup_data.py --stage s1_isolate --split-mode iid_reference
+python scripts/setup_data.py --stage s2_treatment --split-mode iid_reference
+python scripts/setup_data.py --stage s3_transfer
+```

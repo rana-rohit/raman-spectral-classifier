@@ -1,14 +1,21 @@
-# Data — never commit .npy files
+# Data - never commit raw or generated dataset files
 data/
 *.npy
 *.csv
 
-# Experiment outputs — too large for GitHub
-experiments/*/checkpoints/
-experiments/*/epoch_*.pt
+# Experiment outputs - too large for GitHub
+experiments/
 outputs/
+logs/
+runs/
+wandb/
+tensorboard/
 
-# Python cache
+# Model checkpoints
+*.pt
+*.pth
+
+# Python cache and packaging
 __pycache__/
 *.pyc
 *.pyo
@@ -18,35 +25,20 @@ dist/
 build/
 .eggs/
 
-# Notebooks output cells — keep notebooks clean
-# (comment this out if you want to commit notebook outputs)
-# *.ipynb — leave this commented; you DO want notebooks in git
-
 # Environment
 .env
 *.env
 venv/
 .venv/
 
-# OS
+# OS and editor files
 .DS_Store
 Thumbs.db
-
-# VS Code
 .vscode/
-
-# Colab-specific
-*.ipynb_checkpoints/
-# Missing Entries added for Release
-logs/
-wandb/
-runs/
-tensorboard/
-experiments/*/checkpoints/
-*.pt
-*.pth
-temp_figures/
 .idea/
 
-# Generated model checkpoints
-artifacts/checkpoints/*/*.pt
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Temporary figures
+temp_figures/
