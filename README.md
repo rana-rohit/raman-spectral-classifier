@@ -35,16 +35,33 @@ The repository implements the exact methodology described in the final research 
 <b>Figure 1.</b> Overall workflow of the proposed three-stage transfer learning framework.
 </p>
 
-## Repository Structure
+## Project Structure
 ```text
-raman-spectral-classifier/
-├── configs/            # YAML configurations for stages and models
-├── data/               # Raw and processed datasets (Not included in Git)
-├── docs/               # Detailed documentation for components
-├── scripts/            # Public-facing execution scripts
-│   ├── archive/        # Archived exploratory scripts
-├── src/                # Core library source code
-└── README.md           # This file
+.
+├── artifacts/            # Generated checkpoints and experimental results
+├── assets/               # Publication figures and documentation images
+├── configs/              # YAML configuration files
+│   ├── data/             # Splits, preprocessing, and augmentation configs
+│   ├── model/            # Architecture-specific hyperparameters
+│   └── training/         # Base training config, optimizer, losses, etc.
+├── data/
+│   └── raw/              # .npy files go here
+├── docs/                 # Additional documentation
+├── experiments/          # Output directory for training logs
+├── notebooks/            # Jupyter notebooks for data exploration and analysis
+├── scripts/              # Executable entry points
+│   ├── train.py          # Main training and finetuning script
+│   ├── evaluate.py       # Standalone evaluation script
+│   ├── setup_data.py     # Data preparation and integrity checks
+│   └── analyze_experiment.py # Model interpretation and metric analysis
+├── src/                  # Core package
+│   ├── data/             # NumpyDataset, Dataloaders, and Augmentations
+│   ├── evaluation/       # Metrics, confusion matrices, McNemar's test
+│   ├── interpretability/ # Grad-CAM, Integrated Gradients, etc.
+│   ├── models/           # CNN, Hybrid, ResNet1D, Transformer
+│   ├── training/         # Main Trainer, Finetuner, Losses, and Schedulers
+│   └── utils/            # Helper functions for config parsing and I/O
+└── tests/                # Unit tests
 ```
 
 ## Installation

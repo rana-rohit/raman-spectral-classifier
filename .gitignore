@@ -46,7 +46,7 @@ experiments/*/checkpoints/
 *.pt
 *.pth
 temp_figures/
-.DS_Store
-.vscode/
 .idea/
 
+# Generated model checkpoints
+artifacts/checkpoints/*/*.pt
