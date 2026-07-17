@@ -248,14 +248,14 @@ def plot_lime_explanation(
     cbar = fig.colorbar(
         ax_heatmap.images[0],
         ax=ax_heatmap,
-        fraction=0.015,
+        fraction=0.012,
         pad=0.02,
     )
 
     cbar.set_label(
         "Feature Contribution",
         fontsize=9,
-        labelpad=8,
+        labelpad=12,
     )
 
     cbar.ax.yaxis.set_label_position("left")
