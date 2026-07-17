@@ -24,6 +24,8 @@ matplotlib.use("Agg")
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 try:
     from scipy.signal import savgol_filter
@@ -99,10 +101,10 @@ def plot_lime_explanation(
 
     fig = plt.figure(figsize=figsize, facecolor="white")
     gs = gridspec.GridSpec(
-        3,
         2,
-        height_ratios=[3, 2, 0.3],
-        width_ratios=[3, 1],
+        2,
+        height_ratios=[3,2],
+        width_ratios=[3,1],
         hspace=0.35,
         wspace=0.25,
     )
@@ -116,7 +118,7 @@ def plot_lime_explanation(
         x_axis,
         display_spectrum,
         color=_SPECTRUM_COLOR,
-        linewidth=0.8,
+        linewidth=1.2,
         alpha=0.9,
         label="Raman Spectrum",
         zorder=3,
@@ -153,15 +155,6 @@ def plot_lime_explanation(
                 zorder=1.1,
             )
 
-        ax_spectrum.plot(
-            [],
-            [],
-            color=_POSITIVE_COLOR,
-            linewidth=6,
-            alpha=0.0,
-            label="Supports prediction",
-        )
-
     if np.any(negative < 0):
         neg_indices = np.flatnonzero(negative < 0)
         for idx in neg_indices:
@@ -180,19 +173,40 @@ def plot_lime_explanation(
                 zorder=1,
             )
 
-        ax_spectrum.plot(
-            [],
-            [],
-            color=_NEGATIVE_COLOR,
-            linewidth=6,
-            alpha=0.0,
-            label="Opposes prediction",
-        )
 
     ax_spectrum.set_xlabel(x_label, fontsize=11)
     ax_spectrum.set_ylabel("Intensity (a.u.)", fontsize=11)
     ax_spectrum.set_title(title, fontsize=13, fontweight="bold", pad=12)
-    ax_spectrum.legend(loc="upper right", fontsize=9, framealpha=0.9)
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            color=_SPECTRUM_COLOR,
+            lw=1.2,
+            label="Raman Spectrum",
+        ),
+        Patch(
+            facecolor=_POSITIVE_FILL_COLOR,
+            edgecolor=_POSITIVE_COLOR,
+            linewidth=1,
+            label="Supports prediction",
+        ),
+        Patch(
+            facecolor=_NEGATIVE_COLOR,
+            edgecolor=_NEGATIVE_COLOR,
+            alpha=0.35,
+            linewidth=1,
+            label="Opposes prediction",
+        ),
+    ]
+
+    ax_spectrum.legend(
+        handles=legend_handles,
+        loc="upper right",
+        fontsize=9,
+        framealpha=0.95,
+    )
+
     ax_spectrum.grid(True, alpha=0.3, color=_GRID_COLOR)
 
     conf_text = (
@@ -212,13 +226,14 @@ def plot_lime_explanation(
     )
 
     ax_heatmap = fig.add_subplot(gs[1, 0])
+    ax_heatmap.set_facecolor(_BACKGROUND_COLOR)
 
     cmap = LinearSegmentedColormap.from_list(
         "lime_diverging",
         [_NEGATIVE_COLOR, "#FFFFFF", _POSITIVE_COLOR],
     )
 
-    imp_2d = importance[np.newaxis, :]
+    imp_2d = np.tile(importance, (30, 1))
     vmax = np.abs(importance).max() or 1.0
 
     ax_heatmap.imshow(
@@ -228,8 +243,17 @@ def plot_lime_explanation(
         vmin=-vmax,
         vmax=vmax,
         extent=[x_axis[0], x_axis[-1], 0, 1],
-        interpolation="bilinear",
+        interpolation="bicubic",
     )
+    cbar = fig.colorbar(
+        ax_heatmap.images[0],
+        ax=ax_heatmap,
+        fraction=0.025,
+        pad=0.02,
+    )
+
+    cbar.set_label("Feature Contribution", fontsize=9)
+    cbar.ax.tick_params(labelsize=8)
     ax_heatmap.set_xlabel(x_label, fontsize=11)
     ax_heatmap.set_yticks([])
     ax_heatmap.set_title("Spectral Importance Map", fontsize=11, fontweight="bold")
@@ -242,37 +266,15 @@ def plot_lime_explanation(
         weights = [f[1] for f in reversed(top_features)]
         colors = [_POSITIVE_COLOR if w >= 0 else _NEGATIVE_COLOR for w in weights]
 
-        ax_bars.barh(range(len(names)), weights, color=colors, alpha=0.8, height=0.7)
+        ax_bars.barh(range(len(names)), weights, color=colors, alpha=0.9, height=0.65)
         ax_bars.set_yticks(range(len(names)))
-        ax_bars.set_yticklabels(names, fontsize=7)
-        ax_bars.set_xlabel("LIME Weight", fontsize=9)
+        ax_bars.set_yticklabels(names, fontsize=8)
+        ax_bars.set_xlabel("Feature Contribution", fontsize=9)
         ax_bars.set_title("Top Features", fontsize=10, fontweight="bold")
         ax_bars.axvline(x=0, color="#757575", linewidth=0.5, linestyle="--")
-        ax_bars.grid(True, axis="x", alpha=0.3)
+        ax_bars.grid(True, axis="x", alpha=0.2, linestyle=":")
 
-    ax_probs = fig.add_subplot(gs[2, :])
-
-    probs = explanation.probabilities
-    n_classes = len(probs)
-    class_names = explanation.class_names or [f"Class {i}" for i in range(n_classes)]
-
-    bar_colors = ["#BDBDBD"] * n_classes
-    bar_colors[explanation.predicted_class] = _POSITIVE_COLOR
-    if explanation.explained_class != explanation.predicted_class:
-        bar_colors[explanation.explained_class] = "#FF9800"
-
-    ax_probs.barh(
-        range(n_classes),
-        probs,
-        color=bar_colors,
-        alpha=0.85,
-        height=0.6,
-    )
-    ax_probs.set_yticks(range(n_classes))
-    ax_probs.set_yticklabels(class_names, fontsize=8)
-    ax_probs.set_xlabel("Probability", fontsize=9)
-    ax_probs.set_xlim(0, 1)
-    ax_probs.grid(True, axis="x", alpha=0.3)
+    fig.tight_layout()
 
     fig.savefig(
         save_path,
@@ -324,7 +326,7 @@ def plot_lime_comparison(
             x_axis,
             display_spectrum,
             color=_SPECTRUM_COLOR,
-            linewidth=0.8,
+            linewidth=1.0,
             alpha=0.8,
         )
 
@@ -384,9 +386,9 @@ def plot_lime_comparison(
             x_label = "Wavenumber (cm⁻¹)" if wavenumbers is not None else "Index"
             ax.set_xlabel(x_label, fontsize=10)
 
-    fig.suptitle(title, fontsize=13, fontweight="bold", y=1.01)
-    fig.tight_layout()
+    fig.suptitle(title, fontsize=14, fontweight="bold", y=1.01)
 
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
     fig.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
