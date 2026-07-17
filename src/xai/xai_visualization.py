@@ -252,11 +252,6 @@ def plot_lime_explanation(
         pad=0.02,
     )
 
-    cbar.set_label(
-        labelpad=12,
-    )
-
-    cbar.ax.yaxis.set_label_position("left")
     cbar.ax.tick_params(labelsize=8)
     ax_heatmap.set_xlabel(x_label, fontsize=11)
     ax_heatmap.set_yticks([])
