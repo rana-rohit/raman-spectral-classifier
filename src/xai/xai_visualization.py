@@ -253,8 +253,6 @@ def plot_lime_explanation(
     )
 
     cbar.set_label(
-        "Feature Contribution",
-        fontsize=9,
         labelpad=12,
     )
 
