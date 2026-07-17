@@ -74,7 +74,7 @@ def plot_lime_explanation(
     split_label: Optional[str] = None,
     figsize: tuple = (14, 8),
     dpi: int = 300,
-    show_top_features: int = 15,
+    show_top_features: int = 12,
 ) -> None:
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,9 +104,9 @@ def plot_lime_explanation(
         2,
         2,
         height_ratios=[3,2],
-        width_ratios=[3,1],
+        width_ratios=[2.8, 1.2],
         hspace=0.35,
-        wspace=0.25,
+        wspace=0.38,
     )
 
     ax_spectrum = fig.add_subplot(gs[0, :])
@@ -118,7 +118,7 @@ def plot_lime_explanation(
         x_axis,
         display_spectrum,
         color=_SPECTRUM_COLOR,
-        linewidth=1.2,
+        linewidth=0.9,
         alpha=0.9,
         label="Raman Spectrum",
         zorder=3,
@@ -182,7 +182,7 @@ def plot_lime_explanation(
             [0],
             [0],
             color=_SPECTRUM_COLOR,
-            lw=1.2,
+            lw=0.9,
             label="Raman Spectrum",
         ),
         Patch(
@@ -233,7 +233,7 @@ def plot_lime_explanation(
         [_NEGATIVE_COLOR, "#FFFFFF", _POSITIVE_COLOR],
     )
 
-    imp_2d = np.tile(importance, (30, 1))
+    imp_2d = np.tile(importance, (20, 1))
     vmax = np.abs(importance).max() or 1.0
 
     ax_heatmap.imshow(
@@ -243,16 +243,22 @@ def plot_lime_explanation(
         vmin=-vmax,
         vmax=vmax,
         extent=[x_axis[0], x_axis[-1], 0, 1],
-        interpolation="bicubic",
+        interpolation="bilinear",
     )
     cbar = fig.colorbar(
         ax_heatmap.images[0],
         ax=ax_heatmap,
-        fraction=0.025,
+        fraction=0.015,
         pad=0.02,
     )
 
-    cbar.set_label("Feature Contribution", fontsize=9)
+    cbar.set_label(
+        "Feature Contribution",
+        fontsize=9,
+        labelpad=8,
+    )
+
+    cbar.ax.yaxis.set_label_position("left")
     cbar.ax.tick_params(labelsize=8)
     ax_heatmap.set_xlabel(x_label, fontsize=11)
     ax_heatmap.set_yticks([])
@@ -273,8 +279,6 @@ def plot_lime_explanation(
         ax_bars.set_title("Top Features", fontsize=10, fontweight="bold")
         ax_bars.axvline(x=0, color="#757575", linewidth=0.5, linestyle="--")
         ax_bars.grid(True, axis="x", alpha=0.2, linestyle=":")
-
-    fig.tight_layout()
 
     fig.savefig(
         save_path,
@@ -326,7 +330,7 @@ def plot_lime_comparison(
             x_axis,
             display_spectrum,
             color=_SPECTRUM_COLOR,
-            linewidth=1.0,
+            linewidth=0.9,
             alpha=0.8,
         )
 
@@ -380,7 +384,7 @@ def plot_lime_comparison(
 
         label = f"{exp.explained_label} — " f"P={exp.confidence:.1%}"
         ax.set_ylabel(label, fontsize=9)
-        ax.grid(True, alpha=0.2)
+        ax.grid(True, alpha=0.2, linestyle=":")
 
         if i == n - 1:
             x_label = "Wavenumber (cm⁻¹)" if wavenumbers is not None else "Index"
